@@ -1,0 +1,58 @@
+features:
+  - name: user_list
+    endpoint: /api/users
+    method: GET
+    roles:
+      admin: allow
+      user: deny
+      guest: deny
+
+  - name: user_detail
+    endpoint: /api/users/{id}
+    method: GET
+    roles:
+      admin: allow
+      user: allow
+      guest: deny
+    data_scope: owner
+
+  - name: user_create
+    endpoint: /api/users
+    method: POST
+    roles:
+      admin: allow
+      user: deny
+      guest: deny
+
+  - name: user_update
+    endpoint: /api/users/{id}
+    method: PUT
+    roles:
+      admin: allow
+      user: allow
+      guest: deny
+    data_scope: owner
+
+  - name: user_delete
+    endpoint: /api/users/{id}
+    method: DELETE
+    roles:
+      admin: allow
+      user: deny
+      guest: deny
+
+  - name: admin_dashboard
+    endpoint: /api/admin/dashboard
+    method: GET
+    roles:
+      admin: allow
+      user: deny
+      guest: deny
+
+  - name: public_info
+    endpoint: /api/public/info
+    method: GET
+    roles:
+      admin: allow
+      user: allow
+      guest: allow

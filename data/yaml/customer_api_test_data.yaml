@@ -1,0 +1,276 @@
+customer_api_client:
+  add:
+    valid:
+      - customer_name: "测试客户"
+        customer_id: "CUST001"
+        app_name: "测试应用"
+        scope: "read,write"
+        status: 1
+        rate_limit: 100
+        expire_time: "2027-12-31T23:59:59+08:00"
+        ip_whitelist: "192.168.1.1,192.168.1.2"
+        remark: "自动化测试数据"
+    invalid:
+      - customer_name: ""
+        scope: "read"
+        status: 1
+        description: "缺少必填字段customer_name"
+
+  edit:
+    valid:
+      - customer_name: "测试客户-已修改"
+        customer_id: "CUST001"
+        app_name: "测试应用-已修改"
+        scope: "read,write,delete"
+        status: 0
+        rate_limit: 200
+        remark: "修改后的测试数据"
+
+  query:
+    filter_combinations:
+      - customer_name: "测试"
+        status: 1
+        page_size: 10
+      - customer_id: "CUST"
+        app_name: "应用"
+        status: 0
+        page_size: 20
+      - app_key: "AK"
+        scope: "read"
+        page_size: 50
+
+  pagination:
+    - page_num: 1
+      page_size: 10
+    - page_num: 1
+      page_size: 50
+    - page_num: 1
+      page_size: 100
+    - page_num: 2
+      page_size: 10
+
+
+customer_api_resource:
+  add:
+    valid:
+      - api_name: "订单查询接口"
+        path: "/order/query"
+        method: "GET"
+        description: "用于查询订单信息"
+      - api_name: "订单创建接口"
+        path: "/order/create"
+        method: "POST"
+        description: "用于创建订单"
+    invalid:
+      - api_name: ""
+        path: "/test"
+        method: "GET"
+        description: "缺少必填字段api_name"
+
+  edit:
+    valid:
+      - api_name: "订单查询接口-已修改"
+        path: "/order/query/v2"
+        method: "POST"
+        description: "修改后的接口描述"
+
+  query:
+    filter_combinations:
+      - api_name: "订单"
+        method: "GET"
+        page_size: 10
+      - path: "/order"
+        method: "POST"
+        page_size: 20
+      - api_code: "API"
+        page_size: 50
+
+  pagination:
+    - page_num: 1
+      page_size: 10
+    - page_num: 1
+      page_size: 50
+    - page_num: 2
+      page_size: 10
+
+
+openapi:
+  # 认证配置
+  auth:
+    valid:
+      app_key: "${OPENAPI_APP_KEY}"
+      app_secret: "${OPENAPI_APP_SECRET}"
+    invalid:
+      - app_key: "invalid_key"
+        app_secret: "invalid_secret"
+      - app_key: "${OPENAPI_APP_KEY}"
+        app_secret: "wrong_secret"
+  
+  # API请求参数
+  order_query:
+    valid:
+      - pageNum: 1
+        pageSize: 200
+      - store: "测试店铺"
+      - orderNumber: "TEST001"
+      - trackingNumber: "TRK123456"
+    filter_combinations:
+      - country: "US"
+        pageNum: 1
+        pageSize: 10
+      - orderStatus: "已发货"
+        pageNum: 1
+        pageSize: 20
+  
+  stock_query:
+    valid:
+      - pageNum: 1
+        pageSize: 200
+      - skuNo: "SKU001"
+      - title: "测试商品"
+    filter_combinations:
+      - warehouse: "DAYONE NB"
+        pageNum: 1
+        pageSize: 10
+      - stockState: "可用"
+        pageNum: 1
+        pageSize: 20
+  
+  bill_query:
+    valid:
+      - pageNum: 1
+        pageSize: 200
+      - store: "测试店铺"
+      - invoiceNumber: "INV001"
+    filter_combinations:
+      - status: "已付款"
+        pageNum: 1
+        pageSize: 10
+      - dueDate: "2026-01-01"
+        pageNum: 1
+        pageSize: 20
+  
+  bill_item_query:
+    valid:
+      - orderId: "ORD001"
+      - orderNumber: "TEST001"
+    filter_combinations:
+      - status: "已完成"
+        pageNum: 1
+        pageSize: 10
+  
+  logistics_query:
+    valid:
+      - pageNum: 1
+        pageSize: 200
+      - orderId: "ORD001"
+      - trackingNumber: "TRK123456"
+    filter_combinations:
+      - orderShippingStatus: "已发货"
+        pageNum: 1
+        pageSize: 10
+  
+  quotation_query:
+    valid:
+      - pageNum: 1
+        pageSize: 200
+      - title: "测试商品"
+      - sku: "SKU001"
+    filter_combinations:
+      - variantId: "V001"
+        pageNum: 1
+        pageSize: 10
+  
+  # 预期字段（根据API.xlsx）
+  expected_fields:
+    order:
+      - "Store"
+      - "Order ID"
+      - "Order Number"
+      - "Tracking Number"
+      - "Last Mile Number"
+      - "Country"
+      - "Customer City"
+      - "Customer Name"
+      - "Order Amount"
+      - "Order Currency"
+      - "SKU NO."
+      - "Order Status"
+      - "Warehouse"
+      - "Order Time(UTC+8)"
+      - "Payment Time（Store Time Zone）"
+      - "Tracking URL"
+    stock:
+      - "Serial NO."
+      - "SKU NO."
+      - "Variant ID"
+      - "ERP Title"
+      - "English Title"
+      - "Stock State"
+      - "Available Stock"
+      - "Inbound Stock"
+      - "Pending Fulfillment"
+      - "Projected Stock"
+      - "Stock Update Time"
+      - "Warehouse"
+    bill:
+      - "Store"
+      - "Due Date"
+      - "Currency"
+      - "Invoice Amount"
+      - "Paid"
+      - "Unpaid"
+      - "Invoice Number"
+      - "Payment Statue"
+      - "Invoice Creatioin Date"
+    bill_item:
+      - "Store"
+      - "Order ID"
+      - "Order Number"
+      - "Tracking Number"
+      - "Last Mile Number"
+      - "Country"
+      - "Customer City"
+      - "Customer Name"
+      - "Unit Price"
+      - "Discount"
+      - "In Total"
+      - "Currency"
+      - "Status"
+    logistics:
+      - "Store"
+      - "Order ID"
+      - "Order Number"
+      - "Tracking Number"
+      - "Last Mile Number"
+      - "Tracking URL"
+      - "Order Shipping Status"
+      - "Shipping Time"
+      - "Country"
+    quotation:
+      - "Serial Number"
+      - "Image"
+      - "Similar Images"
+      - "Title"
+      - "SKU"
+      - "Variant ID"
+      - "Quantity"
+      - "Remark"
+      - "Remark 2"
+      - "Processing Time"
+      - "Shipping Time"
+      - "Product Cost"
+      - "Size"
+      - "Color"
+      - "Material"
+      - "Size Chart"
+      - "Real Product Image"
+      - "Washing Label Image"
+      - "Carton Specifications (Quantity/Size/Gross Weight)"
+      - "Product Link"
+  
+  # 仓库枚举值
+  warehouse_enum:
+    - "DAYONE NB"
+    - "DAYONE DG"
+    - "DAYONE USW"

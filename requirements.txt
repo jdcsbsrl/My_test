@@ -1,0 +1,43 @@
+# ERP测试平台依赖包
+
+# 核心测试框架
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-xdist>=3.5.0
+pytest-html>=4.1.0
+pytest-rerunfailures>=14.0
+allure-pytest>=2.13.0
+
+# UI测试
+pytest-playwright>=0.5.0
+playwright>=1.50.0
+
+# API测试
+requests>=2.32.0
+requests-toolbelt>=1.0.0
+pydantic>=2.6.0
+jsonschema>=4.21.0
+
+# 性能测试
+locust>=2.24.0
+
+# 数据处理
+PyYAML>=6.0.1
+openpyxl>=3.1.2
+faker>=23.0.0
+
+# 配置和环境
+python-dotenv>=1.0.0
+
+# 日志和报告
+loguru>=0.7.2
+
+# 代码质量
+ruff>=0.3.0
+black>=24.0.0
+mypy>=1.9.0
+
+# 可选扩展
+pytest-bdd>=7.0.0
+pytest-mock>=3.12.0
+pytest-cov>=4.1.0

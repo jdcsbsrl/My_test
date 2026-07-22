@@ -1,0 +1,324 @@
+{
+    "version": "3.0.0",
+    "name": "Test ERP Agent Index",
+    "updated_at": "2026-05-27",
+    "description": "HarnessEngineer架构索引，支持知识域挂载与智能检索",
+    "query_guidance": {
+        "note": "请根据任务类型精准定位所需索引，避免全量查询",
+        "task_types": {
+            "test_case_generation": {
+                "description": "测试用例生成任务",
+                "key_documents": [
+                    "docs/TRAE_TEST_WORKFLOW.md",
+                    "modules/trae_test/utils/test_case_generator.py"
+                ],
+                "key_modules": ["trae_test"]
+            },
+            "automation_test": {
+                "description": "自动化测试执行任务",
+                "key_documents": [
+                    "docs/AUTO_TEST_WORKFLOW.md",
+                    "modules/auto_test/core/environment.py"
+                ],
+                "key_modules": ["auto_test"]
+            },
+            "code_review": {
+                "description": "代码审核任务",
+                "key_documents": [
+                    ".trae/rules/agent_rules.md",
+                    ".trae/rules/coding_rules.md"
+                ],
+                "key_modules": ["orchestrator"]
+            },
+            "knowledge_retrieval": {
+                "description": "知识检索任务",
+                "key_documents": [
+                    "assets/knowledge_base/index.json",
+                    "modules/trae_test/utils/knowledge_retriever.py",
+                    "modules/trae_test/utils/index_builder_v3.py",
+                    "modules/trae_test/utils/chunk_builder.py"
+                ],
+                "key_modules": ["trae_test"]
+            },
+            "knowledge_domain_mount": {
+                "description": "知识域挂载与管理",
+                "key_documents": [
+                    "assets/knowledge_base/agents/agents.md"
+                ],
+                "key_modules": ["orchestrator"]
+            },
+            "automation_solution": {
+                "description": "自动化方案生成",
+                "key_documents": [
+                    "modules/trae_test/orchestrator/auto_agent.py"
+                ],
+                "key_modules": ["orchestrator"]
+            },
+            "workflow_audit": {
+                "description": "工作流审核与审计",
+                "key_documents": [
+                    "modules/api/v1/workflow.py",
+                    "modules/api/v1/audit_logs.py"
+                ],
+                "key_modules": ["api"]
+            },
+            "environment_config": {
+                "description": "环境配置任务",
+                "key_documents": [
+                    "docs/VIRTUAL_ENV.md",
+                    "configs/"
+                ],
+                "key_modules": []
+            }
+        }
+    },
+    "virtual_environment": {
+        "path": ".venv/",
+        "absolute_path": "d:\\Working\\test_erp\\.venv\\",
+        "python_exe": "d:\\Working\\test_erp\\.venv\\Scripts\\python.exe",
+        "pip_exe": "d:\\Working\\test_erp\\.venv\\Scripts\\pip.exe",
+        "python_version": "3.14.4",
+        "status": "available",
+        "requirements_file": "requirements.txt",
+        "detail_document": "docs/VIRTUAL_ENV.md"
+    },
+    "documents": [
+        {
+            "path": "AGENTS.md",
+            "type": "index",
+            "description": "Agent工作区纯索引文件"
+        },
+        {
+            "path": "docs/ARCHITECTURE.md",
+            "type": "architecture",
+            "description": "项目架构设计文档"
+        },
+        {
+            "path": "docs/PROJECT_STRUCTURE.md",
+            "type": "structure",
+            "description": "项目目录结构说明"
+        },
+        {
+            "path": "docs/WORKFLOW.md",
+            "type": "workflow",
+            "description": "工作流程详细说明"
+        },
+        {
+            "path": "docs/TRAE_TEST_WORKFLOW.md",
+            "type": "workflow",
+            "description": "trae_test模块工作流程",
+            "task_type": "test_case_generation"
+        },
+        {
+            "path": "docs/AUTO_TEST_WORKFLOW.md",
+            "type": "workflow",
+            "description": "auto_test模块工作流程",
+            "task_type": "automation_test"
+        },
+        {
+            "path": "docs/MODULE_INTEGRATION.md",
+            "type": "integration",
+            "description": "模块间协作接口规范"
+        },
+        {
+            "path": "docs/VIRTUAL_ENV.md",
+            "type": "environment",
+            "description": "虚拟环境详细说明",
+            "task_type": "environment_config"
+        },
+        {
+            "path": "docs/USAGE_EXAMPLES.md",
+            "type": "guide",
+            "description": "使用示例和命令说明"
+        },
+        {
+            "path": ".trae/rules/project_rules.md",
+            "type": "rules",
+            "description": "项目执行规则"
+        },
+        {
+            "path": ".trae/rules/coding_rules.md",
+            "type": "rules",
+            "description": "编码规范",
+            "task_type": "code_review"
+        },
+        {
+            "path": ".trae/rules/agent_rules.md",
+            "type": "rules",
+            "description": "智能体配置与交互规则",
+            "task_type": "code_review"
+        }
+    ],
+    "modules": [
+        {
+            "name": "trae_test",
+            "path": "modules/trae_test/",
+            "description": "测试用例生成模块",
+            "task_types": ["test_case_generation", "knowledge_retrieval"]
+        },
+        {
+            "name": "auto_test",
+            "path": "modules/auto_test/",
+            "description": "自动化测试执行模块",
+            "task_types": ["automation_test"]
+        },
+        {
+            "name": "orchestrator",
+            "path": "modules/trae_test/orchestrator/",
+            "description": "多Agent协同编排模块",
+            "task_types": ["code_review", "knowledge_domain_mount", "automation_solution"]
+        },
+        {
+            "name": "api",
+            "path": "modules/api/",
+            "description": "REST API接口模块",
+            "task_types": ["workflow_audit"]
+        }
+    ],
+    "knowledge_base": {
+        "path": "assets/knowledge_base/",
+        "index_file": "assets/knowledge_base/index.json",
+        "description": "业务知识库",
+        "task_type": "knowledge_retrieval",
+        "structure": {
+            "data": {
+                "original": "assets/knowledge_base/data/original/",
+                "chunks": "assets/knowledge_base/data/chunks/"
+            },
+            "index": {
+                "global": "assets/knowledge_base/index/global_index.json",
+                "files": "assets/knowledge_base/index/file_indexes/",
+                "inverted": "assets/knowledge_base/index/inverted/inverted_index.json"
+            },
+            "metadata": "assets/knowledge_base/metadata/file_registry.json"
+        },
+        "domains": [
+            {
+                "domain_id": "sales-order-rules",
+                "name": "销售订单规则",
+                "description": "销售订单模块业务规则",
+                "priority": "high"
+            },
+            {
+                "domain_id": "purchase-order-rules",
+                "name": "采购订单规则",
+                "description": "采购订单模块业务规则",
+                "priority": "medium"
+            },
+            {
+                "domain_id": "system-rules",
+                "name": "系统规则",
+                "description": "系统级业务规则",
+                "priority": "medium"
+            }
+        ]
+    },
+    "agents": [
+        {
+            "name": "TestCaseGenerator",
+            "role": "测试用例生成",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "test_case_generation",
+            "knowledge_domains": ["sales-order-rules", "purchase-order-rules"]
+        },
+        {
+            "name": "AutoTestExecutor",
+            "role": "自动化测试执行",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "automation_test"
+        },
+        {
+            "name": "KnowledgeRetriever",
+            "role": "知识检索",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "knowledge_retrieval",
+            "capabilities": ["full_text_search", "inverted_index_search", "semantic_search"]
+        },
+        {
+            "name": "AgentManager",
+            "role": "知识域挂载管理",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "knowledge_domain_mount",
+            "capabilities": ["domain_preload", "domain_unload", "context_management", "hot_reload"]
+        },
+        {
+            "name": "AutoAgent",
+            "role": "自动化方案生成",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "automation_solution",
+            "capabilities": ["solution_generation", "impact_analysis", "risk_assessment"]
+        },
+        {
+            "name": "ReportGenerator",
+            "role": "报告生成",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "test_case_generation"
+        },
+        {
+            "name": "AuditAgent",
+            "role": "审核监督",
+            "rules_file": ".trae/rules/agent_rules.md",
+            "task_type": "code_review",
+            "knowledge_domains": ["sales-order-rules", "purchase-order-rules", "system-rules"]
+        }
+    ],
+    "tools": [
+        {
+            "name": "multi_agent_runner",
+            "path": "tools/multi_agent_runner.py",
+            "description": "多Agent协同工作统一入口"
+        },
+        {
+            "name": "project_structure_auditor",
+            "path": "tools/project_structure_auditor.py",
+            "description": "HarnessEngineer架构验证"
+        },
+        {
+            "name": "case_generator_cli",
+            "path": "tools/case_generator_cli.py",
+            "description": "命令行用例生成",
+            "task_type": "test_case_generation"
+        },
+        {
+            "name": "report_generator",
+            "path": "tools/report_generator.py",
+            "description": "测试报告生成"
+        },
+        {
+            "name": "excel_exporter",
+            "path": "modules/trae_test/utils/excel_exporter.py",
+            "description": "测试用例Excel导出工具",
+            "task_type": "test_case_generation"
+        },
+        {
+            "name": "chunk_builder",
+            "path": "modules/trae_test/utils/chunk_builder.py",
+            "description": "规则级语义切片构建器",
+            "task_type": "knowledge_retrieval"
+        },
+        {
+            "name": "index_builder_v3",
+            "path": "modules/trae_test/utils/index_builder_v3.py",
+            "description": "索引构建器V3（支持倒排索引）",
+            "task_type": "knowledge_retrieval"
+        },
+        {
+            "name": "kb_manager",
+            "path": "tools/kb_manager.py",
+            "description": "知识库管理CLI工具",
+            "task_type": "knowledge_retrieval"
+        },
+        {
+            "name": "verify_knowledge_base",
+            "path": "tools/verify_knowledge_base.py",
+            "description": "知识库完整性验证工具",
+            "task_type": "knowledge_retrieval"
+        },
+        {
+            "name": "migrate_to_v3",
+            "path": "tools/migrate_to_v3.py",
+            "description": "知识库v2到v3.0架构迁移工具",
+            "task_type": "knowledge_retrieval"
+        }
+    ]
+}

@@ -1,0 +1,265 @@
+# 销售订单高级筛选条件配置
+# 每个筛选条件包含：字段名、接口参数名、测试值、值类型
+
+filters:
+  - name: "订单状态"
+    field: "orderStatus"
+    param: "orderStatus"
+    test_values:
+      - value: "0"
+        desc: "待处理"
+      - value: "1"
+        desc: "待审批"
+      - value: "2"
+        desc: "配货中"
+      - value: "3"
+        desc: "已发货"
+      - value: "4"
+        desc: "已完结"
+      - value: "5"
+        desc: "未付款"
+      - value: "6"
+        desc: "已取消"
+    value_type: "string"
+
+  - name: "结算状态"
+    field: "settlementStatus"
+    param: "settlementStatus"
+    test_values:
+      - value: "0"
+        desc: "未结算"
+      - value: "1"
+        desc: "已结算"
+    value_type: "string"
+
+  - name: "销售平台"
+    field: "platform"
+    param: "platform"
+    test_values:
+      - value: "Shopify"
+        desc: "Shopify平台"
+    value_type: "string"
+
+  - name: "店铺"
+    field: "storeIds"
+    param: "storeIds"
+    test_values:
+      - value: ""
+        desc: "指定店铺ID"
+    value_type: "string"
+
+  - name: "发货仓库"
+    field: "locationId"
+    param: "locationId"
+    test_values:
+      - value: "1919680838326657025"
+        desc: "指定仓库"
+    value_type: "string"
+
+  - name: "平台仓库"
+    field: "shopifyLocationIds"
+    param: "shopifyLocationIds"
+    test_values:
+      - value: 78910587077
+        desc: "Shopify仓库ID"
+    value_type: "int"
+
+  - name: "国家"
+    field: "countryCode"
+    param: "countryCode"
+    test_values:
+      - value: "BS,BW,BT"
+        desc: "多个国家"
+    value_type: "string"
+
+  - name: "产品定义类目"
+    field: "itemAttribute"
+    param: "itemAttribute"
+    test_values:
+      - value: ""
+        desc: "指定类目"
+    value_type: "string"
+
+  - name: "订单异常分类"
+    field: "exceptionClassIds"
+    param: "exceptionClassIds"
+    test_values:
+      - value: "54"
+        desc: "指定异常分类"
+    value_type: "string"
+
+  - name: "订单自定义分类"
+    field: "customClassIds"
+    param: "customClassIds"
+    test_values:
+      - value: "1951553878860718081"
+        desc: "指定自定义分类"
+    value_type: "string"
+
+  - name: "客户分类"
+    field: "customerClassId"
+    param: "customerClassId"
+    test_values:
+      - value: "140"
+        desc: "指定客户分类"
+    value_type: "string"
+
+  - name: "客户名称"
+    field: "head"
+    param: "head"
+    test_values:
+      - value: "${TEST_CUSTOMER_NAME}"
+        desc: "指定客户"
+    value_type: "string"
+
+  - name: "客户档案"
+    field: "storeProfileCustomerIdSet"
+    param: "storeProfileCustomerIdSet"
+    test_values:
+      - value: ["2041816840667435010"]
+        desc: "指定客户档案"
+    value_type: "array"
+
+  - name: "Tags标记"
+    field: "tags"
+    param: "tags"
+    test_values:
+      - value: "12w"
+        desc: "指定标签"
+    value_type: "string"
+
+  - name: "应收单号"
+    field: "receivableNo"
+    param: "receivableNo"
+    test_values:
+      - value: "w131"
+        desc: "指定应收单号"
+    value_type: "string"
+
+  - name: "是否生成账单"
+    field: "isCountGap"
+    param: "isCountGap"
+    test_values:
+      - value: "1"
+        desc: "是"
+      - value: "0"
+        desc: "否"
+    value_type: "string"
+
+  - name: "仅显示我的处理"
+    field: "onlyShowMyProcessing"
+    param: "onlyShowMyProcessing"
+    test_values:
+      - value: "0"
+        desc: "否"
+      - value: "1"
+        desc: "是"
+    value_type: "string"
+
+  - name: "查询类型"
+    field: "queryType"
+    param: "queryType"
+    test_values:
+      - value: "0"
+        desc: "普通查询"
+    value_type: "string"
+
+# 时间范围筛选条件
+time_filters:
+  - name: "创建时间"
+    field: "createTime"
+    begin_param: "createTimeBeginStr"
+    end_param: "createTimeEndStr"
+    test_values:
+      begin: "2026-04-01 00:00:00"
+      end: "2026-04-30 23:59:59"
+
+  - name: "付款时间"
+    field: "payTime"
+    begin_param: "payTimeBeginStr"
+    end_param: "payTimeEndStr"
+    test_values:
+      begin: "2026-04-01 00:00:00"
+      end: "2026-04-06 23:59:59"
+
+  - name: "发货时间"
+    field: "sendDate"
+    begin_param: "sendDateBeginStr"
+    end_param: "sendDateEndStr"
+    test_values:
+      begin: "2026-05-09 00:00:00"
+      end: "2026-05-10 23:59:59"
+
+  - name: "转配货中时间"
+    field: "transStockupTime"
+    begin_param: "transStockupTimeBeginStr"
+    end_param: "transStockupTimeEndStr"
+    test_values:
+      begin: "2025-05-07 00:00:00"
+      end: "2026-03-29 23:59:59"
+
+  - name: "交运时间"
+    field: "logisticsDate"
+    begin_param: "logisticsDateBeginStr"
+    end_param: "logisticsDateEndStr"
+    test_values:
+      begin: "2026-05-01 00:00:00"
+      end: "2026-05-02 23:59:59"
+
+  - name: "结算时间"
+    field: "settlementTime"
+    begin_param: "settlementTimeBeginStr"
+    end_param: "settlementTimeEndStr"
+    test_values:
+      begin: "2026-04-01 00:00:00"
+      end: "2026-05-02 23:59:59"
+
+  - name: "作废时间"
+    field: "cancelTime"
+    begin_param: "beginCancelTime"
+    end_param: "endCancelTime"
+    test_values:
+      begin: "2026-03-29 00:00:00"
+      end: "2026-05-02 23:59:59"
+
+  - name: "账单应收时间"
+    field: "billReceivableTime"
+    begin_param: "billReceivableTimeBeginStr"
+    end_param: "billReceivableTimeEndStr"
+    test_values:
+      begin: "2026-03-29 00:00:00"
+      end: "2026-05-07 23:59:59"
+
+# 组合筛选场景
+combinations:
+  - name: "全部条件组合"
+    desc: "所有筛选条件同时生效"
+    params:
+      head: "${TEST_CUSTOMER_NAME}"
+      locationId: "1919680838326657025"
+      shopifyLocationIds: 78910587077
+      settlementStatus: "0"
+      storeProfileCustomerIdSet: ["2041816840667435010"]
+      payTimeEndStr: "2026-04-06 23:59:59"
+      sendDateBeginStr: "2026-05-09 00:00:00"
+      sendDateEndStr: "2026-03-29 23:59:59"
+      transStockupTimeBeginStr: "2025-05-07 00:00:00"
+      transStockupTimeEndStr: "2026-03-29 23:59:59"
+      logisticsDateBeginStr: "2026-05-01 00:00:00"
+      logisticsDateEndStr: "2026-05-02 23:59:59"
+      isCountGap: "1"
+      settlementTimeBeginStr: "2026-04-01 00:00:00"
+      settlementTimeEndStr: "2026-05-02 23:59:59"
+      tags: "12w"
+      receivableNo: "w131"
+      beginCancelTime: "2026-03-29 00:00:00"
+      endCancelTime: "2026-05-02 23:59:59"
+      billReceivableTimeBeginStr: "2026-03-29 00:00:00"
+      billReceivableTimeEndStr: "2026-05-07 23:59:59"
+      orderStatus: "0"
+      exceptionClassIds: "54"
+      customClassIds: "1951553878860718081"
+      customerClassId: "140"
+      countryCode: "BS,BW,BT"
+      onlyShowMyProcessing: "0"
+      queryType: "0"

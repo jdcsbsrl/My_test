@@ -1,0 +1,792 @@
+账单功能优化1
+报价明细唯一约束
+增加赠品标识
+（SKU、数量、赠品标识确定唯一的报价明细）
+
+报价明细-相似款查询
+- 按采购链接：取采购链接不为空，且都相等的明细列表
+- 按标题：取标题字段不为空，且第一个单词相同的列表（使用 空格 或  “|”分割 ）
+- 按SKU：取SKU相等的列表
+
+订单应收-修改折扣，订单应收  计算方法
+- 出现折扣是因为客户报价的应收模式选择的:  单件报价+多件折扣
+- 单价 + 多件折扣时，报价明细的数量都是1
+- 订单不能全为赠品
+- 订单如果仅购买了一件商品，必须取非赠品的报价，如果没有，sku应收就是空的。
+- 优先取赠品价格，每个订单都必须有一个非赠品价格
+- 
+
+
+报价
+SKU
+数量
+赠品
+应收单价
+赠品排序
+A
+1
+是
+1
+2
+A
+1
+否
+2
+
+
+
+
+
+
+B
+1
+是
+1
+1
+
+
+
+
+
+C
+1
+否
+2
+
+
+
+
+
+
+D
+1
+是
+1
+3
+D
+1
+否
+2
+
+按赠品排序字段排序，取最小值对应的非赠品价格
+
+订单  折扣：其他国家1.5
+SKU
+数量
+总折扣
+单个折扣
+旧
+新
+应收单价
+原因
+C
+1
+0
+0
+0
+0
+2
+单件无折扣
+C
+2
+3
+1.5
+1.5  |  3
+1.5  |  3 
+2
+多件有折扣
+C
+3
+4.5
+1.5
+1.5  |  4.5
+1.5  |  4.5
+2
+多件有折扣
+
+
+
+
+
+
+
+
+B
+1
+
+
+0
+
+
+无法出报价(必须有非赠品报价)
+B
+2
+
+
+1.5  |  3
+
+
+无法出报价(必须有非赠品报价)
+B
+3
+
+
+1.5  |  4.5
+
+
+无法出报价(必须有非赠品报价)
+
+
+
+
+
+
+
+
+A
+1
+0
+0
+
+0
+2
+单件无折扣
+A
+2
+0
+0
+1.5  | 3
+0
+拆明细？A:1  A:2
+有赠品报价（1个赠品，1个非赠品）
+A
+3
+0
+0
+1.5  |  4.5
+0
+拆明细？A:1*2  A:2
+有赠品报价（2个赠品，1个非赠品）
+
+
+
+
+
+
+
+
+BC
+B*1、C*1
+0
+0
+1.5  |  3
+0
+B: 1、C: 2
+有赠品报价（1个赠品B，1个非赠品C）
+BC
+B*1、C*2
+1.5
+1.5
+
+C有一件有折扣1.5
+B:1、C:2 * 2 
+有赠品报价（1个赠品B，2个非赠品C）折扣在C
+BC
+B*2、C*2
+
+
+
+0
+B: 1*2  C：2*2
+有赠品报价（2个赠品B，2个非赠品C）无折扣
+BC
+B*2、C*1
+
+
+
+0
+B:1*2， C:2
+有赠品报价（2个赠品B，1个非赠品C）无折扣
+
+
+
+
+
+
+
+
+AB
+A*1、 B*1
+0
+0
+1.5  |  3
+0
+A:2, B:1
+有赠品报价（1个赠品B，1个非赠品A）
+AB
+A*2、 B*2
+0
+0
+1.5  |  4.5 
+0
+拆明细？A:1,B:1,A:2
+有赠品报价（3个赠品(A*1,B*2)），1个非赠品A）
+AB
+A*1  B*2
+0
+0
+1.5
+0
+A:2  B: 1
+有赠品报价（2个赠(B*2), 1个非赠品A)
+AB
+A*2  B*1
+
+
+
+
+
+有赠品报价(2个赠品(A*1, B*1)), 一个非赠品A
+
+
+
+
+
+
+
+
+AC
+A*1、C*1
+0
+0
+1.5
+0
+A:1  C:2
+有赠品报价（1个赠品A，1个非赠品C）
+AC
+A*2、C*2
+0
+0
+1.5
+0
+A:1  C:2
+有赠品报价（2个赠品A、2个非赠品C）
+AC
+A*1、C*2
+A 1.5
+A: 1.5
+1.5
+C: 1.5  A: 0
+A:1  C:2
+A是赠品、C有折扣1.5 ；C非赠品
+AC
+A*2、C*1
+0
+0
+1.5
+0
+A:1  C:2
+有赠品报价（2个赠品A，1个非赠品C）
+
+
+
+
+
+
+
+
+AD
+A*1、D*1
+0
+0
+0
+0
+A:2  D:1
+有赠品报价，按赠品标识字段（1个非赠品A，赠品D）
+AD
+A*2、D*2
+0
+0
+0
+0
+A:2*1   A:1*1   D:1 *2
+1个非赠品A、1个赠品A、2个赠品D
+AD
+A*1、D*2
+0
+0
+0
+0
+A:2*1 D:1*2
+1个非赠品A、2个赠品D
+AD
+A*2、D*1
+0
+0
+0
+0
+A:2*1 A:1*1 D:1*2
+1个非赠品A、1个赠品A、1个赠品D
+
+
+
+
+
+
+
+
+ACD
+C取非赠品，其他都是赠品价格
+
+
+
+
+
+
+
+ACD
+
+
+
+
+
+
+
+...
+
+
+
+
+
+
+
+ACD
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ABD
+A取非赠品，其他都是赠品
+
+
+
+
+
+
+
+...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+组合报价
+
+SKU
+数量
+赠品
+应收单价
+赠品排序
+A
+1
+是
+1
+
+A
+1
+否
+2
+
+A
+2
+是
+2
+
+A
+2
+否
+3
+
+A
+3
+是
+3
+
+A
+3
+否
+4
+
+
+
+
+
+
+B
+1
+是
+1
+
+B
+2
+是
+2
+
+B
+3
+是
+3
+
+
+
+
+
+
+C
+1
+否
+2
+
+C
+2
+否
+3
+
+C
+3
+否
+4
+
+
+
+
+
+
+
+
+SKU
+数量
+应收单价
+应收总额
+原因
+
+C
+1
+2
+2
+
+
+C
+2
+3
+3
+
+
+C
+3
+3
+4
+
+
+B
+1
+-
+-
+订单不能全为赠品
+
+A
+1
+2
+2
+非赠品A*1
+
+A
+2
+3
+3
+非赠品A*2
+
+A
+3
+4
+4
+非赠品A*3
+
+
+
+
+
+
+
+AB
+A*1、B*1
+A:$2、B:$1
+3
+非赠品A：$1、赠品B：$1
+
+AB
+A*1、B*2
+A:$2、B:$2
+4
+非赠品A：$2、赠品B：$2
+
+AB
+A*2、B*1
+A:$3、B:$1
+4
+非赠品A：
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1. 先根据SKU列表和报价数据，统计出折扣SKU、赠品SKU和数量、非赠品SKU和数量，以及这些放在哪个明细上
+2. 再遍历明细，将应收
+itemList
+
+
+
+
+
+基础数据准备：
+
+
+折扣只有在应收模式是单件 + 多件折扣的时候才有
+赠品--》会影响查询的报价明细那一行
+折扣也要在非赠品的SKU上才有
+
+
+1. 找出SKU的所有报价明细
+2. 有赠品的报价，取赠品报价
+3. 汇总所有SKU的报价
+4. 判断报价是否都是赠品  --》是直接结束
+5. 有非赠品报价,且应收模式是单件 + 多件的需要判断两种报价的数量，超过2，
+6. 给非赠品报价的对应数量加折扣
+7. 新增应收
+
+
+
+
+
+折扣
+- orderNo
+- countryCode：国家编码
+- 明细：id、SKU、数量
+- 客户id
+- 物流渠道id
+
+
+
+
+问题：
+- 不收：明细的应收为0、币种是客户报价币种
+- 自定义的时候，生成账单是按明细,给第一个明细应收，其他都是0
+- 包材账单和定金账单新增字段
+
+
+账单修改
+状态：待收款、已收款未到账、部分收款、已到账
+账单类型：订单账单、包材账单、定金账单
+
+
+应收出不来的原因：
+1. 渠道错误，报价渠道为xxxxxxxx
+2. sku没有客户报价数据
+3. sku没有非赠品价格，订单不允许单独出售赠品。
+
+
+新建订单产品报价表
+
+
+
+
+
+报价明细
+
+新增赠品排序字段
+ALTER TABLE sales_customer_quotation_item ADD COLUMN free_sort int4;
+COMMENT ON COLUMN sales_customer_quotation_item.free_sort IS '赠品排序';
+
+
+订单上要新增重发单标识
+计算应收时的类型
+-- 订单类型
+ALTER TABLE sales_order ADD COLUMN resend_flag varchar(4) default '0';
+COMMENT ON COLUMN sales_order.resend_flag IS '重发标识（0-主单，1-重发单）';
+
+ALTER TABLE sales_order ADD COLUMN resend_cost_type varchar(4) default '0';
+COMMENT ON COLUMN sales_order.resend_cost_type IS '重发应收类型（0-全部、1-一半、2-不收、3-自定义）';
+
+ALTER TABLE sales_order ADD COLUMN resend_customer_amount numeric(10,2);
+COMMENT ON COLUMN sales_order.resend_customer_amount IS '重发自定义金额';
+
+-- 订单明细应收错误
+ALTER TABLE sales_order_item ADD COLUMN receivable_error varchar(255);
+COMMENT ON COLUMN sales_order_item.receivable_error IS '订单应收错误';
+
+
+订单明细应收表
+CREATE TABLE "public"."order_item_receivable" (
+        "id" INT8 NOT NULL,
+        "order_no" VARCHAR ( 255 ) COLLATE "pg_catalog"."default",
+        "order_item_id" INT8,
+        "item_id" VARCHAR ( 255 ) DEFAULT 0,
+        "quantity" INT4 NOT NULL DEFAULT 1,
+        "receivable_price" NUMERIC ( 10, 2 ) DEFAULT 0,
+        "quotation_discount_amount" NUMERIC DEFAULT 0,
+        "receivable_total_amount" NUMERIC DEFAULT 0,
+        "receivable_currency" VARCHAR ( 255 ) COLLATE "pg_catalog"."default",
+        "create_dept" INT8,
+        "create_by" INT8,
+        "create_time" TIMESTAMP ( 0 ),
+        "update_by" INT8,
+        "update_time" TIMESTAMP ( 0 ),
+        "memo" VARCHAR ( 255 ) COLLATE "pg_catalog"."default",
+        CONSTRAINT "order_item_receivable_pkey" PRIMARY KEY ( "id" ) 
+);
+ALTER TABLE "public"."order_item_receivable" OWNER TO "dayone_erp";
+COMMENT ON COLUMN "public"."order_item_receivable"."order_no" IS '系统单号';
+COMMENT ON COLUMN "public"."order_item_receivable"."order_item_id" IS '销售订单明细 id';
+COMMENT ON COLUMN "public"."order_item_receivable"."item_id" IS '库存 SKU';
+COMMENT ON COLUMN "public"."order_item_receivable"."quantity" IS '数量';
+COMMENT ON COLUMN "public"."order_item_receivable"."receivable_price" IS '应收单价';
+COMMENT ON COLUMN "public"."order_item_receivable"."receivable_currency" IS '应收币种';
+COMMENT ON COLUMN "public"."order_item_receivable"."quotation_discount_amount" IS '折扣金额';
+COMMENT ON COLUMN "public"."order_item_receivable"."receivable_total_amount" IS '应收总额';
+COMMENT ON TABLE "public"."order_item_receivable" IS '销售订单明细应收表';
+
+
+
+ALTER TABLE order_item_receivable ADD COLUMN free_flag varchar(4);
+COMMENT ON COLUMN order_item_receivable.free_flag IS '赠品标识（是，否）';
+
+
+账单
+
+订单应收单
+-- 添加账单类型
+ALTER TABLE sales_customer_receivable_bill ADD COLUMN bill_type varchar(4);
+COMMENT ON COLUMN sales_customer_receivable_bill.bill_type IS '账单类型（0-订单账单、1-包材账单、2-定金账单）';
+
+ALTER TABLE sales_customer_receivable_bill ADD COLUMN return_flag varchar(4);
+COMMENT ON COLUMN sales_customer_receivable_bill.return_flag IS '退款标识（定金账单使用，0-未退款-否，1-已退款-是）';
+
+
+
+-- 修改账单状态
+COMMENT ON COLUMN sales_customer_receivable_bill.status IS '状态 0：待收款、1：部分收款 2: 已到账，3-已收款-未到账';
+
+
+
+
+客户  USD
+客户报价  USD
+订单：币种、 应收币种USD
+⬇️生成账单
+应收单：订单应收币种 USD
+⬇️提交付款凭证
+收款单：账户、账户币种、 [付款币种（订单应收币种）]
+
+
+
+
+
+
+
+定金账单：
+- 应收单号
+- 客户
+- 店铺
+- 店铺负责人
+- 应收日期
+- 应收金额
+- 已收金额
+- 明细？
+
+包材账单（客户提供的包材？）
+- 应收单号
+- 客户
+- 店铺
+- 店铺负责人
+- 应收日期
+- 应收金额
+- 已收金额
+- 明细包材库存 SKU？
+
+
+问题：
+
+
+
+
+
+测试：
+目的国：日本
+物流渠道：云途全球专线挂号（特惠带电）
+报价数据
+
+SKU：
+- DCMD2-WE496      DCMD2-WE496001   ： 非赠品
+- DCMD2-WE502       ： 是赠品   赠品排序2
+- DCMD2-WE452：两种报价  赠品排序1

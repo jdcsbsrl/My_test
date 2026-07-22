@@ -1,0 +1,250 @@
+"""Sales Order Export Sort Regression Tests."""
+
+import time
+
+import pytest
+from playwright.sync_api import Page
+
+from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_page import SalesOrderPage
+
+EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
+
+SORT_FIELDS = [
+    {"name": "付款时间", "column_name": "paymentTime"},
+    {"name": "订单金额", "column_name": "orderAmount"},
+    {"name": "sku编码", "column_name": "skuCode"},
+    {"name": "平台sku", "column_name": "platformSku"},
+    {"name": "国家", "column_name": "country"},
+    {"name": "店铺", "column_name": "shop"},
+    {"name": "物流渠道", "column_name": "logisticsChannel"},
+    {"name": "下单时间", "column_name": "orderTime"},
+    {"name": "发货时间", "column_name": "shipTime"},
+    {"name": "交运时间", "column_name": "deliveryTime"},
+    {"name": "物流单号", "column_name": "trackingNumber"},
+    {"name": "利润", "column_name": "profit"},
+    {"name": "利润率", "column_name": "profitRate"},
+]
+
+
+def read_excel_order_numbers(file_path: str, limit: int = 50) -> list[str]:
+    """读取Excel文件中的订单号列表"""
+    try:
+        import openpyxl
+
+        wb = openpyxl.load_workbook(file_path)
+        ws = wb.active
+
+        order_numbers = []
+        header_row = None
+
+        for row in ws.iter_rows(max_row=1):
+            header_row = [cell.value for cell in row]
+            break
+
+        if header_row:
+            order_col_index = None
+            for i, header in enumerate(header_row):
+                if header and (
+                    "订单号" in str(header) or "销售单号" in str(header) or "systemNo" in str(header).lower()
+                ):
+                    order_col_index = i
+                    break
+
+            if order_col_index is None:
+                order_col_index = 0
+
+            for row in ws.iter_rows(min_row=2, max_row=limit + 1):
+                cell_value = row[order_col_index].value
+                if cell_value:
+                    order_numbers.append(str(cell_value).strip())
+
+        wb.close()
+        return order_numbers[:limit]
+    except Exception as e:
+        print(f"读取Excel失败: {e}")
+        return []
+
+
+def verify_order_consistency(page_order_numbers: list[str], export_order_numbers: list[str]) -> dict:
+    """验证页面排序与导出文件排序的一致性"""
+    result = {
+        "passed": True,
+        "page_count": len(page_order_numbers),
+        "export_count": len(export_order_numbers),
+        "matching_order_numbers": [],
+        "unmatched_page_numbers": [],
+        "order_consistent": True,
+        "error": None,
+    }
+
+    if not page_order_numbers or not export_order_numbers:
+        result["passed"] = False
+        result["error"] = "页面或导出订单号列表为空"
+        return result
+
+    matching_numbers = []
+    for order_num in page_order_numbers[:20]:
+        if order_num in export_order_numbers:
+            matching_numbers.append(order_num)
+
+    result["matching_order_numbers"] = matching_numbers
+
+    unmatched = [num for num in page_order_numbers[:20] if num not in export_order_numbers]
+    result["unmatched_page_numbers"] = unmatched
+
+    if unmatched:
+        result["passed"] = False
+
+    page_positions = {num: idx for idx, num in enumerate(page_order_numbers[:20])}
+    export_positions = {num: idx for idx, num in enumerate(export_order_numbers)}
+
+    for num in matching_numbers:
+        page_pos = page_positions.get(num, -1)
+        export_pos = export_positions.get(num, -1)
+
+        other_matching = [m for m in matching_numbers if m != num]
+        for other in other_matching:
+            other_page_pos = page_positions.get(other, -1)
+            other_export_pos = export_positions.get(other, -1)
+
+            page_order_correct = (page_pos < other_page_pos) == (export_pos < other_export_pos)
+            if not page_order_correct:
+                result["order_consistent"] = False
+                result["passed"] = False
+                result["error"] = f"订单号 {num} 和 {other} 的相对顺序不一致"
+                break
+
+        if not result["order_consistent"]:
+            break
+
+    return result
+
+
+@pytest.mark.regression
+@pytest.mark.ui
+@pytest.mark.p1
+class TestSalesOrderExportSort:
+    """Tests for sales order export sort functionality."""
+
+    def test_export_sort_payment_time_asc(self, logged_in_page: Page) -> None:
+        """Test export with payment time ascending sort."""
+        sales_order_page = SalesOrderPage(logged_in_page)
+        export_page = SalesOrderExportPage(logged_in_page)
+
+        sales_order_page.navigate_to("sales/order/saleOrder")
+        logged_in_page.wait_for_timeout(5000)
+
+        sales_order_page.click_tab("待处理")
+        logged_in_page.wait_for_timeout(3000)
+
+        sales_order_page.select_sort_order("付款时间", is_ascending=True)
+        logged_in_page.wait_for_timeout(3000)
+
+        page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
+        print(f"\n✅ 页面排序后订单号（付款时间升序）: {page_order_numbers[:10]}...")
+        assert len(page_order_numbers) > 0, "页面未获取到订单号"
+
+        sales_order_page.select_export_current_search()
+        logged_in_page.wait_for_timeout(5000)
+
+        timestamp = str(int(time.time() * 1000))
+        export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo=")
+        logged_in_page.wait_for_timeout(15000)
+
+        print(f"\n✅ 已导航到导出页面: {export_page.get_current_url()}")
+
+        template_selected = export_page.select_export_template(EXPORT_TEMPLATE)
+        assert template_selected, f"未成功选择模板: {EXPORT_TEMPLATE}"
+        print(f"\n✅ 已选择导出模板: {EXPORT_TEMPLATE}")
+
+        export_page.select_all_fields()
+        print("\n✅ 已选择所有导出字段")
+
+        download_result = export_page.wait_for_download(timeout=300000)
+
+        if download_result["success"]:
+            print("\n✅ 导出下载成功")
+            print(f"   - 文件名: {download_result['filename']}")
+            print(f"   - 文件路径: {download_result['file_path']}")
+            print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
+
+            export_order_numbers = read_excel_order_numbers(download_result["file_path"], limit=50)
+            print(f"\n✅ 导出文件订单号: {export_order_numbers[:10]}...")
+
+            verification = verify_order_consistency(page_order_numbers, export_order_numbers)
+            print("\n=== 排序一致性验证结果 ===")
+            print(f"页面订单数: {verification['page_count']}")
+            print(f"导出订单数: {verification['export_count']}")
+            print(f"匹配订单数: {len(verification['matching_order_numbers'])}")
+            print(f"顺序一致: {verification['order_consistent']}")
+
+            if verification["unmatched_page_numbers"]:
+                print(f"未匹配订单号: {verification['unmatched_page_numbers']}")
+
+            assert verification["passed"], f"排序一致性验证失败: {verification['error']}"
+            print("\n✅ 付款时间升序导出排序验证通过")
+        else:
+            print(f"\n⚠️ 导出下载失败: {download_result['error']}")
+            pytest.fail(f"导出下载失败: {download_result['error']}")
+
+    def test_export_sort_payment_time_desc(self, logged_in_page: Page) -> None:
+        """Test export with payment time descending sort."""
+        sales_order_page = SalesOrderPage(logged_in_page)
+        export_page = SalesOrderExportPage(logged_in_page)
+
+        sales_order_page.navigate_to("sales/order/saleOrder")
+        logged_in_page.wait_for_timeout(5000)
+
+        sales_order_page.click_tab("待处理")
+        logged_in_page.wait_for_timeout(3000)
+
+        sales_order_page.select_sort_order("付款时间", is_ascending=False)
+        logged_in_page.wait_for_timeout(3000)
+
+        page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
+        print(f"\n✅ 页面排序后订单号（付款时间降序）: {page_order_numbers[:10]}...")
+        assert len(page_order_numbers) > 0, "页面未获取到订单号"
+
+        sales_order_page.select_export_current_search()
+        logged_in_page.wait_for_timeout(5000)
+
+        timestamp = str(int(time.time() * 1000))
+        export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo=")
+        logged_in_page.wait_for_load_state("networkidle")
+        logged_in_page.wait_for_timeout(5000)
+        print(f"\n✅ 已导航到导出页面: {export_page.get_current_url()}")
+
+        template_selected = export_page.select_export_template(EXPORT_TEMPLATE)
+        assert template_selected, f"未成功选择模板: {EXPORT_TEMPLATE}"
+        print(f"\n✅ 已选择导出模板: {EXPORT_TEMPLATE}")
+
+        export_page.select_all_fields()
+        print("\n✅ 已选择所有导出字段")
+
+        download_result = export_page.wait_for_download(timeout=300000)
+
+        if download_result["success"]:
+            print("\n✅ 导出下载成功")
+            print(f"   - 文件名: {download_result['filename']}")
+            print(f"   - 文件路径: {download_result['file_path']}")
+            print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
+
+            export_order_numbers = read_excel_order_numbers(download_result["file_path"], limit=50)
+            print(f"\n✅ 导出文件订单号: {export_order_numbers[:10]}...")
+
+            verification = verify_order_consistency(page_order_numbers, export_order_numbers)
+            print("\n=== 排序一致性验证结果 ===")
+            print(f"页面订单数: {verification['page_count']}")
+            print(f"导出订单数: {verification['export_count']}")
+            print(f"匹配订单数: {len(verification['matching_order_numbers'])}")
+            print(f"顺序一致: {verification['order_consistent']}")
+
+            if verification["unmatched_page_numbers"]:
+                print(f"未匹配订单号: {verification['unmatched_page_numbers']}")
+
+            assert verification["passed"], f"排序一致性验证失败: {verification['error']}"
+            print("\n✅ 付款时间降序导出排序验证通过")
+        else:
+            print(f"\n⚠️ 导出下载失败: {download_result['error']}")
+            pytest.fail(f"导出下载失败: {download_result['error']}")

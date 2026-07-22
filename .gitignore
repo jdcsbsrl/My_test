@@ -1,0 +1,109 @@
+# ========== 环境配置文件（敏感） ==========
+.env
+.env.*
+!.env.example
+
+# ========== 虚拟环境 ==========
+.venv/
+venv/
+env/
+ENV/
+
+# ========== Python缓存 ==========
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# ========== 测试和报告（敏感数据）==========
+.pytest_cache/
+reports/
+test-reports/
+test_*.xlsx
+htmlcov/
+.coverage
+.coverage.*
+.pytest/
+workspace/
+
+# ========== 知识库（业务敏感信息）==========
+assets/knowledge_base/
+
+# ========== IDE和编辑器 ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ========== 日志文件 ==========
+*.log
+logs/
+
+# ========== 临时文件 ==========
+*.tmp
+*.bak
+*.swp
+*~
+.cache/
+
+# ========== 截图和录制视频 ==========
+*.png
+*.jpg
+*.jpeg
+*.webm
+*.mp4
+screenshots/
+videos/
+traces/
+
+# ========== 配置文件（可能包含敏感信息）==========
+config/*.json
+!config/env_config.example.json
+config/*.yaml
+configs/*.yaml
+!configs/README.md
+!configs/env_config.example.yaml
+configs/*.yml
+configs/*.json
+!configs/*.example.*
+
+# ========== 测试环境配置（包含敏感凭据）==========
+modules/auto_test/configs/*.yaml
+modules/auto_test/configs/*.yml
+modules/auto_test/configs/*.json
+!modules/auto_test/configs/*.example.*
+
+# ========== 模块资源目录 ==========
+modules/assets/
+
+# ========== API密钥和令牌 ==========
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+credentials/
+.auth_tokens.json
+
+# ========== 数据库文件 ==========
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+
+# ========== 性能测试结果 ==========
+locust/
+jmeter/
+performance-results/
+
+# ========== 浏览器 ==========
+browsers/
+node_modules

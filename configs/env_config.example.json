@@ -1,0 +1,26 @@
+{
+  "active_env": "test",
+  "environments": {
+    "test": {
+      "base_url": "https://your-test-erp.example.com",
+      "description": "测试环境",
+      "allowed": true
+    },
+    "uat": {
+      "base_url": "https://your-uat-erp.example.com",
+      "description": "UAT环境",
+      "allowed": true
+    }
+  },
+  "test_accounts": {
+    "admin": {
+      "account": "",
+      "password": "",
+      "description": "管理员账号"
+    }
+  },
+  "browser": {
+    "headless": true,
+    "slow_mo": 0
+  }
+}
