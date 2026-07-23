@@ -35,7 +35,13 @@ class BrowserDriver:
             return self.browser
 
         browser_type = getattr(self._playwright, browser)
-        self.browser = browser_type.launch(headless=headless, slow_mo=slow_mo)
+        launch_options: dict[str, Any] = {"headless": headless, "slow_mo": slow_mo}
+        browser_channel = (os.getenv("PLAYWRIGHT_BROWSER_CHANNEL") or "").strip()
+        if browser_channel:
+            if browser != "chromium":
+                raise ValueError("PLAYWRIGHT_BROWSER_CHANNEL 仅支持 chromium")
+            launch_options["channel"] = browser_channel
+        self.browser = browser_type.launch(**launch_options)
         logger.info(f"BrowserDriver: started {browser}, headless={headless}")
         return self.browser
 
@@ -46,6 +52,7 @@ class BrowserDriver:
         viewport = self.config.get("playwright.viewport", {"width": 1920, "height": 1080})
         context_options: dict[str, Any] = {
             "viewport": viewport,
+            "accept_downloads": True,
             "record_video_dir": None,
             "record_video_size": None,
         }

@@ -194,10 +194,10 @@ class SalesOrderPage(BasePage):
                             .slice(0, 20);
                         debug.pageUrl = window.location.href;
                         debug.pageTitle = document.title;
-                        
+
                         const tabs = document.querySelectorAll('[role="tab"], .el-tabs__item, .ant-tabs-tab');
                         debug.tabsContent = Array.from(tabs).map(t => t.textContent.trim());
-                        
+
                         for (const tab of tabs) {{
                             if (tab.textContent.includes('{search_name}')) {{
                                 tab.click();
@@ -1257,55 +1257,39 @@ class SalesOrderPage(BasePage):
     def select_export_current_search(self) -> None:
         """点击导出下拉菜单中的'导出当前搜索的订单'选项"""
         self.click_export_button()
-        import time
 
-        time.sleep(2)
-
+        export_option = self.page.locator(
+            '.el-dropdown-menu__item:visible:has-text("导出当前搜索的订单"), '
+            '[role="menuitem"]:visible:has-text("导出当前搜索的订单")'
+        ).first
         try:
-            script_result = self.page.evaluate(
-                """
-                () => {
-                    const items = document.querySelectorAll('.el-dropdown-menu__item');
-                    for (let i = 0; i < items.length; i++) {
-                        const text = items[i].innerText.trim();
-                        if (text === '导出当前搜索的订单') {
-                            items[i].click();
-                            return { clicked: true, text: text, index: i };
-                        }
-                    }
-                    return { clicked: false };
-                }
-            """
+            export_option.wait_for(state="visible", timeout=10000)
+            export_option.click(timeout=10000)
+        except Exception as exc:
+            raise ValueError("无法找到“导出当前搜索的订单”选项") from exc
+        self.page.wait_for_timeout(1000)
+        for opened_page in self.page.context.pages:
+            if opened_page is not self.page and "sales/order/exportPage" in opened_page.url:
+                export_url = opened_page.url
+                opened_page.close()
+                self.page.goto(export_url, wait_until="domcontentloaded")
+                break
+        try:
+            self.page.wait_for_url(
+                "**/sales/order/exportPage**", timeout=3000, wait_until="domcontentloaded"
             )
-            if script_result.get("clicked"):
-                logger.info(f"通过JS点击导出选项: {script_result}")
-                time.sleep(5)
-                return
-        except Exception as e:
-            logger.debug(f"通过JS点击导出选项失败: {e}")
+        except Exception:
+            import time
+            from urllib.parse import quote
 
-        selectors = [
-            ".el-dropdown-menu__item:has-text('导出当前搜索的订单')",
-            "//li[contains(text(), '导出当前搜索的订单')]",
-            "//span[contains(text(), '导出当前搜索的订单')]",
-        ]
-
-        clicked = False
-        for selector in selectors:
-            try:
-                elements = self.page.locator(selector).all()
-                if elements:
-                    elements[0].click()
-                    clicked = True
-                    logger.info(f"成功选择导出当前搜索的订单: {selector}")
-                    time.sleep(5)
-                    break
-            except Exception as e:
-                logger.debug(f"尝试选择器 {selector} 失败: {e}")
-                continue
-
-        if not clicked:
-            logger.warning("无法找到'导出当前搜索的订单'选项")
+            order_numbers = self.get_sorted_order_numbers(limit=50)
+            if not order_numbers:
+                raise ValueError("当前搜索结果没有可用于实时导出的订单")
+            order_param = quote(",".join(order_numbers))
+            self.navigate_to(
+                f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}"
+            )
+        logger.info("已进入当前搜索订单导出页面")
 
     @allure.step("选择导出勾选的订单")
     def select_export_selected(self) -> None:

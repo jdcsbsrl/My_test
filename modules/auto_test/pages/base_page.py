@@ -16,7 +16,12 @@ class BasePage:
     @allure.step("Navigate to {url}")
     def navigate_to(self, url: str) -> None:
         if not url.startswith("http"):
-            url = f"{self.base_url.rstrip('/')}/{url.lstrip('/')}"
+            if not self.base_url:
+                raise ValueError("base_url 为空，请检查环境变量 TEST_WEB_BASE_URL 或 TEST_WEB_API_BASE_URL 是否已设置")
+            base_url = self.base_url.rstrip("/")
+            if url and base_url.endswith("/index"):
+                base_url = base_url[: -len("/index")]
+            url = f"{base_url}/{url.lstrip('/')}" if url else f"{base_url}/"
         self.page.goto(url)
         logger.info(f"Navigated to: {url}")
 
@@ -61,7 +66,7 @@ class BasePage:
         self.page.locator(selector).wait_for(timeout=timeout)
 
     @allure.step("Wait for page load")
-    def wait_for_load_state(self, state: str = "networkidle") -> None:
+    def wait_for_load_state(self, state: str = "domcontentloaded") -> None:
         self.page.wait_for_load_state(state)
 
     @allure.step("Assert element visible: {selector}")

@@ -56,12 +56,9 @@ def schema_factory() -> SchemaBasedFactory:
     return SchemaBasedFactory()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")
 def browser(config_manager: ConfigManager) -> Browser:
-    """Create a fresh browser instance for each test function.
-
-    Ensures test isolation by providing a new browser per test.
-    """
+    """Reuse one browser process; function-scoped contexts preserve test isolation."""
     driver = BrowserDriver()
     browser = driver.start_browser(
         browser=config_manager.get("playwright.browser", "chromium"),
@@ -73,13 +70,17 @@ def browser(config_manager: ConfigManager) -> Browser:
 
 
 @pytest.fixture(scope="function")
-def context(browser: Browser, config_manager: ConfigManager) -> BrowserContext:
+def context(
+    browser: Browser, config_manager: ConfigManager, authenticated_storage_state: str
+) -> BrowserContext:
     """Create a new browser context for each test function."""
     viewport = config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
     context_options = {
         "viewport": viewport,
+        "accept_downloads": True,
         "record_video_dir": None,
         "record_video_size": None,
+        "storage_state": authenticated_storage_state,
     }
 
     video_config = config_manager.get("playwright.video", "off")
@@ -102,6 +103,26 @@ def context(browser: Browser, config_manager: ConfigManager) -> BrowserContext:
     context.close()
 
 
+@pytest.fixture(scope="session")
+def authenticated_storage_state(
+    browser: Browser, config_manager: ConfigManager, tmp_path_factory
+) -> str:
+    """Login once per shard and reuse the resulting isolated authentication state."""
+    auth_dir = tmp_path_factory.mktemp("playwright-auth")
+    auth_file = auth_dir / "state.json"
+    auth_context = browser.new_context(
+        viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
+    )
+    auth_page = auth_context.new_page()
+    try:
+        if not LoginPage(auth_page).login(USERNAME, PASSWORD):
+            pytest.fail("Unable to create authenticated browser state")
+        auth_context.storage_state(path=str(auth_file))
+    finally:
+        auth_context.close()
+    return str(auth_file)
+
+
 @pytest.fixture(scope="function")
 def page(context: BrowserContext) -> Page:
     """Create a new page for each test function."""
@@ -116,8 +137,10 @@ def logged_in_page(page: Page) -> Page:
 
     This fixture is useful for tests that require authentication.
     """
-    login_page = LoginPage(page)
-    login_page.login(USERNAME, PASSWORD)
+    page.goto(get_config().base_url)
+    page.wait_for_load_state("domcontentloaded")
+    if "/login" in page.url:
+        pytest.fail("Cached authentication state is invalid")
     yield page
 
 
