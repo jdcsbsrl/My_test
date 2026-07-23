@@ -2,9 +2,9 @@ name: Test ERP CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, clean-branch ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, clean-branch ]
   schedule:
     - cron: '0 2 * * *'
 
@@ -84,14 +84,16 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install dependencies
-        run: pip install -e .
+        run: pip install -e . "pytest>=8,<9"
       - name: Run unit tests
         run: pytest tests/unit/ -v --tb=short -n auto --alluredir reports/allure-results
       - name: Upload unit test results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: unit-test-results
-          path: reports/
+          name: allure-results-unit
+          path: reports/allure-results/
+          if-no-files-found: error
 
   integration-tests:
     name: 集成测试
@@ -110,20 +112,22 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install dependencies
-        run: pip install -e .
+        run: pip install -e . "pytest>=8,<9"
       - name: Run integration tests
         run: pytest tests/integration/ -v --tb=short --alluredir reports/allure-results
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: integration-test-results
-          path: reports/
+          name: allure-results-integration
+          path: reports/allure-results/
+          if-no-files-found: error
 
   ui-tests:
     name: UI测试 (分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: code-quality
-    timeout-minutes: 60
+    timeout-minutes: 90
     strategy:
       matrix:
         include:
@@ -138,7 +142,13 @@ jobs:
           - shard: 5
             test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py"
           - shard: 6
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py"
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k TestInventorySKUSearch"
+          - shard: 7
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination\""
+          - shard: 8
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
+          - shard: 9
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
@@ -152,23 +162,40 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install dependencies
-        run: pip install -e .
+        run: pip install -e . "pytest>=8,<9"
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('pyproject.toml') }}
       - name: Install Playwright browsers
         run: playwright install --with-deps chromium
       - name: Run UI tests (shard ${{ matrix.shard }})
         run: |
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright --alluredir reports/allure-results
         env:
+          TEST_ENV: test
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
           TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
           TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
           TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
       - name: Upload UI test results
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: ui-test-results-shard-${{ matrix.shard }}
-          path: reports/
-          if-no-files-found: warn
+          name: allure-results-ui-shard-${{ matrix.shard }}
+          path: reports/allure-results/
+          if-no-files-found: error
+      - name: Upload UI diagnostics
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ui-diagnostics-shard-${{ matrix.shard }}
+          path: |
+            reports/screenshots/
+            reports/traces/
+            reports/videos/
+          if-no-files-found: ignore
 
   report:
     name: 生成测试报告
@@ -188,28 +215,17 @@ jobs:
           ALLURE_VERSION="2.29.0"
           wget -qO- "https://github.com/allure-framework/allure2/releases/download/${ALLURE_VERSION}/allure-${ALLURE_VERSION}.tgz" | tar -xz -C /tmp
           echo "/tmp/allure-${ALLURE_VERSION}/bin" >> $GITHUB_PATH
-      - name: Download unit test results
+      - name: Download and merge Allure results
         uses: actions/download-artifact@v4
         with:
-          name: unit-test-results
-          path: reports/unit/
-        continue-on-error: true
-      - name: Download integration test results
-        uses: actions/download-artifact@v4
-        with:
-          name: integration-test-results
-          path: reports/integration/
-        continue-on-error: true
-      - name: Download UI test results
-        uses: actions/download-artifact@v4
-        with:
-          pattern: ui-test-results-shard-*
-          path: reports/
-        continue-on-error: true
-      - name: Merge allure-results from all test types
+          pattern: allure-results-*
+          merge-multiple: true
+          path: reports/allure-results/
+      - name: Validate Allure results
         run: |
-          mkdir -p reports/allure-results
-          find reports/ -name "allure-results" -type d -exec cp -r {}/* reports/allure-results/ \;
+          RESULT_COUNT=$(find reports/allure-results -name '*-result.json' -type f | wc -l)
+          echo "Allure result files: ${RESULT_COUNT}"
+          test "${RESULT_COUNT}" -gt 0
       - name: Generate Allure report
         run: allure generate reports/allure-results -o reports/allure-report
       - name: Upload Allure report

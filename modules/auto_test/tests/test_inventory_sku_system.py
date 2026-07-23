@@ -77,24 +77,21 @@ def _do_login(page: Page) -> None:
 
 
 @pytest.fixture(scope="function")
-def facade(page: Page) -> InventorySKUFacade:
+def facade(logged_in_page: Page) -> InventorySKUFacade:
     """库存SKU Facade Fixture，登录后进入库存SKU页面"""
-    _do_login(page)
-
-    fc = InventorySKUFacade(page)
+    fc = InventorySKUFacade(logged_in_page)
     fc.navigate_to_inventory()
     yield fc
     try:
-        page.context.clear_cookies()
+        logged_in_page.context.clear_cookies()
     except Exception:
         pass
 
 
 @pytest.fixture(scope="function")
-def facade_logged_in(page: Page) -> InventorySKUFacade:
+def facade_logged_in(logged_in_page: Page) -> InventorySKUFacade:
     """只登录不跳转的Facade，供各用例自行导航"""
-    _do_login(page)
-    yield InventorySKUFacade(page)
+    yield InventorySKUFacade(logged_in_page)
 
 
 class TestInventorySKUSearch:

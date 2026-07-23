@@ -17,28 +17,8 @@ class SKUSearchPage(BasePage):
     @allure.step("导航到SKU搜索页面")
     def navigate_to_search_page(self) -> None:
         self.navigate_to(self.search_url)
-        self.wait_for_load_state()
-        self.page.wait_for_timeout(5000)
-
-        menu_selectors = [
-            '//span[contains(text(), "产品中心")]',
-            '//span[contains(text(), "库存管理")]',
-            '//span[contains(text(), "库存SKU")]',
-            '//div[contains(@class, "menu")]//span[contains(text(), "库存")]',
-            '//a[contains(@href, "inventory")]',
-        ]
-        for selector in menu_selectors:
-            try:
-                menu_item = self.page.locator(selector)
-                if menu_item.count() > 0 and menu_item.is_visible():
-                    menu_item.click()
-                    self.wait_for_load_state()
-                    self.page.wait_for_timeout(3000)
-                    logger.info(f"通过菜单导航到库存页面: {selector}")
-                    break
-            except Exception:
-                continue
-
+        self.wait_for_load_state("domcontentloaded")
+        self.page.locator("input, button, table, [role='table']").first.wait_for(state="attached", timeout=30000)
         logger.info("导航到SKU搜索页面")
 
     @allure.step("设置产品品类: {category}")
@@ -133,27 +113,31 @@ class SKUSearchPage(BasePage):
     @allure.step("点击搜索按钮")
     def click_search(self) -> float:
         start_time = time.time()
-        search_selectors = [
-            'button:has-text("搜索")',
-            'button[type="primary"]',
-            ".el-button--primary",
-            '.el-button:has-text("搜索")',
-            ".ant-btn-primary",
-            '.ant-btn:has-text("搜索")',
-            '//button[contains(text(), "搜索")]',
-        ]
-        for selector in search_selectors:
-            try:
-                search_btn = self.page.locator(selector)
-                if search_btn.count() > 0 and search_btn.is_visible():
-                    search_btn.click()
-                    self.wait_for_load_state()
-                    elapsed = time.time() - start_time
-                    logger.info(f"搜索响应时间: {elapsed:.2f}秒")
-                    return elapsed
-            except Exception:
-                continue
+        for button_name in ("查询", "搜索"):
+            search_btn = self.page.get_by_role("button", name=button_name, exact=True)
+            if search_btn.count() > 0 and search_btn.first.is_visible():
+                search_btn.first.click(timeout=10000)
+                self._wait_for_table_update()
+                elapsed = time.time() - start_time
+                logger.info(f"搜索响应时间: {elapsed:.2f}秒")
+                return elapsed
         raise ValueError("未找到搜索按钮")
+
+    def _wait_for_table_update(self, timeout: int = 30000) -> None:
+        """等待搜索表格结束加载，避免 SPA 页面被 networkidle 长连接阻塞。"""
+        try:
+            self.page.locator(
+                ".virtual-pro-table:visible, table:visible, [role='table']:visible, .el-table:visible, .ant-table:visible, "
+                ".el-table__empty-block:visible, .ant-empty:visible, [class*='empty']:visible"
+            ).first.wait_for(state="visible", timeout=timeout)
+        except Exception as exc:
+            visible_result_classes = self.page.evaluate(
+                """() => Array.from(document.querySelectorAll('[class]'))
+                    .filter(e => e.offsetParent !== null && /(table|grid|list|empty)/i.test(e.className))
+                    .slice(0, 40).map(e => ({tag: e.tagName, className: e.className, text: e.textContent.trim().slice(0, 80)}))"""
+            )
+            logger.error("搜索结果容器诊断: {}", visible_result_classes)
+            raise TimeoutError(f"搜索结果在 {timeout / 1000:.0f} 秒内未完成刷新") from exc
 
     @allure.step("点击重置按钮")
     def click_reset(self) -> None:
@@ -226,7 +210,10 @@ class SKUSearchPage(BasePage):
                 ".pagination-info",
             ]
             for selector in count_selectors:
-                count_text = self.page.locator(selector).text_content()
+                count_locator = self.page.locator(selector)
+                if count_locator.count() == 0:
+                    continue
+                count_text = count_locator.first.text_content()
                 if count_text:
                     import re
 
@@ -348,23 +335,23 @@ class SKUSearchPage(BasePage):
 
     def _select_dropdown_by_placeholder(self, placeholder: str, value: str) -> None:
         selectors = [
-            f'.ant-select:has(.ant-select-selection-placeholder:contains("{placeholder}")) .ant-select-selector',
-            f'.ant-select:has(.ant-select-selection-item:contains("{placeholder}")) .ant-select-selector',
-            f'.el-select:has(.el-select__placeholder:contains("{placeholder}")) .el-select__input',
-            f'.el-select:has(.el-select__placeholder:contains("{placeholder}"))',
+            f'.el-form-item:has(.el-form-item__label:has-text("{placeholder}")) .el-select',
+            f'.ant-form-item:has(label:has-text("{placeholder}")) .ant-select-selector',
+            f'.el-select:has-text("{placeholder}")',
+            f'.ant-select:has-text("{placeholder}") .ant-select-selector',
+            f'.el-select:has(input[placeholder*="{placeholder}"])',
+            f'.ant-select:has(input[placeholder*="{placeholder}"]) .ant-select-selector',
             f'.ant-select-selector:has-text("{placeholder}")',
-            f'.el-select__input:has-text("{placeholder}")',
             f'.el-select:has(.el-input__inner[placeholder*="{placeholder}"]) .el-input__inner',
             f'.ant-select:has(.ant-input[placeholder*="{placeholder}"]) .ant-select-selector',
-            f'//div[contains(@class, "select") and .//*[contains(text(), "{placeholder}")]]',
         ]
 
         clicked = False
         for selector in selectors:
             try:
                 locator = self.page.locator(selector)
-                if locator.count() > 0 and locator.is_visible():
-                    locator.click()
+                if locator.count() > 0 and locator.first.is_visible():
+                    locator.first.click()
                     clicked = True
                     logger.info(f"点击下拉选择器: {selector}")
                     break
@@ -372,14 +359,19 @@ class SKUSearchPage(BasePage):
                 continue
 
         if not clicked:
-            locator = self.page.locator(f'.ant-select-selector:has-text("{value}")')
-            if locator.count() > 0:
-                logger.info(f"选项 {value} 已选中")
+            if value == "全部":
+                logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
                 return
-            logger.warning(f"未找到下拉选择器: {placeholder}")
-            return
-
-        time.sleep(0.5)
+            debug_controls = self.page.evaluate(
+                """() => ({
+                    labels: Array.from(document.querySelectorAll('label')).slice(0, 30).map(e => e.textContent.trim()),
+                    placeholders: Array.from(document.querySelectorAll('input')).slice(0, 40).map(e => e.placeholder),
+                    selects: Array.from(document.querySelectorAll('.el-select, .ant-select')).slice(0, 30)
+                        .map(e => e.textContent.trim())
+                })"""
+            )
+            logger.error("下拉选择器诊断: {}", debug_controls)
+            raise ValueError(f"未找到下拉选择器: {placeholder}")
 
         option_selectors = [
             f'.ant-select-dropdown-menu-item:has-text("{value}")',
@@ -392,16 +384,18 @@ class SKUSearchPage(BasePage):
         for option_selector in option_selectors:
             try:
                 option = self.page.locator(option_selector)
-                if option.count() > 0 and option.is_visible():
-                    option.click()
-                    time.sleep(0.3)
+                if option.count() > 0 and option.first.is_visible():
+                    option.first.click()
                     logger.info(f"成功选择选项: {value}")
                     return
             except Exception:
                 continue
 
-        logger.warning(f"未找到选项: {value}")
-        self.page.click("body")
+        self.page.keyboard.press("Escape")
+        if value == "全部":
+            logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
+            return
+        raise ValueError(f"下拉选择器“{placeholder}”中未找到选项: {value}")
 
     def _fill_input_by_placeholder(self, placeholder: str, value: str) -> None:
         selectors = [

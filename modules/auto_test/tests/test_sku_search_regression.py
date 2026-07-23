@@ -17,7 +17,7 @@ USERNAME = os.getenv("TEST_USERNAME")
 PASSWORD = os.getenv("TEST_PASSWORD")
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def browser() -> Browser:
     """Create a browser instance for each test."""
     driver = BrowserDriver()
@@ -29,7 +29,7 @@ def browser() -> Browser:
     driver.shutdown_browser()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def page(browser: Browser) -> Page:
     """Create a new page for each test."""
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
@@ -38,7 +38,7 @@ def page(browser: Browser) -> Page:
     context.close()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def logged_in_page(page: Page) -> Page:
     """Create a logged-in page for tests that require authentication."""
     login_page = LoginPage(page)
@@ -55,11 +55,11 @@ class TestSKUSearchDropdownFilters:
     @pytest.mark.parametrize(
         "field,value",
         [
-            ("产品品类", "电子产品"),
-            ("产品品类", "服装鞋帽"),
+            ("产品品类", "男装"),
+            ("产品品类", "女装"),
             ("销售状态", "全部"),
-            ("销售状态", "上架"),
-            ("销售状态", "下架"),
+            ("销售状态", "在售"),
+            ("销售状态", "停售"),
             ("产品自定义分类", "全部"),
             ("创建人", "全部"),
             ("仓库", "全部"),

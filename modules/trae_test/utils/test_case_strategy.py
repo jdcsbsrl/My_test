@@ -546,7 +546,7 @@ class TestCaseScoreEngine:
     _COLD_START_THRESHOLD = 10
     _COLD_START_BASE_SCORE = 50
     _COVERAGE_BASELINE_EMPTY = 30
-    _COVERAGE_BASELINE_SHORT_KEYWORD = 50
+    _COVERAGE_BASELINE_SHORT_KEYWORD = 40
     _COVERAGE_SHORT_KEYWORD_LENGTH = 10
     _COVERAGE_SCORE_MULTIPLIER = 10
     _COMPLETENESS_STEPS_THRESHOLD_HIGH = 3
@@ -678,7 +678,9 @@ class TestCaseScoreEngine:
         读取"优先级"字段（P0/P1/P2/P3），而非"用例等级"（高/中/低）
         """
         priority_map = {"P0": 100, "P1": 75, "P2": 50, "P3": 25}
-        priority = case.get("优先级", "P2")
+        priority = case.get("优先级")
+        if priority not in priority_map:
+            priority = case.get("用例等级", "P2")
         return priority_map.get(priority, 50)
 
     def _score_executability(self, case: dict[str, Any]) -> float:

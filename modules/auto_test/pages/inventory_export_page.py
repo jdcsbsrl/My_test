@@ -47,8 +47,30 @@ class InventoryExportPage(BasePage):
         return self.page.url
 
     @allure.step("全选导出字段")
-    def select_all_fields(self) -> None:
+    def select_all_fields(self, fast_mode: bool = False) -> None:
         self.page.wait_for_timeout(500)
+
+        if fast_mode:
+            try:
+                result = self.page.evaluate(
+                    """
+                    () => {
+                        const boxes = document.querySelectorAll('input[type="checkbox"]');
+                        let count = 0;
+                        for (const box of boxes) {
+                            if (box.offsetParent !== null && !box.checked) {
+                                box.click();
+                                count++;
+                            }
+                        }
+                        return { success: true, selected: count, total: boxes.length };
+                    }
+                """
+                )
+                logger.info("fast_mode 批量选择字段: %s", result)
+                return
+            except Exception as e:
+                logger.warning("fast_mode JS 批量选择失败，回退到逐个选择: %s", e)
 
         select_all_selectors = [
             'button:has-text("全选")',
@@ -73,7 +95,9 @@ class InventoryExportPage(BasePage):
             checkbox_count = self.page.locator('input[type="checkbox"]').count()
             logger.info(f"页面复选框数量: {checkbox_count}")
 
-            for i in range(min(30, checkbox_count)):
+            step = 3 if fast_mode else 1
+            limit = checkbox_count if fast_mode else min(30, checkbox_count)
+            for i in range(0, limit, step):
                 try:
                     checkbox = self.page.locator('input[type="checkbox"]').nth(i)
                     if not checkbox.is_checked():
@@ -164,18 +188,11 @@ class InventoryExportPage(BasePage):
 
     @allure.step("点击实时导出按钮")
     def click_realtime_export(self) -> None:
-        self.page.wait_for_timeout(1000)
-        export_btns = self.page.locator('button:has-text("实时导出")').all()
-        if export_btns:
-            export_btns[0].click()
-            logger.info("点击实时导出按钮")
-        else:
-            logger.warning("未找到实时导出按钮")
-            self.page.wait_for_timeout(1000)
-            export_btns = self.page.locator('button:has-text("实时导出")').all()
-            if export_btns:
-                export_btns[0].click()
-                logger.info("点击实时导出按钮")
+        export_button = self.page.get_by_role("button", name="实时导出", exact=True)
+        if export_button.count() == 0:
+            raise ValueError("未找到可见的实时导出按钮")
+        export_button.first.click(timeout=10000)
+        logger.info("点击实时导出按钮")
 
     @allure.step("点击非实时导出按钮")
     def click_async_export(self) -> None:

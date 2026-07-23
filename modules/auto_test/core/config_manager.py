@@ -73,10 +73,10 @@ class ConfigManager:
 
         config_path = Path(__file__).parent.parent / "configs" / f"{env}.yaml"
         if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        with open(config_path, encoding="utf-8") as f:
-            raw_config = yaml.safe_load(f)
+            raw_config = self._build_environment_config(env)
+        else:
+            with open(config_path, encoding="utf-8") as f:
+                raw_config = yaml.safe_load(f)
 
         if raw_config is None:
             raise ValueError(f"Config file is empty: {config_path}")
@@ -86,6 +86,32 @@ class ConfigManager:
         self._config["env"] = env
 
         self._load_endpoints()
+
+    @staticmethod
+    def _build_environment_config(env: str) -> dict[str, Any]:
+        """Build a secrets-free CI configuration when private YAML is not checked in."""
+        prefix = "UAT" if env == "uat" else "TEST"
+        origin = os.getenv(f"{prefix}_WEB_API_BASE_URL", "")
+        return {
+            "origin": origin,
+            "ui_path": "/oms-uat-ui" if env == "uat" else "/oms-ui",
+            "api_path": "/oms-uat-api" if env == "uat" else "/oms-api",
+            "base_url": os.getenv(f"{prefix}_WEB_BASE_URL", ""),
+            "api": {
+                "base_url": f"{origin}/{'oms-uat-api' if env == 'uat' else 'oms-api'}",
+                "timeout": 30,
+                "retries": 3,
+                "verify_ssl": True,
+            },
+            "playwright": {
+                "headless": True,
+                "browser": "chromium",
+                "slow_mo": 0,
+                "viewport": {"width": 1920, "height": 1080},
+                "video": "off",
+                "trace": "off",
+            },
+        }
 
     def _validate_environment(self, env: str) -> None:
         if not EnvironmentType.is_allowed(env):

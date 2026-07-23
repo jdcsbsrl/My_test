@@ -3,49 +3,10 @@
 import os
 
 import pytest
-from dotenv import load_dotenv
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Page
 
-from modules.auto_test.core.config_manager import get_config
-from modules.auto_test.drivers.browser_driver import BrowserDriver
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.inventory_sku_page import InventorySKUPage
-from modules.auto_test.pages.login_page import LoginPage
-
-load_dotenv()
-
-USERNAME = os.getenv("TEST_USERNAME")
-PASSWORD = os.getenv("TEST_PASSWORD")
-
-
-@pytest.fixture(scope="function")
-def browser() -> Browser:
-    driver = BrowserDriver()
-    config = get_config()
-    browser = driver.start_browser(
-        browser=config.get("playwright.browser", "chromium"), headless=True, slow_mo=config.get("playwright.slow_mo", 0)
-    )
-    yield browser
-    driver.shutdown_browser()
-
-
-@pytest.fixture(scope="function")
-def page(browser: Browser) -> Page:
-    context = browser.new_context(viewport={"width": 1920, "height": 1080})
-    page = context.new_page()
-    yield page
-    context.close()
-
-
-@pytest.fixture(scope="function")
-def logged_in_page(page: Page) -> Page:
-    login_page = LoginPage(page)
-    success = login_page.login(USERNAME, PASSWORD)
-    if not success:
-        page.wait_for_timeout(2000)
-        success = login_page.login(USERNAME, PASSWORD)
-    assert success, "登录失败"
-    return page
 
 
 @pytest.mark.regression
@@ -257,7 +218,7 @@ class TestInventoryExport:
         assert exported, "未成功跳转到导出页面"
         print(f"\n✅ 已跳转到导出页面: {export_page.page.url}")
 
-        export_page.select_all_fields()
+        export_page.select_all_fields(fast_mode=True)
         print("\n✅ 已选择所有导出字段")
 
         download_result = export_page.wait_for_download(timeout=60000)

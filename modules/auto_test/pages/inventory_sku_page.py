@@ -18,28 +18,8 @@ class InventorySKUPage(BasePage):
     @allure.step("导航到库存SKU页面")
     def navigate_to_search_page(self) -> None:
         self.navigate_to(self.search_url)
-        self.wait_for_load_state()
-        self.page.wait_for_timeout(5000)
-
-        menu_selectors = [
-            '//span[contains(text(), "产品中心")]',
-            '//span[contains(text(), "库存管理")]',
-            '//span[contains(text(), "库存SKU")]',
-            '//div[contains(@class, "menu")]//span[contains(text(), "库存")]',
-            '//a[contains(@href, "inventory")]',
-        ]
-        for selector in menu_selectors:
-            try:
-                menu_item = self.page.locator(selector)
-                if menu_item.count() > 0 and menu_item.is_visible():
-                    menu_item.click()
-                    self.wait_for_load_state()
-                    self.page.wait_for_timeout(3000)
-                    logger.info(f"通过菜单导航到库存页面: {selector}")
-                    break
-            except Exception:
-                continue
-
+        self.wait_for_load_state("domcontentloaded")
+        self.page.locator("input, button, table, [role='table']").first.wait_for(state="attached", timeout=30000)
         logger.info("导航到库存SKU页面")
 
     @allure.step("输入SKU编码: {sku_code}")
@@ -77,9 +57,10 @@ class InventorySKUPage(BasePage):
     @allure.step("点击搜索按钮")
     def click_search(self) -> float:
         start_time = time.time()
-        search_btn = self.page.locator('button:has-text("搜索")')
-        search_btn.first.click()
-        self.wait_for_load_state()
+        search_btn = self.page.locator('button:visible:has-text("搜索")')
+        if search_btn.count() == 0:
+            raise ValueError("未找到可见的搜索按钮")
+        search_btn.first.click(timeout=10000)
         self.wait_for_search_results()
         elapsed = time.time() - start_time
         logger.info(f"搜索响应时间: {elapsed:.2f}秒")
@@ -245,171 +226,180 @@ class InventorySKUPage(BasePage):
 
     @allure.step("等待搜索结果加载")
     def wait_for_search_results(self, timeout: int = 30000) -> None:
-        table_selectors = [
-            "table.ant-table-table",
-            "table.el-table__body",
-            ".ant-table-table",
-            ".el-table__body-wrapper",
-            "table",
-            "div[class*='table']",
-        ]
-        for selector in table_selectors:
-            try:
-                self.page.wait_for_selector(selector, timeout=timeout // len(table_selectors))
-                logger.info(f"找到表格元素: {selector}")
-                self.wait_for_load_state()
-                return
-            except Exception:
-                continue
-        logger.warning("未找到表格元素")
+        try:
+            self.page.locator(
+                ".virtual-pro-table:visible, table:visible, [role='table']:visible, .el-table:visible, .ant-table:visible, "
+                ".el-table__empty-block:visible, .ant-empty:visible, [class*='empty']:visible"
+            ).first.wait_for(state="visible", timeout=timeout)
+        except Exception as exc:
+            raise TimeoutError(f"库存SKU结果在 {timeout / 1000:.0f} 秒内未完成刷新") from exc
 
     @allure.step("全选当前页所有记录")
     def select_all_current_page(self) -> None:
-        """点击表头全选复选框"""
+        """通过真实表头复选框全选，并等待选中状态落地。"""
+        checkbox = self.page.locator(
+            ".el-table__header-wrapper .el-checkbox, .ant-table-thead input[type='checkbox']"
+        ).first
+        if checkbox.count() == 0:
+            raise ValueError("未找到表头全选复选框")
+        checkbox.click(force=True, timeout=10000)
         try:
-            self.page.evaluate(
-                """() => {
-                const checkbox = document.querySelector('thead input[type="checkbox"]');
-                if (checkbox && !checkbox.checked) {
-                    checkbox.click();
-                }
-            }"""
+            self.page.wait_for_function(
+                """() => document.querySelectorAll(
+                    '.el-table__body-wrapper .el-checkbox__input.is-checked, '
+                    + '.ant-table-tbody input[type="checkbox"]:checked'
+                ).length > 0""",
+                timeout=10000,
             )
-            self.page.wait_for_timeout(1000)
-            logger.info("已全选当前页")
-        except Exception as e:
-            logger.warning(f"JS全选失败: {e}")
-            checkbox = self.page.locator("thead .el-checkbox__input").first
-            checkbox.click(force=True)
-            self.page.wait_for_timeout(1000)
+        except Exception as exc:
+            raise TimeoutError("点击全选后未检测到选中行") from exc
+        logger.info("已全选当前页")
 
     @allure.step("取消全选")
     def deselect_all(self) -> None:
-        try:
-            self.page.evaluate(
-                """() => {
-                const checkbox = document.querySelector('thead input[type="checkbox"]');
-                if (checkbox && checkbox.checked) {
-                    checkbox.click();
-                }
-            }"""
-            )
-            self.page.wait_for_timeout(1000)
-            logger.info("已取消全选")
-        except Exception as e:
-            logger.warning(f"JS取消全选失败: {e}")
+        if self.get_selected_count() == 0:
+            return
+        checkbox = self.page.locator(
+            ".el-table__header-wrapper .el-checkbox, .ant-table-thead input[type='checkbox']"
+        ).first
+        if checkbox.count() == 0:
+            raise ValueError("未找到表头全选复选框")
+        checkbox.click(force=True, timeout=10000)
+        self.page.wait_for_function(
+            """() => document.querySelectorAll(
+                '.el-table__body-wrapper .el-checkbox__input.is-checked, '
+                + '.ant-table-tbody input[type="checkbox"]:checked'
+            ).length === 0""",
+            timeout=10000,
+        )
 
     @allure.step("选择单行: {row_index}")
     def select_row(self, row_index: int) -> None:
-        """选择指定行（从1开始）"""
+        """选择指定行（从1开始），使用浏览器真实点击事件。"""
+        checkboxes = self.page.locator(
+            ".el-table__body-wrapper .el-checkbox, .ant-table-tbody input[type='checkbox']"
+        )
+        if checkboxes.count() < row_index:
+            raise ValueError(f"第 {row_index} 行复选框不存在")
+        checkboxes.nth(row_index - 1).click(force=True, timeout=10000)
         try:
-            self.page.evaluate(
-                f"""() => {{
-                const rows = document.querySelectorAll('table tbody tr');
-                if (rows.length >= {row_index}) {{
-                    const row = rows[{row_index - 1}];
-                    const checkbox = row.querySelector('input[type="checkbox"]');
-                    if (checkbox && !checkbox.checked) {{
-                        checkbox.click();
-                    }}
-                }}
-            }}"""
+            self.page.wait_for_function(
+                """expected => document.querySelectorAll(
+                    '.el-table__body-wrapper .el-checkbox__input.is-checked, '
+                    + '.ant-table-tbody input[type="checkbox"]:checked'
+                ).length === expected""",
+                arg=1,
+                timeout=10000,
             )
-            self.page.wait_for_timeout(500)
-            logger.info(f"已选择第{row_index}行")
-        except Exception as e:
-            logger.warning(f"选择行失败: {e}")
+        except Exception as exc:
+            raise TimeoutError(f"第 {row_index} 行点击后未进入选中状态") from exc
 
     @allure.step("获取已选中的行数")
     def get_selected_count(self) -> int:
         try:
-            count = self.page.evaluate(
-                """() => {
-                const checked = document.querySelectorAll('table tbody input[type="checkbox"]:checked');
-                return checked.length;
-            }"""
-            )
-            return count or 0
+            return self.page.locator(
+                ".el-table__body-wrapper .el-checkbox__input.is-checked, "
+                ".ant-table-tbody input[type='checkbox']:checked"
+            ).count()
         except Exception:
             return 0
 
     @allure.step("检查表头全选复选框是否被勾选")
     def is_header_checkbox_checked(self) -> bool:
         try:
-            checked = self.page.evaluate(
-                """() => {
-                const checkbox = document.querySelector('thead input[type="checkbox"]');
-                return checkbox ? checkbox.checked : false;
-            }"""
+            header = self.page.locator(
+                ".el-table__header-wrapper .el-checkbox__input.is-checked, "
+                ".ant-table-thead input[type='checkbox']:checked"
             )
-            return bool(checked)
+            return header.count() > 0
         except Exception:
             return False
 
     @allure.step("设置每页显示数量: {page_size}")
     def set_page_size(self, page_size: int) -> float:
-        """设置分页大小"""
+        """通过可见分页控件设置每页数量，并等待表格行数更新。"""
         start_time = time.time()
-        try:
-            self.page.evaluate(
-                f"""() => {{
-                const select = document.querySelector('.el-pagination .el-select');
-                if (select) {{
-                    select.click();
-                    setTimeout(() => {{
-                        const options = document.querySelectorAll('.el-select-dropdown__item');
-                        for (const opt of options) {{
-                            if (opt.textContent.trim() === '{page_size}' ||
-                                opt.textContent.trim() === '{page_size}/页') {{
-                                opt.click();
-                                break;
-                            }}
-                        }}
-                    }}, 300);
-                }}
-            }}"""
-            )
-            self.page.wait_for_timeout(3000)
-            elapsed = time.time() - start_time
-            logger.info(f"设置分页{page_size}/页，耗时{elapsed:.2f}秒")
-            return elapsed
-        except Exception as e:
-            logger.warning(f"设置分页大小失败: {e}")
-            return 0.0
+        size_dropdown = self.page.locator(
+            ".el-pagination__sizes .el-select, .ant-pagination-options-size-changer"
+        ).first
+        if size_dropdown.count() == 0:
+            raise ValueError("未找到分页大小选择器")
+        size_dropdown.click(timeout=10000)
+        option = self.page.locator(
+            f'.el-select-dropdown__item:visible:has-text("{page_size}"), '
+            f'.ant-select-item-option:visible:has-text("{page_size}")'
+        ).first
+        if option.count() == 0:
+            raise ValueError(f"分页选项 {page_size}/页 不存在")
+        option.click(timeout=10000)
+        self.wait_for_search_results()
+        elapsed = time.time() - start_time
+        logger.info("设置分页%s/页，耗时%.2f秒", page_size, elapsed)
+        return elapsed
 
     @allure.step("跳转到第{page_num}页")
     def goto_page(self, page_num: int) -> None:
-        """跳转到指定页码"""
-        try:
-            page_input = self.page.locator(".el-pagination .el-pagination__jump input").first
-            if page_input.count() > 0:
-                page_input.fill(str(page_num))
-                page_input.press("Enter")
-                self.page.wait_for_timeout(2000)
-                logger.info(f"跳转到第{page_num}页")
-        except Exception as e:
-            logger.warning(f"跳转页码失败: {e}")
+        page_button = self.page.locator(
+            f".el-pager li, .ant-pagination-item-{page_num}"
+        ).filter(has_text=re.compile(rf"^\s*{page_num}\s*$")).first
+        if page_button.count() > 0:
+            page_button.click(timeout=10000)
+        else:
+            page_input = self.page.locator(
+                ".el-pagination__jump input, .ant-pagination-options-quick-jumper input"
+            ).first
+            if page_input.count() == 0:
+                raise ValueError(f"未找到第 {page_num} 页按钮或跳页输入框")
+            page_input.fill(str(page_num))
+            page_input.press("Enter")
+        self.page.wait_for_function(
+            """expected => {
+                const active = document.querySelector('.el-pager li.active, .ant-pagination-item-active');
+                return active && Number(active.textContent.trim()) === expected;
+            }""",
+            arg=page_num,
+            timeout=10000,
+        )
+        self.wait_for_search_results()
 
     @allure.step("点击下一页")
     def click_next_page(self) -> None:
-        try:
-            next_btn = self.page.locator(".el-pagination .btn-next").first
-            if next_btn.count() > 0:
-                next_btn.click(force=True)
-                self.page.wait_for_timeout(2000)
-        except Exception as e:
-            logger.warning(f"点击下一页失败: {e}")
+        current_page = self.get_current_page()
+        next_btn = self.page.locator(".el-pagination .btn-next, .ant-pagination-next").first
+        if next_btn.count() == 0:
+            raise ValueError("未找到下一页按钮")
+        next_btn.click(timeout=10000)
+        self.page.wait_for_function(
+            """previous => {
+                const active = document.querySelector('.el-pager li.active, .ant-pagination-item-active');
+                return active && Number(active.textContent.trim()) > previous;
+            }""",
+            arg=current_page,
+            timeout=10000,
+        )
+        self.wait_for_search_results()
 
     @allure.step("获取当前页码")
     def get_current_page(self) -> int:
         try:
-            text = self.page.evaluate(
+            page = self.page.evaluate(
                 """() => {
-                const active = document.querySelector('.el-pagination .active');
-                return active ? active.textContent.trim() : '';
+                // 方法1: Vue pagination internalCurrentPage
+                const pagination = document.querySelector('.el-pagination');
+                if (pagination && pagination.__vue__) {
+                    const vm = pagination.__vue__;
+                    if (vm.internalCurrentPage !== undefined) return vm.internalCurrentPage;
+                }
+                // 方法2: DOM .active
+                const active = document.querySelector('.el-pagination .el-pager .active, .el-pagination .active');
+                if (active) {
+                    const n = parseInt(active.textContent.trim(), 10);
+                    if (!isNaN(n)) return n;
+                }
+                return 1;
             }"""
             )
-            return int(text) if text and text.isdigit() else 1
+            return int(page) if page else 1
         except Exception:
             return 1
 

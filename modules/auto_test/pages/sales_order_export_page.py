@@ -1,5 +1,7 @@
 import os
+import re
 import time
+from urllib.parse import unquote, urljoin
 
 import allure
 from playwright.sync_api import Page
@@ -55,8 +57,30 @@ class SalesOrderExportPage(BasePage):
         return self.page.url
 
     @allure.step("全选导出字段")
-    def select_all_fields(self) -> None:
+    def select_all_fields(self, fast_mode: bool = False) -> None:
         self.page.wait_for_timeout(500)
+
+        if fast_mode:
+            try:
+                result = self.page.evaluate(
+                    """
+                    () => {
+                        const boxes = document.querySelectorAll('.el-checkbox:not(.is-checked)');
+                        let count = 0;
+                        for (const box of boxes) {
+                            if (box.offsetParent !== null) {
+                                box.click();
+                                count++;
+                            }
+                        }
+                        return { success: true, selected: count, total: boxes.length };
+                    }
+                """
+                )
+                logger.info("fast_mode 批量选择字段: {}", result)
+                return
+            except Exception as e:
+                logger.warning("fast_mode JS 批量选择失败，回退到逐个选择: {}", e)
 
         select_all_selectors = [
             'button:has-text("全选")',
@@ -81,7 +105,9 @@ class SalesOrderExportPage(BasePage):
             checkbox_count = self.page.locator('input[type="checkbox"]').count()
             logger.info(f"页面复选框数量: {checkbox_count}")
 
-            for i in range(min(30, checkbox_count)):
+            step = 3 if fast_mode else 1
+            limit = checkbox_count if fast_mode else min(30, checkbox_count)
+            for i in range(0, limit, step):
                 try:
                     checkbox = self.page.locator('input[type="checkbox"]').nth(i)
                     if not checkbox.is_checked():
@@ -281,7 +307,7 @@ class SalesOrderExportPage(BasePage):
                             debug.allSelectDropdownItems = Array.from(document.querySelectorAll('.el-select-dropdown__item')).map(el => el.textContent.trim());
                             debug.pageUrl = window.location.href;
                             debug.pageTitle = document.title;
-                            
+
                             const selects = document.querySelectorAll('.el-select');
                             for (let i = 0; i < selects.length; i++) {
                                 const text = selects[i].innerText.trim();
@@ -323,7 +349,7 @@ class SalesOrderExportPage(BasePage):
             self.page.wait_for_timeout(2000)
 
             # 3. 获取下拉选项并验证
-            items = self.page.locator(".el-select-dropdown__item").all()
+            items = self.page.locator(".el-select-dropdown__item:visible").all()
             logger.info(f"下拉选项数量: {len(items)}")
             for item in items:
                 text = item.text_content() or ""
@@ -331,6 +357,28 @@ class SalesOrderExportPage(BasePage):
 
             # 4. 过滤掉字体名称（如 Calibri, 微软雅黑 等），只保留模板选项
             font_names = {"calibri", "微软雅黑", "arial", "times new roman", "宋体"}
+
+            js_clicked = self.page.evaluate(
+                """
+                ({variants, fonts}) => {
+                    const items = Array.from(document.querySelectorAll('.el-select-dropdown__item'))
+                        .filter(item => item.offsetParent !== null);
+                    const target = items.find(item => {
+                        const text = (item.textContent || '').trim();
+                        return text && !fonts.includes(text.toLowerCase())
+                            && variants.some(name => text.includes(name) || name.includes(text));
+                    });
+                    if (!target) return false;
+                    target.click();
+                    return true;
+                }
+                """,
+                {"variants": template_variants, "fonts": list(font_names)},
+            )
+            if js_clicked:
+                logger.info("成功选择模板: {}", template_name)
+                self.page.wait_for_timeout(500)
+                return True
 
             # 先尝试精确匹配
             for name_variant in template_variants:
@@ -413,72 +461,49 @@ class SalesOrderExportPage(BasePage):
 
     @allure.step("点击实时导出按钮")
     def click_realtime_export(self) -> None:
-        self.page.wait_for_timeout(1000)
-
-        # 先通过 JS 查找按钮位置，再用 Playwright 原生点击（确保触发 Vue/React 事件）
-        found_btn = None
-        try:
-            script_result = self.page.evaluate(
-                """
-                () => {
-                    const buttons = Array.from(document.querySelectorAll('button'));
-                    const visibleButtons = buttons.filter(b => b.offsetParent !== null);
-
-                    const createBtn = visibleButtons.find(b => b.innerText.includes('创建导出任务'));
-                    const saveBtn = visibleButtons.find(b => b.innerText.includes('保存为导出模板'));
-
-                    if (createBtn && saveBtn) {
-                        const createIndex = visibleButtons.indexOf(createBtn);
-                        const saveIndex = visibleButtons.indexOf(saveBtn);
-                        const minIdx = Math.min(createIndex, saveIndex);
-                        const maxIdx = Math.max(createIndex, saveIndex);
-
-                        for (let i = minIdx + 1; i < maxIdx; i++) {
-                            const btn = visibleButtons[i];
-                            if (btn.innerText.includes('实时导出')) {
-                                btn.click();
-                                return { success: true, text: btn.innerText.trim(), position: 'between' };
-                            }
-                        }
-                    }
-
-                    for (const btn of visibleButtons) {
-                        const text = btn.innerText.trim();
-                        if (text.includes('实时导出')) {
-                            btn.click();
-                            return { success: true, text: text, position: 'direct' };
-                        }
-                    }
-
-                    return { success: false, text: null, position: null };
-                }
-            """
-            )
-            if script_result.get("success"):
-                logger.info(f"成功点击实时导出按钮: {script_result}")
-                return
-        except Exception as e:
-            logger.debug(f"通过JS点击实时导出按钮失败: {e}")
-
-        export_btns = self.page.locator('button:has-text("实时导出")').all()
-        if export_btns:
-            export_btns[0].click()
-            logger.info("点击实时导出按钮")
-        else:
-            logger.warning("未找到实时导出按钮")
+        export_button = self.page.get_by_role("button", name="实时导出", exact=True)
+        if export_button.count() == 0:
+            raise ValueError("未找到可见的实时导出按钮")
+        logger.info(
+            "实时导出按钮: count={}, enabled={}",
+            export_button.count(),
+            export_button.first.is_enabled(),
+        )
+        export_button.first.click(timeout=10000)
+        logger.info("已点击实时导出按钮")
 
     @allure.step("等待导出下载")
-    def wait_for_download(self, timeout: int = 300000) -> dict:
+    def wait_for_download(self, timeout: int = 120000) -> dict:
+        """监听实时导出直接触发的浏览器下载事件。"""
+        download_dir = "downloads"
+        os.makedirs(download_dir, exist_ok=True)
+        file_responses = []
+        export_responses = []
+        export_response_objects = []
+
+        def capture_file_response(response) -> None:
+            headers = response.headers
+            content_type = headers.get("content-type", "").lower()
+            disposition = headers.get("content-disposition", "").lower()
+            if "attachment" in disposition or any(
+                marker in content_type for marker in ("spreadsheet", "excel", "octet-stream")
+            ):
+                file_responses.append(response)
+            if "export" in response.url.lower():
+                export_response_objects.append(response)
+                export_responses.append(
+                    {"url": response.url, "status": response.status, "content_type": content_type}
+                )
+
+        self.page.on("response", capture_file_response)
         try:
-            self.click_realtime_export()
-            self.page.wait_for_timeout(2000)
-            with self.page.expect_download(timeout=timeout) as download_info:
-                logger.info("等待文件下载...")
+            logger.info("等待文件下载（浏览器事件监听）...")
+            with self.page.expect_download(timeout=min(timeout, 30000)) as download_info:
+                self.click_realtime_export()
 
             download = download_info.value
             filename = download.suggested_filename
-            os.makedirs("downloads", exist_ok=True)
-            file_path = f"downloads/{filename}"
+            file_path = os.path.join(download_dir, filename)
             download.save_as(file_path)
 
             file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
@@ -490,19 +515,109 @@ class SalesOrderExportPage(BasePage):
                 "file_size": file_size,
                 "url": download.url,
             }
-            logger.info(f"导出下载成功: {filename}, 大小: {file_size}字节")
+            logger.info("导出下载成功（浏览器事件）: {}, 大小: {}字节", filename, file_size)
             return result
         except Exception as e:
-            logger.warning(f"导出下载超时或失败: {e}")
-            return {"success": False, "error": str(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            if file_responses:
+                response = file_responses[-1]
+                disposition = response.headers.get("content-disposition", "")
+                filename_match = re.search(r"filename\\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
+                filename = unquote(filename_match.group(1)) if filename_match else f"export_{int(time.time())}.xlsx"
+                file_path = os.path.join(download_dir, filename)
+                with open(file_path, "wb") as export_file:
+                    export_file.write(response.body())
+                file_size = os.path.getsize(file_path)
+                logger.info("从实时导出响应保存文件: {}, 大小: {}字节", filename, file_size)
+                return {
+                    "success": file_size > 0,
+                    "filename": filename,
+                    "file_path": file_path,
+                    "file_size": file_size,
+                    "url": response.url,
+                }
+            if export_response_objects:
+                response = export_response_objects[-1]
+                try:
+                    payload = response.json()
+                except Exception:
+                    payload = None
+                if isinstance(payload, dict):
+                    logger.info(
+                        "实时导出接口结果: code={}, message={}, data_type={}",
+                        payload.get("code"),
+                        payload.get("message") or payload.get("msg"),
+                        type(payload.get("data")).__name__,
+                    )
+
+                    def find_download_url(value):
+                        if isinstance(value, str) and (
+                            value.startswith(("http://", "https://", "/")) or ".xlsx" in value.lower()
+                        ):
+                            return value
+                        if isinstance(value, dict):
+                            preferred_keys = ("downloadUrl", "fileUrl", "url", "path")
+                            for key in preferred_keys:
+                                if key in value:
+                                    found = find_download_url(value[key])
+                                    if found:
+                                        return found
+                            for nested in value.values():
+                                found = find_download_url(nested)
+                                if found:
+                                    return found
+                        return None
+
+                    download_url = find_download_url(payload.get("data"))
+                    if download_url:
+                        absolute_url = urljoin(response.url, download_url)
+                        api_response = self.page.context.request.get(absolute_url)
+                        if api_response.ok:
+                            disposition = api_response.headers.get("content-disposition", "")
+                            filename_match = re.search(
+                                r"filename\\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I
+                            )
+                            filename = (
+                                unquote(filename_match.group(1))
+                                if filename_match
+                                else os.path.basename(download_url.split("?", 1)[0]) or f"export_{int(time.time())}.xlsx"
+                            )
+                            file_path = os.path.join(download_dir, filename)
+                            with open(file_path, "wb") as export_file:
+                                export_file.write(api_response.body())
+                            file_size = os.path.getsize(file_path)
+                            return {
+                                "success": file_size > 0,
+                                "filename": filename,
+                                "file_path": file_path,
+                                "file_size": file_size,
+                                "url": absolute_url,
+                            }
+            messages = self.page.locator(
+                ".el-message:visible, .el-notification:visible, [role='alert']:visible"
+            ).all_text_contents()
+            logger.warning(
+                "实时导出未产生文件，页面提示: {}，导出响应: {}",
+                messages,
+                export_responses[-10:],
+            )
+            return {
+                "success": False,
+                "error": str(e),
+                "filename": None,
+                "file_path": None,
+                "file_size": 0,
+                "url": None,
+            }
+        finally:
+            self.page.remove_listener("response", capture_file_response)
 
     @allure.step("下载到指定路径: {save_path}")
-    def download_to(self, save_path: str, timeout: int = 300000) -> dict:
+    def download_to(self, save_path: str, timeout: int = 120000) -> dict:
         try:
-            self.click_realtime_export()
-            self.page.wait_for_timeout(2000)
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with self.page.expect_download(timeout=timeout) as download_info:
-                pass
+                self.click_realtime_export()
+                self.page.wait_for_timeout(1000)
 
             download = download_info.value
             filename = download.suggested_filename
