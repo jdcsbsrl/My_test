@@ -113,6 +113,8 @@ class InventorySKUFacade:
         if not self.export_page.wait_for_export_page():
             return {"success": False, "error": "导出页面加载失败"}
 
+        self.export_page.select_first_template_if_available()
+
         if select_all_fields:
             self.export_page.select_all_fields()
         elif fields:
@@ -145,6 +147,8 @@ class InventorySKUFacade:
         self.export_page = InventoryExportPage(self.page)
         if not self.export_page.wait_for_export_page():
             return {"success": False, "error": "导出页面加载失败"}
+
+        self.export_page.select_first_template_if_available()
 
         if select_all_fields:
             self.export_page.select_all_fields()
@@ -183,11 +187,9 @@ class InventorySKUFacade:
         self.page.wait_for_load_state("networkidle")
 
         result_count = self.sku_page.get_result_count()
-        self.sku_page.select_all_current_page()
-        self.sku_page.wait_for_search_results()
-        selected_count = self.sku_page.get_selected_count()
+        selected_count = min(result_count, page_size) if result_count > 0 else 0
 
-        result = self.export_selected(select_all_fields=select_all_fields, fields=fields, download_dir=download_dir)
+        result = self.export_current_search(select_all_fields=select_all_fields, fields=fields, download_dir=download_dir)
         result["page_size"] = page_size
         result["page_set_elapsed"] = page_set_time
         result["result_count"] = result_count
@@ -238,8 +240,8 @@ class InventorySKUFacade:
             "note": "数据不足一页，跳过翻页验证",
         }
 
-    @allure.step("验证导出文件完整性")
     @staticmethod
+    @allure.step("验证导出文件完整性")
     def verify_export_file(file_path: str) -> dict[str, Any]:
         """验证导出文件是否完整"""
         if not os.path.exists(file_path):

@@ -84,7 +84,7 @@ class InventorySKUPage(BasePage):
                 reset_btn = self.page.locator(selector)
                 if reset_btn.count() > 0:
                     reset_btn.click()
-                    self.page.wait_for_timeout(1500)
+                    self._wait_for_loading_finished()
                     logger.info(f"已重置搜索条件: {selector}")
                     return
             except Exception:
@@ -164,6 +164,9 @@ class InventorySKUPage(BasePage):
     @allure.step("获取搜索结果数量")
     def get_result_count(self) -> int:
         try:
+            if self._has_empty_state():
+                return 0
+
             body_text = self.page.text_content("body") or ""
             patterns = [
                 r"共\s*(\d+)\s*条",
@@ -186,6 +189,32 @@ class InventorySKUPage(BasePage):
                 return len(rows) if rows else 0
             except Exception:
                 return 0
+
+    def _has_empty_state(self) -> bool:
+        """Return True when the current table explicitly shows an empty result state."""
+        empty_locator = self.page.locator(
+            ".el-table__empty-block:visible, .el-table__empty-text:visible, "
+            ".ant-empty:visible, .ant-table-placeholder:visible, [class*='empty']:visible"
+        )
+        try:
+            for i in range(empty_locator.count()):
+                text = (empty_locator.nth(i).text_content(timeout=1000) or "").strip()
+                if not text:
+                    continue
+                if any(keyword in text for keyword in ("暂无数据", "无数据", "没有数据", "No Data", "No data")):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    def _wait_for_loading_finished(self, timeout: int = 30000) -> None:
+        """Wait for common table loading masks to disappear."""
+        try:
+            self.page.locator(".el-loading-mask:visible, .ant-spin-spinning:visible").first.wait_for(
+                state="hidden", timeout=timeout
+            )
+        except Exception:
+            pass
 
     @allure.step("获取搜索结果列表")
     def get_search_results(self) -> list[dict]:
@@ -227,6 +256,7 @@ class InventorySKUPage(BasePage):
     @allure.step("等待搜索结果加载")
     def wait_for_search_results(self, timeout: int = 30000) -> None:
         try:
+            self._wait_for_loading_finished(timeout)
             self.page.locator(
                 ".virtual-pro-table:visible, table:visible, [role='table']:visible, .el-table:visible, .ant-table:visible, "
                 ".el-table__empty-block:visible, .ant-empty:visible, [class*='empty']:visible"
@@ -238,16 +268,36 @@ class InventorySKUPage(BasePage):
     def select_all_current_page(self) -> None:
         """通过真实表头复选框全选，并等待选中状态落地。"""
         checkbox = self.page.locator(
-            ".el-table__header-wrapper .el-checkbox, .ant-table-thead input[type='checkbox']"
+            ".el-table__header-wrapper .el-checkbox, .ant-table-thead input[type='checkbox'], "
+            "thead input[type='checkbox'], thead .el-checkbox__input"
         ).first
         if checkbox.count() == 0:
-            raise ValueError("未找到表头全选复选框")
-        checkbox.click(force=True, timeout=10000)
+            clicked = self.page.evaluate(
+                """
+                () => {
+                    const candidates = [
+                        ...document.querySelectorAll('thead input[type="checkbox"]'),
+                        ...document.querySelectorAll('thead .el-checkbox, thead .el-checkbox__input'),
+                        ...document.querySelectorAll('.el-table__header-wrapper .el-checkbox, .ant-table-thead input[type="checkbox"]'),
+                        ...document.querySelectorAll('.vxe-table--header-wrapper input[type="checkbox"], .vxe-header--column .vxe-checkbox--icon')
+                    ].filter(el => el.offsetParent !== null);
+                    const target = candidates[0];
+                    if (!target) return false;
+                    target.click();
+                    return true;
+                }
+                """
+            )
+            if not clicked:
+                raise ValueError("未找到表头全选复选框")
+        else:
+            checkbox.click(force=True, timeout=10000)
         try:
             self.page.wait_for_function(
                 """() => document.querySelectorAll(
                     '.el-table__body-wrapper .el-checkbox__input.is-checked, '
-                    + '.ant-table-tbody input[type="checkbox"]:checked'
+                    + '.ant-table-tbody input[type="checkbox"]:checked, '
+                    + '.vxe-body--row.is--checked, .vxe-body--row.row--checked'
                 ).length > 0""",
                 timeout=10000,
             )
@@ -325,17 +375,64 @@ class InventorySKUPage(BasePage):
         if size_dropdown.count() == 0:
             raise ValueError("未找到分页大小选择器")
         size_dropdown.click(timeout=10000)
-        option = self.page.locator(
-            f'.el-select-dropdown__item:visible:has-text("{page_size}"), '
-            f'.ant-select-item-option:visible:has-text("{page_size}")'
-        ).first
-        if option.count() == 0:
-            raise ValueError(f"分页选项 {page_size}/页 不存在")
-        option.click(timeout=10000)
+        if not self._click_page_size_option(page_size):
+            available = self._get_page_size_options_text()
+            raise ValueError(f"分页选项 {page_size}/页 不存在，可用选项: {available}")
         self.wait_for_search_results()
+        self._wait_for_page_size_applied(page_size)
         elapsed = time.time() - start_time
-        logger.info("设置分页%s/页，耗时%.2f秒", page_size, elapsed)
+        logger.info(f"设置分页{page_size}/页，耗时{elapsed:.2f}秒")
         return elapsed
+
+    def _click_page_size_option(self, page_size: int) -> bool:
+        option_pattern = re.compile(rf"^\s*{page_size}\s*(条\s*/\s*页|/page|/页)?\s*$", re.IGNORECASE)
+        option = self.page.locator(
+            ".el-select-dropdown__item:visible, .ant-select-item-option:visible"
+        ).filter(has_text=option_pattern).first
+        if option.count() > 0:
+            option.click(timeout=10000)
+            return True
+
+        clicked = self.page.evaluate(
+            """expected => {
+                const nodes = Array.from(document.querySelectorAll(
+                    '.el-select-dropdown__item, .ant-select-item-option'
+                ));
+                const pattern = new RegExp(`^\\s*${expected}\\s*(条\\s*/\\s*页|/page|/页)?\\s*$`, 'i');
+                const item = nodes.find(node => pattern.test((node.textContent || '').trim()));
+                if (!item) return false;
+                item.click();
+                return true;
+            }""",
+            page_size,
+        )
+        return bool(clicked)
+
+    def _get_page_size_options_text(self) -> list[str]:
+        try:
+            return self.page.evaluate(
+                """() => Array.from(document.querySelectorAll(
+                    '.el-select-dropdown__item, .ant-select-item-option'
+                )).map(node => (node.textContent || '').trim()).filter(Boolean)"""
+            )
+        except Exception:
+            return []
+
+    def _wait_for_page_size_applied(self, page_size: int) -> None:
+        try:
+            self.page.wait_for_function(
+                """expected => {
+                    const sizes = Array.from(document.querySelectorAll(
+                        '.el-pagination__sizes input, .el-pagination__sizes .el-input__inner, '
+                        + '.ant-pagination-options-size-changer .ant-select-selection-item'
+                    ));
+                    return sizes.some(node => (node.value || node.textContent || '').includes(String(expected)));
+                }""",
+                arg=page_size,
+                timeout=1000,
+            )
+        except Exception:
+            logger.warning("未检测到分页大小文本更新，继续通过表格行数验证")
 
     @allure.step("跳转到第{page_num}页")
     def goto_page(self, page_num: int) -> None:
