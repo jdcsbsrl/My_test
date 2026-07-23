@@ -266,104 +266,272 @@ class InventorySKUPage(BasePage):
         except Exception as exc:
             raise TimeoutError(f"库存SKU结果在 {timeout / 1000:.0f} 秒内未完成刷新") from exc
 
-    @allure.step("全选当前页所有记录")
-    def select_all_current_page(self) -> None:
-        """通过真实表头复选框全选，并等待选中状态落地。"""
-        checkbox = self.page.locator(
-            ".el-table__header-wrapper .el-checkbox, .ant-table-thead input[type='checkbox'], "
-            "thead input[type='checkbox'], thead .el-checkbox__input"
-        ).first
-        if checkbox.count() == 0:
-            clicked = self.page.evaluate(
-                """
-                () => {
-                    const candidates = [
-                        ...document.querySelectorAll('thead input[type="checkbox"]'),
-                        ...document.querySelectorAll('thead .el-checkbox, thead .el-checkbox__input'),
-                        ...document.querySelectorAll('.el-table__header-wrapper .el-checkbox, .ant-table-thead input[type="checkbox"]'),
-                        ...document.querySelectorAll('.vxe-table--header-wrapper input[type="checkbox"], .vxe-header--column .vxe-checkbox--icon')
-                    ].filter(el => el.offsetParent !== null);
-                    const target = candidates[0];
+    def _click_inventory_checkbox(self, kind: str, row_index: int | None = None) -> bool:
+        """Click the real checkbox rendered by Element Plus/Ant/VXE tables."""
+        return bool(
+            self.page.evaluate(
+                """({ kind, rowIndex }) => {
+                    const isVisible = (el) => {
+                        if (!el) return false;
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none'
+                            && style.visibility !== 'hidden';
+                    };
+                    const clickableOf = (el) =>
+                        el.closest('label.el-checkbox')
+                        || el.closest('.el-checkbox')
+                        || el.closest('.el-checkbox__input')
+                        || el;
+                    const selectors = kind === 'header'
+                        ? [
+                            '.el-table__header-wrapper .el-checkbox__inner',
+                            '.el-table__header-wrapper .el-checkbox__original',
+                            '.el-table__header-wrapper .el-checkbox',
+                            'thead .el-checkbox__inner',
+                            'thead .el-checkbox__original',
+                            'thead .el-checkbox',
+                            '.vxe-table--header-wrapper input[type="checkbox"]',
+                            '.vxe-table--header-wrapper .el-checkbox__inner',
+                            '.vxe-header--column .vxe-checkbox--icon',
+                            '.ant-table-thead input[type="checkbox"]',
+                            '.el-checkbox__inner',
+                            '.el-checkbox__original',
+                            '.el-checkbox'
+                        ]
+                        : [
+                            '.el-table__body-wrapper .el-checkbox__original',
+                            '.el-table__body-wrapper .el-checkbox__inner',
+                            '.el-table__body-wrapper .el-checkbox',
+                            'tbody .el-checkbox__original',
+                            'tbody .el-checkbox__inner',
+                            'tbody .el-checkbox',
+                            '.vxe-table--body-wrapper input[type="checkbox"]',
+                            '.vxe-table--body-wrapper .el-checkbox__inner',
+                            '.ant-table-tbody input[type="checkbox"]',
+                            '.el-checkbox__original',
+                            '.el-checkbox__inner',
+                            '.el-checkbox'
+                        ];
+                    const nodes = selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)))
+                        .filter(isVisible)
+                        .sort((a, b) => {
+                            const ar = a.getBoundingClientRect();
+                            const br = b.getBoundingClientRect();
+                            return (ar.y - br.y) || (ar.x - br.x);
+                        });
+                    const unique = [];
+                    const seen = new Set();
+                    for (const node of nodes) {
+                        const clickable = clickableOf(node);
+                        if (seen.has(clickable)) continue;
+                        seen.add(clickable);
+                        unique.push(node);
+                    }
+                    const target = kind === 'header' ? unique[0] : unique[rowIndex || 1];
                     if (!target) return false;
-                    target.click();
+                    clickableOf(target).click();
                     return true;
-                }
-                """
+                }""",
+                {"kind": kind, "rowIndex": row_index},
             )
-            if not clicked:
-                raise ValueError("未找到表头全选复选框")
-        else:
-            checkbox.click(force=True, timeout=10000)
+        )
+
+    def _selected_row_count(self) -> int:
+        return int(
+            self.page.evaluate(
+                """() => {
+                    const clickableOf = (el) =>
+                        el.closest('label.el-checkbox')
+                        || el.closest('.el-checkbox')
+                        || el.closest('.el-checkbox__input')
+                        || el;
+                    const visibleCheckboxes = Array.from(document.querySelectorAll(
+                        '.el-checkbox__inner, .el-checkbox__original, .el-checkbox'
+                    )).filter(el => {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none'
+                            && style.visibility !== 'hidden';
+                    }).sort((a, b) => {
+                        const ar = a.getBoundingClientRect();
+                        const br = b.getBoundingClientRect();
+                        return (ar.y - br.y) || (ar.x - br.x);
+                    });
+                    const headerCheckbox = visibleCheckboxes.length ? clickableOf(visibleCheckboxes[0]) : null;
+                    const selectors = [
+                        '.el-table__body-wrapper .el-checkbox__input.is-checked',
+                        '.el-table__body-wrapper .el-checkbox.is-checked',
+                        '.el-table__body-wrapper .el-checkbox__original:checked',
+                        'tbody .el-checkbox__input.is-checked',
+                        'tbody .el-checkbox.is-checked',
+                        'tbody .el-checkbox__original:checked',
+                        '.el-checkbox__original:checked',
+                        '.el-checkbox__input.is-checked',
+                        '.el-checkbox.is-checked',
+                        '.ant-table-tbody input[type="checkbox"]:checked',
+                        '.vxe-body--row.is--checked',
+                        '.vxe-body--row.row--checked'
+                    ];
+                    const rows = new Set();
+                    for (const selector of selectors) {
+                        for (const node of document.querySelectorAll(selector)) {
+                            if (headerCheckbox && clickableOf(node) === headerCheckbox) continue;
+                            rows.add(node.closest('tr, .el-table__row, .vxe-body--row') || clickableOf(node));
+                        }
+                    }
+                    return rows.size;
+                }"""
+            )
+            or 0
+        )
+
+    def _header_checkbox_checked(self) -> bool:
+        return bool(
+            self.page.evaluate(
+                """() => {
+                    const clickableOf = (el) =>
+                        el.closest('label.el-checkbox')
+                        || el.closest('.el-checkbox')
+                        || el.closest('.el-checkbox__input')
+                        || el;
+                    const nodes = Array.from(document.querySelectorAll([
+                        '.el-table__header-wrapper .el-checkbox__inner',
+                        '.el-table__header-wrapper .el-checkbox__original',
+                        '.el-table__header-wrapper .el-checkbox',
+                        'thead .el-checkbox__inner',
+                        'thead .el-checkbox__original',
+                        'thead .el-checkbox',
+                        '.ant-table-thead input[type="checkbox"]',
+                        '.vxe-table--header-wrapper input[type="checkbox"]',
+                        '.el-checkbox__inner',
+                        '.el-checkbox__original',
+                        '.el-checkbox'
+                    ].join(','))).filter(el => {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none'
+                            && style.visibility !== 'hidden';
+                    }).sort((a, b) => {
+                        const ar = a.getBoundingClientRect();
+                        const br = b.getBoundingClientRect();
+                        return (ar.y - br.y) || (ar.x - br.x);
+                    });
+                    const header = nodes.length ? clickableOf(nodes[0]) : null;
+                    if (!header) return false;
+                    const input = header.querySelector('input[type="checkbox"]');
+                    return !!(input && input.checked)
+                        || header.matches('input[type="checkbox"]:checked')
+                        || header.classList.contains('is-checked')
+                        || !!header.closest('.is-checked')
+                        || header.getAttribute('aria-checked') === 'true';
+                }"""
+            )
+        )
+
+    @allure.step("Select all inventory SKU rows on current page")
+    def select_all_current_page(self) -> None:
+        """Select all rows on the current page through the real header checkbox."""
+        if not self._click_inventory_checkbox("header"):
+            raise ValueError("Header select-all checkbox was not found")
         try:
             self.page.wait_for_function(
-                """() => document.querySelectorAll(
-                    '.el-table__body-wrapper .el-checkbox__input.is-checked, '
-                    + '.ant-table-tbody input[type="checkbox"]:checked, '
-                    + '.vxe-body--row.is--checked, .vxe-body--row.row--checked'
-                ).length > 0""",
+                """() => {
+                    const selectors = [
+                        '.el-table__body-wrapper .el-checkbox__input.is-checked',
+                        '.el-table__body-wrapper .el-checkbox.is-checked',
+                        '.el-table__body-wrapper .el-checkbox__original:checked',
+                        'tbody .el-checkbox__input.is-checked',
+                        'tbody .el-checkbox.is-checked',
+                        'tbody .el-checkbox__original:checked',
+                        '.el-checkbox__original:checked',
+                        '.el-checkbox__input.is-checked',
+                        '.el-checkbox.is-checked',
+                        '.ant-table-tbody input[type="checkbox"]:checked',
+                        '.vxe-body--row.is--checked',
+                        '.vxe-body--row.row--checked'
+                    ];
+                    return selectors.some(selector => document.querySelectorAll(selector).length > 0);
+                }""",
                 timeout=10000,
             )
         except Exception as exc:
-            raise TimeoutError("点击全选后未检测到选中行") from exc
-        logger.info("已全选当前页")
+            raise TimeoutError("No selected rows detected after clicking select-all") from exc
+        logger.info("Selected all rows on current page")
 
-    @allure.step("取消全选")
+    @allure.step("Deselect all inventory SKU rows")
     def deselect_all(self) -> None:
         if self.get_selected_count() == 0:
             return
-        checkbox = self.page.locator(
-            ".el-table__header-wrapper .el-checkbox, .ant-table-thead input[type='checkbox']"
-        ).first
-        if checkbox.count() == 0:
-            raise ValueError("未找到表头全选复选框")
-        checkbox.click(force=True, timeout=10000)
+        if not self._click_inventory_checkbox("header"):
+            raise ValueError("Header select-all checkbox was not found")
         self.page.wait_for_function(
-            """() => document.querySelectorAll(
-                '.el-table__body-wrapper .el-checkbox__input.is-checked, '
-                + '.ant-table-tbody input[type="checkbox"]:checked'
-            ).length === 0""",
+            """() => {
+                const selectors = [
+                    '.el-table__body-wrapper .el-checkbox__input.is-checked',
+                    '.el-table__body-wrapper .el-checkbox.is-checked',
+                    '.el-table__body-wrapper .el-checkbox__original:checked',
+                    'tbody .el-checkbox__input.is-checked',
+                    'tbody .el-checkbox.is-checked',
+                    'tbody .el-checkbox__original:checked',
+                    '.el-checkbox__original:checked',
+                    '.el-checkbox__input.is-checked',
+                    '.el-checkbox.is-checked',
+                    '.ant-table-tbody input[type="checkbox"]:checked'
+                ];
+                return selectors.every(selector => document.querySelectorAll(selector).length === 0);
+            }""",
             timeout=10000,
         )
 
-    @allure.step("选择单行: {row_index}")
+    @allure.step("Select inventory SKU row: {row_index}")
     def select_row(self, row_index: int) -> None:
-        """选择指定行（从1开始），使用浏览器真实点击事件。"""
-        checkboxes = self.page.locator(
-            ".el-table__body-wrapper .el-checkbox, .ant-table-tbody input[type='checkbox']"
-        )
-        if checkboxes.count() < row_index:
-            raise ValueError(f"第 {row_index} 行复选框不存在")
-        checkboxes.nth(row_index - 1).click(force=True, timeout=10000)
+        """Select one row using the real row checkbox."""
+        if not self._click_inventory_checkbox("row", row_index):
+            raise ValueError(f"Row {row_index} checkbox was not found")
         try:
             self.page.wait_for_function(
-                """expected => document.querySelectorAll(
-                    '.el-table__body-wrapper .el-checkbox__input.is-checked, '
-                    + '.ant-table-tbody input[type="checkbox"]:checked'
-                ).length === expected""",
+                """expected => {
+                    const selectors = [
+                        '.el-table__body-wrapper .el-checkbox__input.is-checked',
+                        '.el-table__body-wrapper .el-checkbox.is-checked',
+                        '.el-table__body-wrapper .el-checkbox__original:checked',
+                        'tbody .el-checkbox__input.is-checked',
+                        'tbody .el-checkbox.is-checked',
+                        'tbody .el-checkbox__original:checked',
+                        '.el-checkbox__original:checked',
+                        '.el-checkbox__input.is-checked',
+                        '.el-checkbox.is-checked',
+                        '.ant-table-tbody input[type="checkbox"]:checked'
+                    ];
+                    const rows = new Set();
+                    for (const selector of selectors) {
+                        for (const node of document.querySelectorAll(selector)) {
+                            rows.add(node.closest('tr, .el-table__row') || node.closest('label.el-checkbox') || node.closest('.el-checkbox') || node);
+                        }
+                    }
+                    return rows.size === expected;
+                }""",
                 arg=1,
                 timeout=10000,
             )
         except Exception as exc:
-            raise TimeoutError(f"第 {row_index} 行点击后未进入选中状态") from exc
+            raise TimeoutError(f"Row {row_index} was not selected after click") from exc
 
-    @allure.step("获取已选中的行数")
+    @allure.step("Get selected inventory SKU row count")
     def get_selected_count(self) -> int:
         try:
-            return self.page.locator(
-                ".el-table__body-wrapper .el-checkbox__input.is-checked, "
-                ".ant-table-tbody input[type='checkbox']:checked"
-            ).count()
+            return self._selected_row_count()
         except Exception:
             return 0
 
-    @allure.step("检查表头全选复选框是否被勾选")
+    @allure.step("Check inventory SKU header checkbox selected state")
     def is_header_checkbox_checked(self) -> bool:
         try:
-            header = self.page.locator(
-                ".el-table__header-wrapper .el-checkbox__input.is-checked, "
-                ".ant-table-thead input[type='checkbox']:checked"
-            )
-            return header.count() > 0
+            return self._header_checkbox_checked()
         except Exception:
             return False
 
@@ -436,8 +604,11 @@ class InventorySKUPage(BasePage):
         except Exception:
             logger.warning("未检测到分页大小文本更新，继续通过表格行数验证")
 
-    @allure.step("跳转到第{page_num}页")
+    @allure.step("Go to inventory SKU page {page_num}")
     def goto_page(self, page_num: int) -> None:
+        total_pages = self.get_total_pages()
+        if page_num < 1 or page_num > total_pages:
+            raise ValueError(f"Target page {page_num} exceeds total pages {total_pages}")
         page_button = self.page.locator(
             f".el-pager li, .ant-pagination-item-{page_num}"
         ).filter(has_text=re.compile(rf"^\s*{page_num}\s*$")).first
@@ -448,12 +619,16 @@ class InventorySKUPage(BasePage):
                 ".el-pagination__jump input, .ant-pagination-options-quick-jumper input"
             ).first
             if page_input.count() == 0:
-                raise ValueError(f"未找到第 {page_num} 页按钮或跳页输入框")
+                raise ValueError(f"Page {page_num} button or jump input was not found")
             page_input.fill(str(page_num))
             page_input.press("Enter")
         self.page.wait_for_function(
             """expected => {
-                const active = document.querySelector('.el-pager li.active, .ant-pagination-item-active');
+                const active = document.querySelector(
+                    '.el-pagination .el-pager li.is-active, '
+                    + '.el-pagination .el-pager li.active, '
+                    + '.ant-pagination-item-active'
+                );
                 return active && Number(active.textContent.trim()) === expected;
             }""",
             arg=page_num,
@@ -461,16 +636,28 @@ class InventorySKUPage(BasePage):
         )
         self.wait_for_search_results()
 
-    @allure.step("点击下一页")
+    @allure.step("Click next inventory SKU page")
     def click_next_page(self) -> None:
         current_page = self.get_current_page()
         next_btn = self.page.locator(".el-pagination .btn-next, .ant-pagination-next").first
         if next_btn.count() == 0:
-            raise ValueError("未找到下一页按钮")
+            raise ValueError("Next page button was not found")
+        disabled = next_btn.evaluate(
+            """node => node.disabled
+                || node.getAttribute('aria-disabled') === 'true'
+                || node.classList.contains('is-disabled')
+                || node.classList.contains('disabled')"""
+        )
+        if disabled:
+            raise ValueError("Next page button is disabled")
         next_btn.click(timeout=10000)
         self.page.wait_for_function(
             """previous => {
-                const active = document.querySelector('.el-pager li.active, .ant-pagination-item-active');
+                const active = document.querySelector(
+                    '.el-pagination .el-pager li.is-active, '
+                    + '.el-pagination .el-pager li.active, '
+                    + '.ant-pagination-item-active'
+                );
                 return active && Number(active.textContent.trim()) > previous;
             }""",
             arg=current_page,
@@ -478,19 +665,23 @@ class InventorySKUPage(BasePage):
         )
         self.wait_for_search_results()
 
-    @allure.step("获取当前页码")
+    @allure.step("Get current inventory SKU page number")
     def get_current_page(self) -> int:
         try:
             page = self.page.evaluate(
                 """() => {
-                // 方法1: Vue pagination internalCurrentPage
                 const pagination = document.querySelector('.el-pagination');
                 if (pagination && pagination.__vue__) {
                     const vm = pagination.__vue__;
                     if (vm.internalCurrentPage !== undefined) return vm.internalCurrentPage;
                 }
-                // 方法2: DOM .active
-                const active = document.querySelector('.el-pagination .el-pager .active, .el-pagination .active');
+                const active = document.querySelector(
+                    '.el-pagination .el-pager li.is-active, '
+                    + '.el-pagination .el-pager li.active, '
+                    + '.el-pagination .is-active, '
+                    + '.el-pagination .active, '
+                    + '.ant-pagination-item-active'
+                );
                 if (active) {
                     const n = parseInt(active.textContent.trim(), 10);
                     if (!isNaN(n)) return n;
@@ -502,28 +693,80 @@ class InventorySKUPage(BasePage):
         except Exception:
             return 1
 
-    @allure.step("获取总页数")
+    @allure.step("Get total inventory SKU pages")
     def get_total_pages(self) -> int:
         try:
-            text = self.page.evaluate(
+            pages = self.page.evaluate(
                 """() => {
                 const pagination = document.querySelector('.el-pagination');
-                if (pagination) {
-                    const total = pagination.querySelector('.el-pagination__total');
-                    if (total) return total.textContent.trim();
+                if (!pagination) return 1;
+                const maxInput = pagination.querySelector('.el-pagination__jump input[max]');
+                if (maxInput && maxInput.getAttribute('max')) {
+                    const max = parseInt(maxInput.getAttribute('max'), 10);
+                    if (!Number.isNaN(max) && max > 0) return max;
                 }
-                return '';
+                const last = Array.from(pagination.querySelectorAll('.el-pager li.number'))
+                    .map(node => parseInt((node.textContent || '').trim(), 10))
+                    .filter(num => !Number.isNaN(num))
+                    .sort((a, b) => b - a)[0];
+                if (last) return last;
+                const total = pagination.querySelector('.el-pagination__total');
+                const size = pagination.querySelector('.el-pagination__sizes input, .el-pagination__sizes .el-select__placeholder');
+                const totalText = total ? total.textContent || '' : '';
+                const sizeText = size ? size.value || size.textContent || '' : '';
+                const totalCount = parseInt((totalText.match(/\\d+/) || ['0'])[0], 10);
+                const pageSize = parseInt((sizeText.match(/\\d+/) || ['20'])[0], 10);
+                return totalCount > 0 && pageSize > 0 ? Math.ceil(totalCount / pageSize) : 1;
             }"""
             )
-            if text:
-                m = re.search(r"共\s*(\d+)\s*条", text)
-                if m:
-                    total_count = int(m.group(1))
-                    return (total_count + 9) // 10
-            return 1
+            return int(pages) if pages else 1
         except Exception:
             return 1
 
-    @allure.step("获取当前页实际行数")
+    @allure.step("Get visible inventory SKU row count")
     def get_current_page_row_count(self) -> int:
-        return self.page.locator("table tbody tr").count()
+        try:
+            checkbox_rows = int(
+                self.page.evaluate(
+                    """() => {
+                    const clickableOf = (el) =>
+                        el.closest('label.el-checkbox')
+                        || el.closest('.el-checkbox')
+                        || el.closest('.el-checkbox__input')
+                        || el;
+                    const nodes = Array.from(document.querySelectorAll(
+                        '.el-checkbox__inner, .el-checkbox__original, .el-checkbox'
+                    )).filter(el => {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none'
+                            && style.visibility !== 'hidden';
+                    }).sort((a, b) => {
+                        const ar = a.getBoundingClientRect();
+                        const br = b.getBoundingClientRect();
+                        return (ar.y - br.y) || (ar.x - br.x);
+                    });
+                    const unique = [];
+                    const seen = new Set();
+                    for (const node of nodes) {
+                        const clickable = clickableOf(node);
+                        if (seen.has(clickable)) continue;
+                        seen.add(clickable);
+                        unique.push(clickable);
+                    }
+                    return Math.max(unique.length - 1, 0);
+                }"""
+                )
+                or 0
+            )
+            if checkbox_rows > 0:
+                return checkbox_rows
+        except Exception:
+            pass
+        return int(
+            self.page.locator(
+                ".el-table__body-wrapper tr:visible, .el-table__row:visible, "
+                ".ant-table-tbody tr:visible, .vxe-body--row:visible"
+            ).count()
+        )
