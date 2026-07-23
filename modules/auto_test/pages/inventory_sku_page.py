@@ -103,12 +103,12 @@ class InventorySKUPage(BasePage):
         self.page.wait_for_timeout(1000)
 
         try:
-            self.page.evaluate(
+            clicked = self.page.evaluate(
                 """() => {
                 const items = document.querySelectorAll('.el-dropdown-menu__item');
                 for (const item of items) {
                     const text = item.textContent || "";
-                    if (text.includes("导出当前搜索的库存SKU")) {
+                    if (text.includes("\\u5f53\\u524d\\u641c\\u7d22") && text.toUpperCase().includes("SKU")) {
                         item.click();
                         return true;
                     }
@@ -116,6 +116,8 @@ class InventorySKUPage(BasePage):
                 return false;
             }"""
             )
+            if not clicked:
+                raise ValueError("未找到导出当前搜索的库存SKU菜单项")
             self.page.wait_for_timeout(3000)
             logger.info("选择导出当前搜索的库存SKU")
             return

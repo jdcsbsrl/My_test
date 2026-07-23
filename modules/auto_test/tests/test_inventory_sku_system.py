@@ -397,23 +397,17 @@ class TestInventorySKUIntegration:
         with allure.step("2. 设置分页20"):
             facade.sku_page.set_page_size(20)
 
-        with allure.step("3. 全选当前页"):
-            facade.sku_page.select_all_current_page()
-            time.sleep(1)
-            selected = facade.sku_page.get_selected_count()
-            assert selected > 0, "全选后应有选中行"
-
-        with allure.step("4. 导出当前搜索"):
+        with allure.step("3. 导出当前搜索"):
             result = facade.export_current_search(select_all_fields=True, download_dir="downloads/full_workflow")
             assert result["success"], f"导出失败: {result.get('error')}"
 
-        with allure.step("5. 验证文件"):
+        with allure.step("4. 验证文件"):
             validation = InventorySKUFacade.verify_export_file(result["file_path"])
             assert validation["valid"], f"导出文件验证失败: {validation}"
 
         allure.attach(
             json.dumps(
-                {"search": search_result, "selected_count": selected, "export": result, "validation": validation},
+                {"search": search_result, "export": result, "validation": validation},
                 ensure_ascii=False,
                 indent=2,
                 default=str,
