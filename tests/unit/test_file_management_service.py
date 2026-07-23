@@ -15,10 +15,11 @@ class TestFileManagementService:
         with patch("modules.trae_test.utils.file_management_service.os.path.exists", return_value=True):
             with patch("modules.trae_test.utils.file_management_service.shutil.copy2"):
                 with patch("modules.trae_test.utils.file_management_service.kb_monitor_module") as mock_monitor:
-                    with patch("modules.trae_test.utils.file_management_service.metadata_manager_module"):
+                    with patch("modules.trae_test.utils.file_management_service.metadata_manager_module") as mock_meta:
                         mock_monitor.KnowledgeBaseMonitor.return_value.process_file_complete.return_value = {
                             "success": True
                         }
+                        mock_meta.MetadataManager.return_value.scan_and_register_all.return_value = None
 
                         result = service.add_file(
                             "test.json",
@@ -45,7 +46,7 @@ class TestFileManagementService:
         with patch("modules.trae_test.utils.file_management_service.os.path.exists", return_value=True):
             with patch("modules.trae_test.utils.file_management_service.shutil.copy2"):
                 with patch("modules.trae_test.utils.file_management_service.kb_monitor_module") as mock_monitor:
-                    with patch("modules.trae_test.utils.file_management_service.metadata_manager_module"):
+                    with patch("modules.trae_test.utils.file_management_service.metadata_manager_module") as mock_meta:
                         with patch(
                             "modules.trae_test.utils.file_management_service.os.listdir",
                             return_value=["test_chunk_001.json"],
@@ -54,6 +55,7 @@ class TestFileManagementService:
                                 mock_monitor.KnowledgeBaseMonitor.return_value.process_file_complete.return_value = {
                                     "success": True
                                 }
+                                mock_meta.MetadataManager.return_value.scan_and_register_all.return_value = None
 
                                 result = service.update_file(
                                     "test.json",
@@ -79,7 +81,8 @@ class TestFileManagementService:
 
         with patch("modules.trae_test.utils.file_management_service.os.path.exists", return_value=True):
             with patch("modules.trae_test.utils.file_management_service.shutil.copy2"):
-                with patch("modules.trae_test.utils.file_management_service.metadata_manager_module"):
+                with patch("modules.trae_test.utils.file_management_service.metadata_manager_module") as mock_meta:
+                    mock_meta.MetadataManager.return_value.scan_and_register_all.return_value = None
                     result = service.add_file("test.json", auto_process=False)
 
                     assert result["success"] is True

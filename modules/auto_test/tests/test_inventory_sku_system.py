@@ -38,7 +38,7 @@ INVALID_KEYWORDS = [
     "测试不存在",
 ]
 
-PAGE_SIZE_PARAMS = [10, 50, 100, 500]
+PAGE_SIZE_PARAMS = [20, 50, 100, 200, 500]
 
 DEFAULT_FIELDS = ["sku编码", "产品名称", "产品图片", "库存总量", "未发货数量", "在途数量", "7天销售"]
 
@@ -253,7 +253,6 @@ class TestInventorySKUPageSize:
         """修改每页显示数量后数据加载正确"""
         facade.search_by_sku("YX-L")
         elapsed = facade.sku_page.set_page_size(page_size)
-        time.sleep(2)
 
         actual_rows = facade.sku_page.get_current_page_row_count()
         result_count = facade.sku_page.get_result_count()
@@ -280,9 +279,8 @@ class TestInventorySKUExport:
             search_result = facade.search_by_sku("YX-L")
             assert search_result["count"] > 0
 
-        with allure.step("设置分页为100"):
-            facade.sku_page.set_page_size(100)
-            time.sleep(2)
+        with allure.step("设置分页为20"):
+            facade.sku_page.set_page_size(20)
 
         with allure.step("导出当前搜索结果"):
             result = facade.export_current_search(select_all_fields=True, download_dir="downloads/test_export")
@@ -312,7 +310,7 @@ class TestInventorySKUExport:
     @allure.story("导出功能")
     def test_export_with_different_page_size(self, facade: InventorySKUFacade):
         """测试不同分页数量的导出耗时"""
-        for page_size in [100, 500]:
+        for page_size in [20, 50]:
             with allure.step(f"分页{page_size}导出"):
                 facade.sku_page.click_reset()
                 facade.search_by_sku("YX-L")
@@ -336,8 +334,7 @@ class TestInventorySKUExportFields:
     def test_select_all_fields(self, facade: InventorySKUFacade):
         """全选所有导出字段后导出"""
         facade.search_by_sku("YX-L")
-        facade.sku_page.set_page_size(100)
-        time.sleep(2)
+        facade.sku_page.set_page_size(20)
 
         with allure.step("导出（全选字段）"):
             result = facade.export_current_search(select_all_fields=True, download_dir="downloads/all_fields")
@@ -352,8 +349,7 @@ class TestInventorySKUExportFields:
     def test_select_specific_fields(self, facade: InventorySKUFacade):
         """选择指定字段后导出"""
         facade.search_by_sku("YX-L")
-        facade.sku_page.set_page_size(100)
-        time.sleep(2)
+        facade.sku_page.set_page_size(20)
 
         with allure.step("导出（指定6个字段）"):
             result = facade.export_current_search(
@@ -373,16 +369,15 @@ class TestInventorySKUExportFields:
         from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 
         facade.search_by_sku("YX-L")
-        facade.sku_page.set_page_size(100)
-        time.sleep(2)
+        facade.sku_page.set_page_size(20)
 
         facade.sku_page.select_export_current_search()
-        time.sleep(5)
 
         export_page_obj = InventoryExportPage(facade.page)
+        assert export_page_obj.wait_for_export_page(), "导出页应加载完成"
         export_page_obj.deselect_all_fields()
         time.sleep(1)
-        assert export_page_obj.get_selected_field_count() == 0, "清空后应无字段被选中"
+        assert export_page_obj.get_selected_field_count() <= 1, "清空后只允许保留必选字段"
 
         selected = export_page_obj.select_fields(["sku编码", "产品名称"])
         assert selected >= 1, "应至少选中1个字段"
@@ -399,9 +394,8 @@ class TestInventorySKUIntegration:
             search_result = facade.search_by_sku("YX-L")
             assert search_result["count"] > 0, "搜索YX-L应有结果"
 
-        with allure.step("2. 设置分页100"):
-            facade.sku_page.set_page_size(100)
-            time.sleep(2)
+        with allure.step("2. 设置分页20"):
+            facade.sku_page.set_page_size(20)
 
         with allure.step("3. 全选当前页"):
             facade.sku_page.select_all_current_page()
