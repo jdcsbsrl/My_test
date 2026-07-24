@@ -342,6 +342,38 @@ class SKUSearchPage(BasePage):
             self.page.wait_for_timeout(1000)
         raise ValueError(f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}")
 
+    def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
+        """Get the first usable option from the dropdown opened for this placeholder."""
+        excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
+        options = []
+        for attempt in range(3):
+            if not self._open_dropdown_by_placeholder(placeholder):
+                options = []
+            else:
+                try:
+                    self._wait_for_visible_dropdown_options()
+                    options = self._get_visible_dropdown_options()
+                finally:
+                    pass
+
+            for option in options:
+                normalized_option = self._normalize_dropdown_option(option)
+                if normalized_option and normalized_option not in excluded:
+                    logger.info("动态获取下拉选项: {} -> {}", placeholder, option)
+                    self.page.keyboard.press("Escape")
+                    return option
+
+            logger.warning(
+                "Dropdown {} attempt {} has no usable option. Visible options: {}",
+                placeholder,
+                attempt + 1,
+                options,
+            )
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(1000)
+
+        raise ValueError(f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}")
+
     def _dropdown_selectors(self, placeholder: str) -> list[str]:
         return [
             f'.el-form-item:has(.el-form-item__label:has-text("{placeholder}")) .el-select',
@@ -380,6 +412,30 @@ class SKUSearchPage(BasePage):
         logger.error("下拉选择器诊断: {}", debug_controls)
         return False
 
+    def _open_dropdown_by_placeholder(self, placeholder: str) -> bool:
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_timeout(500)
+        for selector in self._dropdown_selectors(placeholder):
+            try:
+                locator = self.page.locator(selector)
+                if locator.count() > 0 and locator.first.is_visible():
+                    locator.first.click()
+                    self.page.wait_for_timeout(300)
+                    logger.info(f"点击下拉选择器: {selector}")
+                    return True
+            except Exception:
+                continue
+        debug_controls = self.page.evaluate(
+            """() => ({
+                labels: Array.from(document.querySelectorAll('label')).slice(0, 30).map(e => e.textContent.trim()),
+                placeholders: Array.from(document.querySelectorAll('input')).slice(0, 40).map(e => e.placeholder),
+                selects: Array.from(document.querySelectorAll('.el-select, .ant-select')).slice(0, 30)
+                    .map(e => e.textContent.trim())
+            })"""
+        )
+        logger.error("下拉选择器诊断: {}", debug_controls)
+        return False
+
     def _latest_visible_dropdown(self):
         dropdown_selector = (
             ".ant-select-dropdown:not(.ant-select-dropdown-hidden):visible, "
@@ -390,6 +446,37 @@ class SKUSearchPage(BasePage):
         if count == 0:
             return None
         return dropdowns.nth(count - 1)
+
+    def _latest_visible_dropdown(self):
+        dropdowns = self.page.locator(
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden), .el-select-dropdown"
+        )
+        candidates = []
+        for index in range(dropdowns.count()):
+            dropdown = dropdowns.nth(index)
+            try:
+                info = dropdown.evaluate(
+                    """element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        const optionCount = element.querySelectorAll(
+                            '.ant-select-item-option:not(.ant-select-item-option-disabled), .el-select-dropdown__item:not(.is-disabled)'
+                        ).length;
+                        return {
+                            visible: rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none',
+                            zIndex: Number.parseInt(style.zIndex || '0', 10) || 0,
+                            optionCount
+                        };
+                    }"""
+                )
+                if info.get("visible") and info.get("optionCount", 0) > 0:
+                    candidates.append((info.get("zIndex", 0), index, dropdown))
+            except Exception:
+                continue
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return candidates[-1][2]
 
     def _wait_for_visible_dropdown_options(self, timeout: int = 5000) -> None:
         dropdown_selector = (
