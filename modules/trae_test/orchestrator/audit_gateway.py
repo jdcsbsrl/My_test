@@ -64,7 +64,9 @@ class AuditGateway:
 
         # 1. 检查审核是否启用
         if not self.config.enabled:
-            return AuditResult(passed=True, execution_time=0.0, audit_type=audit_type)
+            result = AuditResult(execution_time=0.0, audit_type=audit_type)
+            result.passed = True
+            return result
 
         # 2. 标准化审核类型
         audit_type_enum = self._normalize_audit_type(audit_type)

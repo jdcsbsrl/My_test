@@ -274,14 +274,16 @@ class AuditLogger:
             params["issue_category"] = f"%{issue_category}%"
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        sql = f"SELECT * FROM audit_logs WHERE {where_clause} ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
-        params["limit"] = limit
-        params["offset"] = offset
 
         def do_query(session):
             if self._use_pg:
-                rows = session.execute(text(sql), params).fetchall()
+                sql = f"SELECT * FROM audit_logs WHERE {where_clause} ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
+                pg_params = params.copy()
+                pg_params["limit"] = limit
+                pg_params["offset"] = offset
+                rows = session.execute(text(sql), pg_params).fetchall()
             else:
+                sql = f"SELECT * FROM audit_logs WHERE {where_clause} ORDER BY timestamp DESC LIMIT {limit} OFFSET {offset}"
                 sqlite_params = list(params.values())
                 sqlite_sql = sql.replace(":", "?")
                 rows = session.execute(sqlite_sql, sqlite_params).fetchall()
