@@ -337,6 +337,8 @@ class SKUSearchPage(BasePage):
         ]
 
     def _open_dropdown_by_placeholder(self, placeholder: str) -> bool:
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_timeout(200)
         for selector in self._dropdown_selectors(placeholder):
             try:
                 locator = self.page.locator(selector)
@@ -357,21 +359,37 @@ class SKUSearchPage(BasePage):
         logger.error("下拉选择器诊断: {}", debug_controls)
         return False
 
+    def _latest_visible_dropdown(self):
+        dropdown_selector = (
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden):visible, "
+            ".el-select-dropdown:visible"
+        )
+        dropdowns = self.page.locator(dropdown_selector)
+        count = dropdowns.count()
+        if count == 0:
+            return None
+        return dropdowns.nth(count - 1)
+
     def _wait_for_visible_dropdown_options(self, timeout: int = 5000) -> None:
-        option_selector = (
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:visible, "
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content:visible, "
+        dropdown_selector = (
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden):visible "
+            ".ant-select-item-option:visible, "
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden):visible "
+            ".ant-select-item-option-content:visible, "
             ".el-select-dropdown:visible .el-select-dropdown__item:visible"
         )
-        self.page.locator(option_selector).first.wait_for(state="visible", timeout=timeout)
+        self.page.locator(dropdown_selector).first.wait_for(state="visible", timeout=timeout)
 
     def _get_visible_dropdown_options(self) -> list[str]:
         option_selector = (
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:visible, "
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content:visible, "
-            ".el-select-dropdown:visible .el-select-dropdown__item:visible"
+            ".ant-select-item-option:visible, "
+            ".ant-select-item-option-content:visible, "
+            ".el-select-dropdown__item:visible"
         )
-        options = self.page.locator(option_selector)
+        dropdown = self._latest_visible_dropdown()
+        if dropdown is None:
+            return []
+        options = dropdown.locator(option_selector)
         result = []
         for index in range(options.count()):
             try:
@@ -383,21 +401,18 @@ class SKUSearchPage(BasePage):
         return result
 
     def _click_visible_dropdown_option(self, value: str) -> bool:
+        dropdown = self._latest_visible_dropdown()
+        if dropdown is None:
+            return False
         option_selectors = [
-            f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:has-text("{value}")',
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) "
+            f'.ant-select-item-option:has-text("{value}")',
             f'.ant-select-item-option-content:has-text("{value}")',
-            f'.el-select-dropdown:visible .el-select-dropdown__item:has-text("{value}")',
-            '//div[contains(@class, "ant-select-dropdown") '
-            'and not(contains(@class, "ant-select-dropdown-hidden"))]'
+            f'.el-select-dropdown__item:has-text("{value}")',
             f'//*[contains(text(), "{value}")]',
-            '//div[contains(@class, "el-select-dropdown") '
-            'and not(contains(@style, "display: none"))]'
-            f'//li[contains(text(), "{value}")]',
         ]
         for option_selector in option_selectors:
             try:
-                option = self.page.locator(option_selector)
+                option = dropdown.locator(option_selector)
                 if option.count() > 0 and option.first.is_visible():
                     option.first.click()
                     logger.info(f"成功选择选项: {value}")
@@ -456,23 +471,7 @@ class SKUSearchPage(BasePage):
     def _find_unique_fuzzy_dropdown_option(self, value: str) -> str | None:
         """Return the only sufficiently similar visible dropdown option."""
         normalized_value = self._normalize_dropdown_option(value)
-        candidates: set[str] = set()
-        for selector in (
-            ".ant-select-dropdown-menu-item",
-            ".ant-select-item-option-content",
-            ".ant-select-item-option",
-            ".el-select-dropdown__item",
-        ):
-            options = self.page.locator(selector)
-            for index in range(options.count()):
-                option = options.nth(index)
-                try:
-                    if option.is_visible():
-                        text = option.inner_text().strip()
-                        if text:
-                            candidates.add(text)
-                except Exception:
-                    continue
+        candidates = set(self._get_visible_dropdown_options())
 
         matches = [
             candidate
