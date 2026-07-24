@@ -1381,6 +1381,33 @@ class SalesOrderPage(BasePage):
         order_param = quote(",".join(order_numbers))
         self.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
 
+    def _ensure_sales_export_page(self, order_numbers: list[str] | None = None) -> None:
+        """Ensure selected/current-page export ends on the sales export page."""
+        import time
+        from urllib.parse import quote
+
+        for opened_page in self.page.context.pages:
+            if opened_page is not self.page and "sales/order/exportPage" in opened_page.url:
+                export_url = opened_page.url
+                opened_page.close()
+                self.page.goto(export_url, wait_until="domcontentloaded")
+                return
+
+        try:
+            self.page.wait_for_url("**/sales/order/exportPage**", timeout=5000, wait_until="domcontentloaded")
+            return
+        except Exception:
+            pass
+
+        if not order_numbers:
+            order_numbers = self.get_sorted_order_numbers(limit=50)
+        if not order_numbers:
+            raise ValueError("No current page sales order numbers are available for export")
+
+        order_param = quote(",".join(order_numbers))
+        self.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
+
+    @allure.step("閫夋嫨鎸囧畾鎺掑簭鏂瑰紡: {column_name}, 鍗囧簭: {is_ascending}")
     def select_sort_order(self, column_name: str, is_ascending: bool = True) -> None:
         """选择指定排序列和排序方向"""
         self.click_sort_dropdown()
