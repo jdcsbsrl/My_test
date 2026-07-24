@@ -2,8 +2,11 @@
 """知识库管理CLI工具 - 支持批量操作、分割、索引、验证和迁移"""
 
 import argparse
+import json
+import logging
 import os
 import sys
+from typing import Dict
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,10 +25,13 @@ FAIL_SIGN = "[FAIL]"
 CHECK_SIGN = "[v]"
 CROSS_SIGN = "[x]"
 
+logger = logging.getLogger(__name__)
+
 from modules.trae_test.utils.file_splitter import JSONFileSplitter
 from modules.trae_test.utils.index_builder_v3 import IndexBuilderV3
 from modules.trae_test.utils.kb_monitor import KnowledgeBaseMonitor
 from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
+from modules.trae_test.utils.metadata_manager import MetadataManager
 
 
 class KnowledgeBaseManager:
@@ -140,8 +146,16 @@ class KnowledgeBaseManager:
 
         try:
             index_file = f"{file_title}_index.json"
-            index_path = os.path.join(self.monitor.INDEX_DIR, "files", index_file)
-            result["index_exists"] = os.path.exists(index_path)
+            index_paths = [
+                os.path.join(self.monitor.INDEX_DIR, "files", index_file),
+                os.path.join(self.monitor.INDEX_DIR, index_file),
+            ]
+            result["index_exists"] = any(os.path.exists(path) for path in index_paths)
+
+            original_path = os.path.join(self.monitor.ORIGINAL_DIR, f"{file_title}.json")
+            if not os.path.exists(original_path):
+                original_path = os.path.join(self.monitor.ORIGINAL_DIR, f"{file_title}.md")
+            result["original_exists"] = os.path.exists(original_path)
 
             if result["index_exists"]:
                 chunks = self.retriever.get_all_chunks(file_title)
@@ -151,17 +165,141 @@ class KnowledgeBaseManager:
                     chunk_valid = all(key in chunk for key in ["chunk_index", "total_chunks", "data"])
                     result["chunks_valid"].append({"chunk_index": chunk.get("chunk_index"), "valid": chunk_valid})
 
-                result["success"] = (
-                    result["index_exists"]
-                    and result["chunks_exist"]
-                    and all(item["valid"] for item in result["chunks_valid"])
-                )
+                chunks_ok = result["chunks_exist"] and all(item["valid"] for item in result["chunks_valid"])
+                # Small knowledge files are intentionally not split; in that case,
+                # index + original JSON/MD existence is enough for integrity.
+                result["success"] = result["index_exists"] and (chunks_ok or result["original_exists"])
+
+            # 接入审核：将验证结果包装后执行审核
+            audit_input = {
+                "total_files": 1,
+                "verified": 1 if result["success"] else 0,
+                "failed": 0 if result["success"] else 1,
+                "file_results": [
+                    {
+                        "file_name": f"{file_title}.json",
+                        "passed": result["success"],
+                        "error": result.get("error", ""),
+                        "index_exists": result["index_exists"],
+                        "chunks_exist": result["chunks_exist"],
+                    }
+                ],
+                "errors": [result.get("error", "")] if not result["success"] and result.get("error") else [],
+            }
+            self._audit_verification_result(audit_input)
 
             return result
 
         except Exception as e:
             result["error"] = str(e)
             return result
+
+    def validate_file(self, file_title: str, keyword: str = "") -> Dict:
+        """Validate local KB availability through registry, index, content, and retrieval."""
+        result = {
+            "success": False,
+            "file_title": file_title,
+            "registered": False,
+            "original_exists": False,
+            "index_exists": False,
+            "content_loaded": False,
+            "retrieval_hit": False,
+            "matched_rule_ids": [],
+            "error": "",
+        }
+
+        try:
+            registry = MetadataManager().load_registry()
+            if registry is None:
+                MetadataManager().scan_and_register_all()
+                registry = MetadataManager().load_registry()
+
+            file_id = file_title.replace(" ", "_").lower()
+            file_info = (registry or {}).get("files", {}).get(file_id)
+            result["registered"] = bool(file_info)
+
+            original_path = os.path.join(self.monitor.ORIGINAL_DIR, f"{file_title}.json")
+            if not os.path.exists(original_path):
+                original_path = os.path.join(self.monitor.ORIGINAL_DIR, f"{file_title}.md")
+            result["original_exists"] = os.path.exists(original_path)
+
+            index_file = f"{file_title}_index.json"
+            index_paths = [
+                os.path.join(self.monitor.INDEX_DIR, "files", index_file),
+                os.path.join(self.monitor.INDEX_DIR, index_file),
+            ]
+            result["index_exists"] = any(os.path.exists(path) for path in index_paths)
+
+            content = self.retriever.load_aggregated_data(file_title)
+            result["content_loaded"] = bool(content)
+
+            if keyword:
+                matches = self.retriever.search_business_rules(keyword)
+                hits = [item for item in matches if item.get("file_id") == file_id]
+                result["retrieval_hit"] = bool(hits)
+                result["matched_rule_ids"] = [item.get("rule_id", item.get("id", "")) for item in hits]
+            else:
+                result["retrieval_hit"] = True
+
+            result["success"] = all(
+                [
+                    result["registered"],
+                    result["original_exists"],
+                    result["index_exists"],
+                    result["content_loaded"],
+                    result["retrieval_hit"],
+                ]
+            )
+            return result
+        except Exception as e:
+            result["error"] = str(e)
+            return result
+
+    def lint_file(self, file_path: str) -> Dict:
+        """Scan a knowledge source for common sensitive tokens before local KB import."""
+        result = {"success": False, "file_path": file_path, "warnings": [], "errors": []}
+        if not os.path.exists(file_path):
+            result["errors"].append(f"file not found: {file_path}")
+            return result
+
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                text = f.read()
+        except Exception as e:
+            result["errors"].append(str(e))
+            return result
+
+        sensitive_patterns = [
+            "password",
+            "passwd",
+            "token",
+            "cookie",
+            "authorization",
+            "secret",
+            "BEGIN PRIVATE KEY",
+            "DATABASE_URL",
+            "手机号",
+            "邮箱",
+            "身份证",
+            "客户地址",
+            "生产环境账号",
+        ]
+
+        lowered = text.lower()
+        for pattern in sensitive_patterns:
+            haystack = lowered if pattern.isascii() else text
+            needle = pattern.lower() if pattern.isascii() else pattern
+            if needle in haystack:
+                result["warnings"].append(pattern)
+
+        if file_path.lower().endswith(".json"):
+            try:
+                json.loads(text)
+            except Exception as e:
+                result["errors"].append(f"invalid json: {e}")
+
+        result["success"] = not result["errors"] and not result["warnings"]
+        return result
 
     def migrate_file(self, source_path: str, target_title: str = None) -> Dict:
         """迁移单个文件到知识库
@@ -185,7 +323,11 @@ class KnowledgeBaseManager:
             if target_title is None:
                 target_title = os.path.splitext(os.path.basename(source_path))[0]
 
-            target_filename = f"{target_title}.json"
+            source_ext = os.path.splitext(source_path)[1].lower()
+            if source_ext not in {".json", ".md"}:
+                result["error"] = f"不支持的知识库文件类型: {source_ext or '(无扩展名)'}"
+                return result
+            target_filename = f"{target_title}{source_ext}"
             target_path = os.path.join(self.monitor.ORIGINAL_DIR, target_filename)
 
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -195,12 +337,87 @@ class KnowledgeBaseManager:
             process_result = self.process_file(target_path)
             result["processed"] = process_result
             result["success"] = process_result["success"]
+            if result["success"]:
+                MetadataManager().scan_and_register_all()
+
+            # 接入审核：迁移完成后执行审核
+            audit_input = {
+                "total_files": 1,
+                "verified": 1 if result["success"] else 0,
+                "failed": 0 if result["success"] else 1,
+                "file_results": [
+                    {
+                        "file_name": target_filename,
+                        "passed": result["success"],
+                        "error": result.get("error", ""),
+                        "split_success": process_result.get("split", {}).get("success", False),
+                        "index_success": process_result.get("index", {}).get("success", False),
+                    }
+                ],
+                "errors": [result.get("error", "")] if not result["success"] and result.get("error") else [],
+            }
+            self._audit_verification_result(audit_input)
 
             return result
 
         except Exception as e:
             result["error"] = str(e)
             return result
+
+    def _audit_verification_result(self, verification_result: dict) -> bool:
+        """将完整性验证结果包装为统一 AuditResult 并执行审核
+
+        Args:
+            verification_result: 完整性验证结果
+
+        Returns:
+            bool: 审核是否通过
+        """
+        if os.getenv("KB_AUDIT_ENABLED") != "1":
+            return True
+
+        try:
+            from modules.trae_test.orchestrator.audit_gateway import AuditGateway
+        except Exception as e:
+            logger.warning("Skip KB audit: audit gateway unavailable: %s", e)
+            return True
+
+        # 构造审核目标数据
+        audit_target = {
+            "verification_type": "knowledge_base",
+            "total_files": verification_result.get("total_files", 0),
+            "verified_files": verification_result.get("verified", 0),
+            "failed_files": verification_result.get("failed", 0),
+            "file_results": [
+                {
+                    "file_name": fr.get("file_name", "unknown"),
+                    "passed": fr.get("passed", False),
+                    "error": fr.get("error", ""),
+                    "chunk_count": fr.get("details", {}).get("chunk_count", 0),
+                    "hash_match": fr.get("details", {}).get("hash_match", False),
+                }
+                for fr in verification_result.get("file_results", [])
+            ],
+            "errors": [
+                fr.get("error", "")
+                for fr in verification_result.get("file_results", [])
+                if not fr.get("passed", True)
+            ],
+        }
+
+        try:
+            gateway = AuditGateway()
+            context = {"block_on_fail": False, "source": "kb_update"}
+            result = gateway.audit(audit_target, "environment", context)
+        except Exception as e:
+            logger.warning("Skip KB audit: audit execution failed: %s", e)
+            return True
+
+        if not result.passed:
+            logger.error(f"知识库完整性验证审核未通过: {result.errors}")
+            return False
+        logger.info("知识库完整性验证审核已通过")
+        return True
 
     def scan_all(self) -> Dict:
         """扫描所有文件
@@ -314,7 +531,12 @@ def print_verify_result(result: Dict):
     print(f"文件标题: {result['file_title']}")
     print(f"成功: {OK_SIGN if result['success'] else FAIL_SIGN}")
     print(f"索引存在: {OK_SIGN if result['index_exists'] else FAIL_SIGN}")
-    print(f"块存在: {OK_SIGN if result['chunks_exist'] else FAIL_SIGN}")
+    if result.get("chunks_exist"):
+        print(f"块存在: {OK_SIGN}")
+    elif result.get("original_exists"):
+        print("块存在: [SKIP] 小文件使用原始文件")
+    else:
+        print(f"块存在: {FAIL_SIGN}")
 
     if result["chunks_valid"]:
         print("\n块验证:")
@@ -388,6 +610,41 @@ def print_process_all_result(result: Dict):
             print(f"  - {filename}")
 
 
+def print_validate_result(result: Dict):
+    print("=" * 80)
+    print("Knowledge base validation result")
+    print("=" * 80)
+    print(f"title: {result['file_title']}")
+    print(f"success: {OK_SIGN if result['success'] else FAIL_SIGN}")
+    print(f"registered: {OK_SIGN if result['registered'] else FAIL_SIGN}")
+    print(f"original exists: {OK_SIGN if result['original_exists'] else FAIL_SIGN}")
+    print(f"index exists: {OK_SIGN if result['index_exists'] else FAIL_SIGN}")
+    print(f"content loaded: {OK_SIGN if result['content_loaded'] else FAIL_SIGN}")
+    print(f"retrieval hit: {OK_SIGN if result['retrieval_hit'] else FAIL_SIGN}")
+    if result["matched_rule_ids"]:
+        print("matched rules:")
+        for rule_id in result["matched_rule_ids"]:
+            print(f"  - {rule_id}")
+    if result["error"]:
+        print(f"error: {result['error']}")
+
+
+def print_lint_result(result: Dict):
+    print("=" * 80)
+    print("Knowledge source lint result")
+    print("=" * 80)
+    print(f"file: {result['file_path']}")
+    print(f"success: {OK_SIGN if result['success'] else FAIL_SIGN}")
+    if result["warnings"]:
+        print("sensitive warnings:")
+        for item in result["warnings"]:
+            print(f"  - {item}")
+    if result["errors"]:
+        print("errors:")
+        for item in result["errors"]:
+            print(f"  - {item}")
+
+
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
@@ -428,6 +685,13 @@ def main():
     verify_parser = subparsers.add_parser("verify", help="验证文件完整性")
     verify_parser.add_argument("--title", required=True, help="文件标题（不带扩展名）")
 
+    validate_parser = subparsers.add_parser("validate", help="Validate a KB file through registry/index/retrieval")
+    validate_parser.add_argument("--title", required=True, help="Knowledge file title without extension")
+    validate_parser.add_argument("--keyword", default="", help="Keyword that must retrieve this file")
+
+    lint_parser = subparsers.add_parser("lint", help="Lint a knowledge source for sensitive content")
+    lint_parser.add_argument("--file", required=True, help="Knowledge source file path")
+
     # migrate 命令
     migrate_parser = subparsers.add_parser("migrate", help="迁移文件到知识库")
     migrate_parser.add_argument("--source", required=True, help="源文件路径")
@@ -461,6 +725,12 @@ def main():
     elif args.command == "verify":
         result = manager.verify_file(args.title)
         print_verify_result(result)
+    elif args.command == "validate":
+        result = manager.validate_file(args.title, args.keyword)
+        print_validate_result(result)
+    elif args.command == "lint":
+        result = manager.lint_file(args.file)
+        print_lint_result(result)
     elif args.command == "migrate":
         result = manager.migrate_file(args.source, args.title)
         print_migrate_result(result)

@@ -160,8 +160,10 @@ class FileManagementService:
             分块文件路径列表
         """
         existing = []
+        normalized_title = file_title.replace(" ", "_").lower()
+        valid_prefixes = (file_title + "_", normalized_title + "_")
         if os.path.exists(self.chunks_dir):
             for fname in os.listdir(self.chunks_dir):
-                if is_chunk_filename(fname):
+                if is_chunk_filename(fname) and fname.startswith(valid_prefixes):
                     existing.append(os.path.join(self.chunks_dir, fname))
         return existing

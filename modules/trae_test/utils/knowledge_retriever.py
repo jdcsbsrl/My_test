@@ -93,6 +93,13 @@ class KnowledgeRetriever:
 
     def _load_registry(self) -> None:
         """加载文件注册表 metadata/file_registry.json"""
+        if not os.path.exists(self.registry_path):
+            try:
+                from .metadata_manager import MetadataManager
+
+                MetadataManager(self.knowledge_base_dir).scan_and_register_all()
+            except Exception as e:
+                logger.warning("Failed to rebuild knowledge registry: %s", e)
         self._metadata_repository.load_registry()
         self._registry = self._metadata_repository.get_registry()
         self._registry_last_loaded = time.time()

@@ -1,5 +1,9 @@
 # 知识库更新工作流程规范
 
+> 本项目真实知识库默认保留在本地：`assets/knowledge_base/`。原始知识文件位于
+> `assets/knowledge_base/data/original/`，不要使用早期非 `data/` 分层目录。如需提交到 GitHub，应只提交工具代码、流程文档和脱敏样例，
+> 不提交真实业务知识内容。详细约定见 `docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md`。
+
 ## 📚 概述
 
 本规范定义了test_erp项目中知识库更新的标准化工作流程，确保所有Agent在更新知识库时都遵循统一的操作步骤，保证知识库的完整性和可检索性。
@@ -25,7 +29,7 @@ python tools/kb_manager.py verify --title "销售模块"
 ```
 
 **1.2 备份原始文件（自动）**
-- 系统自动将原始文件备份到 `assets/knowledge_base/original/`
+- 系统自动将原始文件备份到 `assets/knowledge_base/data/original/`
 - 保留历史版本记录
 
 ### 阶段二：执行阶段
@@ -35,10 +39,10 @@ python tools/kb_manager.py verify --title "销售模块"
 **方式A: 使用 kb_manager.py（推荐）**
 ```bash
 # 更新已存在的文件（自动分割+重建索引）
-python tools/kb_manager.py process --file "assets/knowledge_base/original/销售模块.json"
+python tools/kb_manager.py process --file "assets/knowledge_base/data/original/销售模块.json"
 
 # 强制更新（覆盖现有块）
-python tools/kb_manager.py process --file "assets/knowledge_base/original/销售模块.json" --force
+python tools/kb_manager.py process --file "assets/knowledge_base/data/original/销售模块.json" --force
 ```
 
 **方式B: 使用API**
@@ -48,7 +52,7 @@ from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
 retriever = KnowledgeRetriever()
 
 # 更新文件（自动处理分割和索引）
-result = retriever.update_file("assets/knowledge_base/original/销售模块.json")
+result = retriever.update_file("assets/knowledge_base/data/original/销售模块.json")
 
 # 检查结果
 if result.get("success"):

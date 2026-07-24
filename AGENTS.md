@@ -1,5 +1,43 @@
 # Test ERP Agent Workspace Index
 
+## 2026-07-24 本地知识库索引增补（Agent 必读）
+
+> 真实知识库默认保留在本地 `assets/knowledge_base/`，不上传 GitHub。提交仓库时只提交工具代码、流程文档和脱敏样例，避免泄露业务规则、测试数据、订单号、SKU、账号、环境信息等敏感内容。
+
+### 本地知识库入口
+
+| 索引项 | 位置 | 用途 |
+|-------|------|------|
+| 本地知识库使用指南 | [docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md](docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md) | 本地知识库目录、隐私边界、推荐知识格式、lint/migrate/validate 流程 |
+| 知识库更新工作流 | [docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | 标准化更新流程 |
+| 知识库管理器 | [tools/kb_manager.py](tools/kb_manager.py) | `lint` / `migrate` / `process` / `scan` / `validate` |
+| 检索 API | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | Agent 访问知识库的统一入口 |
+
+### Agent 更新知识库时必须使用的流程
+
+```bash
+python tools/kb_manager.py lint --file path/to/source.json
+python tools/kb_manager.py migrate --source path/to/source.json
+python tools/kb_manager.py scan
+python tools/kb_manager.py validate --title file_title --keyword keyword
+```
+
+更新已有知识文件时：
+
+```bash
+python tools/kb_manager.py lint --file assets/knowledge_base/data/original/file_title.json
+python tools/kb_manager.py process --file assets/knowledge_base/data/original/file_title.json
+python tools/kb_manager.py scan
+python tools/kb_manager.py validate --title file_title --keyword keyword
+```
+
+### Agent 检索知识库时必须遵守
+
+- 使用 `KnowledgeRetriever` API，不直接读取 `assets/knowledge_base/data/original/*.json`。
+- 检索前如 registry 缺失或疑似过期，调用 `r.refresh_registry()`；当前实现会在 registry 缺失时自动重建。
+- 优先使用 `retrieve()` / `search_business_rules()` 获取精准片段。
+- 只有用户明确要求全量分析时，才使用 `get_all_chunks()`，并设置 `max_chunks`。
+
 **版本**: 3.2.0  
 **架构**: HarnessEngineer  
 **更新时间**: 2026-07-16

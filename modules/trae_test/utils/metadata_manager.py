@@ -79,6 +79,27 @@ class MetadataManager:
         return list(set(tags))
 
     @staticmethod
+    def _extract_declared_tags(file_path: str) -> list[str]:
+        """Read optional top-level tags from a JSON knowledge file."""
+        if not file_path.lower().endswith(".json"):
+            return []
+
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                content = json.load(f)
+        except Exception:
+            return []
+
+        if not isinstance(content, dict):
+            return []
+
+        tags = content.get("tags", [])
+        if not isinstance(tags, list):
+            return []
+
+        return [str(tag).strip() for tag in tags if str(tag).strip()]
+
+    @staticmethod
     def _classify_file(title: str) -> str:
         """根据标题自动分类文件"""
         for classification, keywords in MetadataManager.CLASSIFICATION_MAPPING.items():
@@ -86,6 +107,19 @@ class MetadataManager:
                 if keyword in title:
                     return classification
         return "其他"
+
+    @staticmethod
+    def _sync_reverse_tags(registry: dict[str, Any]) -> None:
+        """Rebuild the reverse tag index from registry['files'][*]['tags']."""
+        tag_index: dict[str, list[str]] = {}
+        for file_id, file_info in registry.get("files", {}).items():
+            for tag in file_info.get("tags", []):
+                if not tag:
+                    continue
+                tag_index.setdefault(tag, [])
+                if file_id not in tag_index[tag]:
+                    tag_index[tag].append(file_id)
+        registry["tags"] = tag_index
 
     def _count_actual_chunks(self, file_id: str) -> int:
         """统计指定文件的实际分块数"""
@@ -123,7 +157,7 @@ class MetadataManager:
 
                     stat = os.stat(file_path)
 
-                    tags = self._extract_file_tags(title)
+                    tags = list(set(self._extract_file_tags(title) + self._extract_declared_tags(file_path)))
                     classification = self._classify_file(title)
                     chunk_count = self._count_actual_chunks(file_id)
 
@@ -143,13 +177,10 @@ class MetadataManager:
 
                     registry["files"][file_id] = file_info
 
-                    for tag in tags:
-                        if tag not in registry["tags"]:
-                            registry["tags"][tag] = []
-                        registry["tags"][tag].append(file_id)
-
                     result["files"].append(title)
                     result["registered_files"] += 1
+
+        self._sync_reverse_tags(registry)
 
         with open(self.registry_path, "w", encoding="utf-8") as f:
             json.dump(registry, f, ensure_ascii=False, indent=2)
@@ -185,6 +216,7 @@ class MetadataManager:
             return False
 
         registry["files"][file_id].update(updates)
+        self._sync_reverse_tags(registry)
 
         with open(self.registry_path, "w", encoding="utf-8") as f:
             json.dump(registry, f, ensure_ascii=False, indent=2)
