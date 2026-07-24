@@ -282,7 +282,10 @@ class TestSKUSearchCombinedConditions:
         product_category = sku_page.get_first_available_dropdown_option("产品品类")
         sku_page.select_product_category(product_category)
 
-        sales_status = sku_page.get_first_available_dropdown_option("销售状态")
+        try:
+            sales_status = sku_page.get_first_available_dropdown_option("销售状态")
+        except ValueError as exc:
+            pytest.skip(f"当前产品品类下没有可组合的销售状态选项: {exc}")
         sku_page.select_sales_status(sales_status)
 
         response_time = sku_page.click_search()
