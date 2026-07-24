@@ -15,6 +15,7 @@ load_dotenv()
 
 USERNAME = os.getenv("TEST_USERNAME")
 PASSWORD = os.getenv("TEST_PASSWORD")
+DYNAMIC_FIRST_AVAILABLE = "__FIRST_AVAILABLE__"
 
 
 @pytest.fixture(scope="module")
@@ -55,11 +56,9 @@ class TestSKUSearchDropdownFilters:
     @pytest.mark.parametrize(
         "field,value",
         [
-            ("产品品类", "男装"),
-            ("产品品类", "女装"),
+            ("产品品类", DYNAMIC_FIRST_AVAILABLE),
             ("销售状态", "全部"),
-            ("销售状态", "在售"),
-            ("销售状态", "停售"),
+            ("销售状态", DYNAMIC_FIRST_AVAILABLE),
             ("产品自定义分类", "全部"),
             ("创建人", "全部"),
             ("仓库", "全部"),
@@ -85,6 +84,8 @@ class TestSKUSearchDropdownFilters:
         }
 
         if field in select_method:
+            if value == DYNAMIC_FIRST_AVAILABLE:
+                value = sku_page.get_first_available_dropdown_option(field)
             select_method[field](value)
 
         response_time = sku_page.click_search()
@@ -278,8 +279,11 @@ class TestSKUSearchCombinedConditions:
         sku_page.navigate_to_search_page()
         sku_page.click_reset()
 
-        sku_page.select_product_category("电子产品")
-        sku_page.select_sales_status("上架")
+        product_category = sku_page.get_first_available_dropdown_option("产品品类")
+        sku_page.select_product_category(product_category)
+
+        sales_status = sku_page.get_first_available_dropdown_option("销售状态")
+        sku_page.select_sales_status(sales_status)
 
         response_time = sku_page.click_search()
         count = sku_page.get_result_count()

@@ -1,4 +1,5 @@
 import time
+import unicodedata
 
 import allure
 from playwright.sync_api import Page, expect
@@ -301,40 +302,27 @@ class SKUSearchPage(BasePage):
 
     @allure.step("获取页面上的下拉选项")
     def get_dropdown_options(self, placeholder: str) -> list[str]:
-        selectors = [
-            f'.ant-select:has(.ant-select-selection-placeholder:contains("{placeholder}")) .ant-select-selector',
-            f'.el-select:has(.el-select__placeholder:contains("{placeholder}")) .el-select__input',
-            f'.el-select:has(.el-select__placeholder:contains("{placeholder}"))',
-            f'.ant-select-selector:has-text("{placeholder}")',
-            f'.el-select__input:has-text("{placeholder}")',
-        ]
-        for selector in selectors:
-            try:
-                self.page.locator(selector).click()
-                time.sleep(0.5)
-                option_selectors = [
-                    ".ant-select-dropdown-menu-item",
-                    ".ant-select-item-option-content",
-                    ".el-select-dropdown__item",
-                ]
-                for option_selector in option_selectors:
-                    options = self.page.locator(option_selector)
-                    count = options.count()
-                    if count > 0:
-                        result = []
-                        for i in range(count):
-                            text = options.nth(i).text_content()
-                            if text:
-                                result.append(text.strip())
-                        self.page.click("body")
-                        return result
-            except Exception:
-                continue
-        self.page.click("body")
-        return []
+        if not self._open_dropdown_by_placeholder(placeholder):
+            return []
+        try:
+            self._wait_for_visible_dropdown_options()
+            return self._get_visible_dropdown_options()
+        finally:
+            self.page.keyboard.press("Escape")
 
-    def _select_dropdown_by_placeholder(self, placeholder: str, value: str) -> None:
-        selectors = [
+    def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
+        """获取指定下拉框中第一个非排除项的真实可用选项。"""
+        excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
+        options = self.get_dropdown_options(placeholder)
+        for option in options:
+            normalized_option = self._normalize_dropdown_option(option)
+            if normalized_option and normalized_option not in excluded:
+                logger.info("动态获取下拉选项: {} -> {}", placeholder, option)
+                return option
+        raise ValueError(f"下拉选择器“{placeholder}”中未找到非 {excluded_options} 的可用选项，可见选项: {options}")
+
+    def _dropdown_selectors(self, placeholder: str) -> list[str]:
+        return [
             f'.el-form-item:has(.el-form-item__label:has-text("{placeholder}")) .el-select',
             f'.ant-form-item:has(label:has-text("{placeholder}")) .ant-select-selector',
             f'.el-select:has-text("{placeholder}")',
@@ -344,58 +332,171 @@ class SKUSearchPage(BasePage):
             f'.ant-select-selector:has-text("{placeholder}")',
             f'.el-select:has(.el-input__inner[placeholder*="{placeholder}"]) .el-input__inner',
             f'.ant-select:has(.ant-input[placeholder*="{placeholder}"]) .ant-select-selector',
+            f'.ant-select:has(.ant-select-selection-placeholder:has-text("{placeholder}")) .ant-select-selector',
+            f'.el-select:has(.el-select__placeholder:has-text("{placeholder}"))',
         ]
 
-        clicked = False
-        for selector in selectors:
+    def _open_dropdown_by_placeholder(self, placeholder: str) -> bool:
+        for selector in self._dropdown_selectors(placeholder):
             try:
                 locator = self.page.locator(selector)
                 if locator.count() > 0 and locator.first.is_visible():
                     locator.first.click()
-                    clicked = True
                     logger.info(f"点击下拉选择器: {selector}")
-                    break
+                    return True
             except Exception:
                 continue
+        debug_controls = self.page.evaluate(
+            """() => ({
+                labels: Array.from(document.querySelectorAll('label')).slice(0, 30).map(e => e.textContent.trim()),
+                placeholders: Array.from(document.querySelectorAll('input')).slice(0, 40).map(e => e.placeholder),
+                selects: Array.from(document.querySelectorAll('.el-select, .ant-select')).slice(0, 30)
+                    .map(e => e.textContent.trim())
+            })"""
+        )
+        logger.error("下拉选择器诊断: {}", debug_controls)
+        return False
 
-        if not clicked:
-            if value == "全部":
-                logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
-                return
-            debug_controls = self.page.evaluate(
-                """() => ({
-                    labels: Array.from(document.querySelectorAll('label')).slice(0, 30).map(e => e.textContent.trim()),
-                    placeholders: Array.from(document.querySelectorAll('input')).slice(0, 40).map(e => e.placeholder),
-                    selects: Array.from(document.querySelectorAll('.el-select, .ant-select')).slice(0, 30)
-                        .map(e => e.textContent.trim())
-                })"""
-            )
-            logger.error("下拉选择器诊断: {}", debug_controls)
-            raise ValueError(f"未找到下拉选择器: {placeholder}")
+    def _wait_for_visible_dropdown_options(self, timeout: int = 5000) -> None:
+        option_selector = (
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:visible, "
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content:visible, "
+            ".el-select-dropdown:visible .el-select-dropdown__item:visible"
+        )
+        self.page.locator(option_selector).first.wait_for(state="visible", timeout=timeout)
 
+    def _get_visible_dropdown_options(self) -> list[str]:
+        option_selector = (
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:visible, "
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content:visible, "
+            ".el-select-dropdown:visible .el-select-dropdown__item:visible"
+        )
+        options = self.page.locator(option_selector)
+        result = []
+        for index in range(options.count()):
+            try:
+                text = options.nth(index).inner_text().strip()
+                if text and text not in result:
+                    result.append(text)
+            except Exception:
+                continue
+        return result
+
+    def _click_visible_dropdown_option(self, value: str) -> bool:
         option_selectors = [
-            f'.ant-select-dropdown-menu-item:has-text("{value}")',
+            f'.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:has-text("{value}")',
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden) "
             f'.ant-select-item-option-content:has-text("{value}")',
-            f'.ant-select-item-option:has-text("{value}")',
-            f'.el-select-dropdown__item:has-text("{value}")',
+            f'.el-select-dropdown:visible .el-select-dropdown__item:has-text("{value}")',
+            '//div[contains(@class, "ant-select-dropdown") '
+            'and not(contains(@class, "ant-select-dropdown-hidden"))]'
+            f'//*[contains(text(), "{value}")]',
+            '//div[contains(@class, "el-select-dropdown") '
+            'and not(contains(@style, "display: none"))]'
             f'//li[contains(text(), "{value}")]',
         ]
-
         for option_selector in option_selectors:
             try:
                 option = self.page.locator(option_selector)
                 if option.count() > 0 and option.first.is_visible():
                     option.first.click()
                     logger.info(f"成功选择选项: {value}")
-                    return
+                    return True
             except Exception:
                 continue
+        return False
 
+    def _log_dropdown_options_not_found(self, placeholder: str, value: str) -> None:
+        try:
+            visible_options = self._get_visible_dropdown_options()
+        except Exception:
+            visible_options = []
+        logger.error(
+            "下拉选项未找到: placeholder={}, value={}, url={}, visible_options={}",
+            placeholder,
+            value,
+            self.page.url,
+            visible_options,
+        )
+
+    def _select_dropdown_by_placeholder(self, placeholder: str, value: str) -> None:
+        clicked = self._open_dropdown_by_placeholder(placeholder)
+
+        if not clicked:
+            if value == "全部":
+                logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
+                return
+            raise ValueError(f"未找到下拉选择器: {placeholder}")
+
+        try:
+            self._wait_for_visible_dropdown_options()
+        except Exception:
+            self._log_dropdown_options_not_found(placeholder, value)
+            self.page.keyboard.press("Escape")
+            if value == "全部":
+                logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
+                return
+            raise ValueError(f"下拉选择器“{placeholder}”中未加载可见选项")
+
+        if self._click_visible_dropdown_option(value):
+            return
+
+        fuzzy_option = self._find_unique_fuzzy_dropdown_option(value)
+        if fuzzy_option and self._click_visible_dropdown_option(fuzzy_option):
+            logger.info("模糊匹配下拉选项: {} -> {}", value, fuzzy_option)
+            return
+
+        self._log_dropdown_options_not_found(placeholder, value)
         self.page.keyboard.press("Escape")
         if value == "全部":
             logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
             return
         raise ValueError(f"下拉选择器“{placeholder}”中未找到选项: {value}")
+
+    def _find_unique_fuzzy_dropdown_option(self, value: str) -> str | None:
+        """Return the only sufficiently similar visible dropdown option."""
+        normalized_value = self._normalize_dropdown_option(value)
+        candidates: set[str] = set()
+        for selector in (
+            ".ant-select-dropdown-menu-item",
+            ".ant-select-item-option-content",
+            ".ant-select-item-option",
+            ".el-select-dropdown__item",
+        ):
+            options = self.page.locator(selector)
+            for index in range(options.count()):
+                option = options.nth(index)
+                try:
+                    if option.is_visible():
+                        text = option.inner_text().strip()
+                        if text:
+                            candidates.add(text)
+                except Exception:
+                    continue
+
+        matches = [
+            candidate
+            for candidate in candidates
+            if self._is_sufficient_fuzzy_match(normalized_value, self._normalize_dropdown_option(candidate))
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if matches:
+            logger.warning("下拉选项模糊匹配不唯一: {} -> {}", value, matches)
+        elif candidates:
+            logger.warning("下拉选项无可用模糊匹配: {}，可见选项: {}", value, sorted(candidates))
+        return None
+
+    @staticmethod
+    def _normalize_dropdown_option(value: str) -> str:
+        return "".join(unicodedata.normalize("NFKC", value).split())
+
+    @staticmethod
+    def _is_sufficient_fuzzy_match(value: str, candidate: str) -> bool:
+        if not value or not candidate:
+            return False
+        common_characters = len(set(value) & set(candidate))
+        return common_characters >= 2 and common_characters / len(value) >= 0.5
 
     def _fill_input_by_placeholder(self, placeholder: str, value: str) -> None:
         selectors = [
