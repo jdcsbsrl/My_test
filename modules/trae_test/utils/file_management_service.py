@@ -16,6 +16,7 @@ class FileManagementService:
     def __init__(self):
         self.original_dir = PathManager.get_original_dir()
         self.chunks_dir = PathManager.get_chunks_dir()
+        PathManager.ensure_directories(self.original_dir, self.chunks_dir)
 
     def add_file(
         self, file_path: str, auto_process: bool = True, clear_caches_callback=None, load_registry_callback=None
