@@ -209,6 +209,49 @@ class InventoryExportPage(BasePage):
     @allure.step("选择指定字段: {field_name}")
     def select_field(self, field_name: str) -> bool:
         try:
+            result = self.page.evaluate(
+                """
+                (fieldName) => {
+                    const normalize = value => (value || '').replace(/\\s+/g, '').toLowerCase();
+                    const target = normalize(fieldName);
+                    const aliases = {
+                        'sku编码': ['sku编码', 'sku'],
+                        '产品名称': ['产品名称', '商品名称'],
+                        '产品图片': ['产品图片', '商品图片'],
+                        '库存总量': ['库存总量', '总可用库存'],
+                        '未发货数量': ['未发货数量', '未发货数'],
+                        '在途数量': ['在途数量', '在途量'],
+                        '7天销售': ['7天销量', '7天销售']
+                    };
+                    const candidates = (aliases[fieldName] || [fieldName]).map(normalize);
+                    const boxes = Array.from(document.querySelectorAll('.el-checkbox, label, .tag_item'))
+                        .filter(box => {
+                            const rect = box.getBoundingClientRect();
+                            const style = window.getComputedStyle(box);
+                            return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                        });
+                    for (const box of boxes) {
+                        const text = normalize(box.textContent);
+                        if (!text || (!candidates.some(candidate => text.includes(candidate)) && !text.includes(target))) {
+                            continue;
+                        }
+                        const input = box.querySelector('input[type="checkbox"]');
+                        const isChecked = box.classList.contains('is-checked') || (input && input.checked);
+                        if (!isChecked) {
+                            const clickable = box.querySelector('.el-checkbox__input, input[type="checkbox"]') || box;
+                            clickable.click();
+                        }
+                        return { selected: true, text: box.textContent.trim(), already_checked: isChecked };
+                    }
+                    return { selected: false, visibleTexts: boxes.slice(0, 120).map(box => box.textContent.trim()) };
+                }
+                """,
+                field_name,
+            )
+            if result.get("selected"):
+                self.page.wait_for_timeout(300)
+                logger.info("宸查€夋嫨瀛楁: {} -> {}", field_name, result)
+                return True
             field_label = self.page.locator(f'.el-checkbox__label:has-text("{field_name}")').first
             if field_label.count() > 0:
                 field_label.click(force=True)

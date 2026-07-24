@@ -49,6 +49,8 @@ class InventorySKUFacade:
         Returns:
             包含搜索耗时、结果数量、结果列表的字典
         """
+        if "product/productCenter/inventoryInfo" not in self.page.url:
+            self.sku_page.navigate_to_search_page()
         self.sku_page.click_reset()
         self.sku_page.fill_sku_code(sku_code)
         elapsed = self.sku_page.click_search()
@@ -118,7 +120,10 @@ class InventorySKUFacade:
         if select_all_fields:
             self.export_page.select_all_fields()
         elif fields:
-            self.export_page.select_fields(fields)
+            self.export_page.deselect_all_fields()
+            selected = self.export_page.select_fields(fields)
+            if selected == 0:
+                return {"success": False, "error": f"未成功选择任何指定导出字段: {fields}"}
 
         os.makedirs(download_dir, exist_ok=True)
         timestamp = int(time.time())
