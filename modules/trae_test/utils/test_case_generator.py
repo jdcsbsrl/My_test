@@ -199,7 +199,7 @@ class TestCaseGenerator:
 
         return self.excel_generator.generate(cases, output_path, extra_fields=extra_fields)
 
-    def generate_and_export(self, keyword: str, limit: int = 10, output_path: str | None = None, extra_fields: list[str] | None = None) -> str:
+    def generate_and_export(self, keyword: str, limit: int = 10, output_path: str | None = None, extra_fields: list[str] | None = None, block_on_audit_fail: bool = False) -> str:
         """生成测试用例并导出到Excel（包含评分和审核）
 
         Args:
@@ -207,23 +207,31 @@ class TestCaseGenerator:
             limit: 返回用例数量限制
             output_path: 输出路径
             extra_fields: 额外导出字段列表（可选）
+            block_on_audit_fail: 审核失败时是否阻断导出（默认False，仅警告）
 
         Returns:
             导出文件的路径
         """
+        from modules.trae_test.orchestrator.audit_gateway import AuditGateway
         from modules.trae_test.utils.test_case_strategy import TestCaseScoreEngine
-        from modules.trae_test.orchestrator.audit_agent_enhanced import AuditAgent
 
         cases = self.generate_cases(keyword, limit)
 
+        # 恢复逐条评分（与旧逻辑一致）
         score_engine = TestCaseScoreEngine()
         for case in cases:
             case["质量评分"] = score_engine.score(case)
 
-        agent = AuditAgent()
-        audit_result = agent.audit_test_cases(cases)
+        # 使用 AuditGateway 统一入口
+        gateway = AuditGateway()
+        context = {"block_on_fail": block_on_audit_fail}
+        audit_result = gateway.audit(cases, "test_case", context)
+
         if not audit_result.passed:
-            logger.warning(f"测试用例审核未通过: {audit_result.errors}")
+            if block_on_audit_fail:
+                raise RuntimeError(f"审核未通过，导出已阻断：{len(audit_result.errors)}个错误")
+            else:
+                logger.warning(f"测试用例审核未通过: {audit_result.errors}")
 
         return self.export_to_excel(cases, output_path, extra_fields=extra_fields)
 

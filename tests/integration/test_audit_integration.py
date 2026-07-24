@@ -1,4 +1,4 @@
-﻿"""审核Agent集成测试 - 验证审核流程在工作流执行中被正确调用"""
+"""审核Agent集成测试 - 验证审核流程在工作流执行中被正确调用"""
 
 from unittest.mock import Mock
 
@@ -218,8 +218,10 @@ class TestAuditAgentReliability:
         assert result.errors == []
 
     def test_audit_always_returns_result(self):
-        """测试审核总是返回结果对象"""
-        agent = AuditAgent()
+        """测试审核总是返回结果对象（禁用硬阻断模式）"""
+        from modules.trae_test.orchestrator.config import AuditConfig
+        config = AuditConfig(enforce_hard_block=False)
+        agent = AuditAgent(config=config)
 
         result = agent.audit(None, None)
 

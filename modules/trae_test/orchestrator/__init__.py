@@ -20,6 +20,8 @@ from typing import Optional
 
 from .agent_orchestrator import AgentOrchestrator
 from .audit_agent_enhanced import AuditAgent, AuditResult, AuditType
+from .audit_gateway import AuditGateway
+from .audit_models import AuditIssue
 from .config import (
     AuditConfig,
     OrchestratorConfig,
@@ -73,7 +75,9 @@ __all__ = [
     "AuditType",
     # 审核Agent
     "AuditAgent",
+    "AuditGateway",
     "AuditResult",
+    "AuditIssue",
     # 工作流管理
     "WorkflowStep",
     "Workflow",
