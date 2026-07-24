@@ -68,8 +68,11 @@ class FileRepository:
         if not os.path.exists(self.chunks_dir):
             return chunks
 
+        normalized_title = file_title.replace(" ", "_").lower()
+        valid_prefixes = (file_title + "_", normalized_title + "_")
+
         for filename in os.listdir(self.chunks_dir):
-            if is_chunk_filename(filename):
+            if is_chunk_filename(filename) and filename.startswith(valid_prefixes):
                 chunk_path = os.path.join(self.chunks_dir, filename)
                 try:
                     with open(chunk_path, encoding="utf-8") as f:
@@ -92,10 +95,16 @@ class FileRepository:
         Returns:
             块数据字典，不存在返回None
         """
-        chunk_filename = f"{file_title}_chunk_{chunk_index:03d}.json"
-        chunk_path = os.path.join(self.chunks_dir, chunk_filename)
+        normalized_title = file_title.replace(" ", "_").lower()
+        candidate_filenames = [
+            f"{file_title}_chunk_{chunk_index:03d}.json",
+            f"{normalized_title}_chunk_{chunk_index:03d}.json",
+        ]
 
-        if os.path.exists(chunk_path):
+        for chunk_filename in dict.fromkeys(candidate_filenames):
+            chunk_path = os.path.join(self.chunks_dir, chunk_filename)
+            if not os.path.exists(chunk_path):
+                continue
             try:
                 with open(chunk_path, encoding="utf-8") as f:
                     return json.load(f)
@@ -153,9 +162,12 @@ class FileRepository:
             分块文件路径列表
         """
         existing = []
+        normalized_title = file_title.replace(" ", "_").lower()
+        valid_prefixes = (file_title + "_", normalized_title + "_")
+
         if os.path.exists(self.chunks_dir):
             for fname in os.listdir(self.chunks_dir):
-                if fname.startswith(file_title + "_") and "_chunk_" in fname:
+                if fname.startswith(valid_prefixes) and "_chunk_" in fname:
                     existing.append(os.path.join(self.chunks_dir, fname))
         return existing
 

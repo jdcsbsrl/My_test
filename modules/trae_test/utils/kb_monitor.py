@@ -147,7 +147,9 @@ class KnowledgeBaseMonitor:
 
                 file_title = os.path.splitext(filename)[0]
                 index_file = f"{file_title}_index.json"
-                index_exists = os.path.exists(os.path.join(self.INDEX_DIR, index_file))
+                index_exists = os.path.exists(os.path.join(self.INDEX_DIR, "files", index_file)) or os.path.exists(
+                    os.path.join(self.INDEX_DIR, index_file)
+                )
 
                 if size_check["exceeds_threshold"] and not index_exists:
                     result["needs_processing"].append({"file": filename, "file_size": size_check["file_size"]})
