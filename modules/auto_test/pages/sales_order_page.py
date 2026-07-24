@@ -1354,14 +1354,17 @@ class SalesOrderPage(BasePage):
         time.sleep(2)
 
         arrow_icon = "↑" if is_ascending else "↓"
+        direction_keywords = ("升序", "asc") if is_ascending else ("降序", "desc")
 
-        menu_items = self.page.locator(".el-dropdown-menu__item").all()
-        logger.info(f"找到 {len(menu_items)} 个下拉菜单项")
+        menu_items = self.page.locator(".el-dropdown-menu:visible .el-dropdown-menu__item:visible")
+        logger.info(f"找到 {menu_items.count()} 个可见下拉菜单项")
 
-        for item in menu_items:
+        for index in range(menu_items.count()):
             try:
+                item = menu_items.nth(index)
                 text = item.text_content() or ""
-                if column_name in text:
+                has_direction = arrow_icon in text or any(keyword in text.lower() for keyword in direction_keywords)
+                if column_name in text and has_direction:
                     item.click()
                     logger.info(f"成功选择排序: {column_name}, 升序: {is_ascending}, 菜单项: {text}")
                     self.wait_for_load_state()
@@ -1372,10 +1375,14 @@ class SalesOrderPage(BasePage):
                 continue
 
         selectors = [
-            f"//div[contains(@class, 'el-dropdown-menu')]//span[contains(text(), '{column_name}')]/following-sibling::span[contains(text(), '{arrow_icon}')]",
-            f"//div[contains(@class, 'el-dropdown-menu')]//li[contains(text(), '{column_name}')]",
-            f"//div[contains(@class, 'dropdown-menu')]//span[contains(text(), '{column_name}')]",
-            f"//div[contains(@class, 'dropdown-menu')]//li[contains(text(), '{column_name}')]",
+            "//div[contains(@class, 'el-dropdown-menu') and not(contains(@style, 'display: none'))]"
+            f"//span[contains(text(), '{column_name}')]/following-sibling::span[contains(text(), '{arrow_icon}')]",
+            "//div[contains(@class, 'el-dropdown-menu') and not(contains(@style, 'display: none'))]"
+            f"//li[contains(text(), '{column_name}')]",
+            "//div[contains(@class, 'dropdown-menu') and not(contains(@style, 'display: none'))]"
+            f"//span[contains(text(), '{column_name}')]",
+            "//div[contains(@class, 'dropdown-menu') and not(contains(@style, 'display: none'))]"
+            f"//li[contains(text(), '{column_name}')]",
             f"//li[contains(text(), '{column_name}')]",
             f"//span[contains(text(), '{column_name}')]",
         ]

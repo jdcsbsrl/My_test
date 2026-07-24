@@ -223,13 +223,23 @@ class TestExportFlowPrecise:
         print(f"Exported order numbers: {order_numbers[:10]}...")
         print(f"Total exported: {len(order_numbers)}")
 
+        exported_unique_order_numbers = []
+        seen_exported_order_numbers = set()
+        for order_num in order_numbers:
+            if order_num not in seen_exported_order_numbers:
+                seen_exported_order_numbers.add(order_num)
+                exported_unique_order_numbers.append(order_num)
+
+        print(f"Exported unique order numbers: {exported_unique_order_numbers[:10]}...")
+        print(f"Total exported unique: {len(exported_unique_order_numbers)}")
+
         print("\n" + "=" * 70)
         print("Step 13: Verify order consistency")
         print("=" * 70)
 
         matching_numbers = []
         for order_num in page_order_numbers[:20]:
-            if order_num in order_numbers:
+            if order_num in exported_unique_order_numbers:
                 matching_numbers.append(order_num)
 
         print(f"Matching order numbers: {matching_numbers}")
@@ -237,7 +247,7 @@ class TestExportFlowPrecise:
 
         if matching_numbers:
             page_positions = {num: idx for idx, num in enumerate(page_order_numbers[:20])}
-            export_positions = {num: idx for idx, num in enumerate(order_numbers)}
+            export_positions = {num: idx for idx, num in enumerate(exported_unique_order_numbers)}
 
             order_consistent = True
             for i, num in enumerate(matching_numbers[:-1]):
