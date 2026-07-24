@@ -148,6 +148,49 @@ class InventorySKUPage(BasePage):
                 logger.warning("未找到导出当前搜索的库存SKU菜单")
 
     @allure.step("选择导出勾选的库存SKU")
+    def select_export_current_search(self) -> None:
+        """Select current-search inventory SKU export and wait for export page."""
+        self.click_export()
+        self.page.wait_for_timeout(1000)
+
+        clicked = self.page.evaluate(
+            """() => {
+                const items = Array.from(document.querySelectorAll('.el-dropdown-menu__item'))
+                    .filter(item => {
+                        const rect = item.getBoundingClientRect();
+                        const style = window.getComputedStyle(item);
+                        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                    });
+                for (const item of items) {
+                    const text = item.textContent || "";
+                    if (text.includes("\\u5f53\\u524d\\u641c\\u7d22") && text.toUpperCase().includes("SKU")) {
+                        item.click();
+                        return { clicked: true, text };
+                    }
+                }
+                return { clicked: false, visibleTexts: items.map(item => item.textContent || "") };
+            }"""
+        )
+
+        if not clicked.get("clicked"):
+            raise ValueError(f"未找到可见的导出当前搜索库存SKU菜单项: {clicked}")
+
+        logger.info("閫夋嫨瀵煎嚭褰撳墠鎼滅储鐨勫簱瀛楽KU: {}", clicked)
+        self._wait_for_inventory_export_navigation()
+
+    def _wait_for_inventory_export_navigation(self, timeout: int = 30000) -> None:
+        start_time = time.time()
+        while time.time() - start_time < timeout / 1000:
+            if "exportPage" in self.page.url:
+                return
+            for opened_page in self.page.context.pages:
+                if "exportPage" in opened_page.url:
+                    self.page = opened_page
+                    return
+            self.page.wait_for_timeout(500)
+        page_urls = [pg.url for pg in self.page.context.pages]
+        raise TimeoutError(f"Inventory export page did not open. current={self.page.url}, pages={page_urls}")
+
     def select_export_selected(self) -> None:
         self.click_export()
         self.page.wait_for_timeout(1000)

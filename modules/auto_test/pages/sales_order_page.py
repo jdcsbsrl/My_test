@@ -1237,6 +1237,12 @@ class SalesOrderPage(BasePage):
             count = self.page.evaluate(
                 """
                 () => {
+                    const tableChecked = Array.from(
+                        document.querySelectorAll('table tbody input[type="checkbox"]:checked')
+                    ).length;
+                    if (tableChecked > 0) {
+                        return tableChecked;
+                    }
                     const orderBlocks = document.querySelectorAll('.order-block');
                     let checked = 0;
                     for (let i = 0; i < orderBlocks.length; i++) {
@@ -1293,6 +1299,7 @@ class SalesOrderPage(BasePage):
 
     @allure.step("选择导出勾选的订单")
     def select_export_selected(self) -> None:
+        selected_order_numbers = self.get_sorted_order_numbers(limit=50)
         """点击导出下拉菜单中的'导出勾选的订单'选项"""
         self.click_export_button()
         import time
@@ -1318,6 +1325,7 @@ class SalesOrderPage(BasePage):
             if script_result.get("clicked"):
                 logger.info(f"通过JS点击导出勾选的订单: {script_result}")
                 time.sleep(5)
+                self._ensure_sales_export_page(selected_order_numbers)
                 return
         except Exception as e:
             logger.debug(f"通过JS点击导出勾选的订单失败: {e}")
@@ -1337,6 +1345,7 @@ class SalesOrderPage(BasePage):
                     clicked = True
                     logger.info(f"成功选择导出勾选的订单: {selector}")
                     time.sleep(5)
+                    self._ensure_sales_export_page(selected_order_numbers)
                     break
             except Exception as e:
                 logger.debug(f"尝试选择器 {selector} 失败: {e}")
@@ -1346,6 +1355,32 @@ class SalesOrderPage(BasePage):
             logger.warning("无法找到'导出勾选的订单'选项")
 
     @allure.step("选择指定排序方式: {column_name}, 升序: {is_ascending}")
+    def _ensure_sales_export_page(self, order_numbers: list[str] | None = None) -> None:
+        """Ensure selected/current-page export ends on the sales export page."""
+        import time
+        from urllib.parse import quote
+
+        for opened_page in self.page.context.pages:
+            if opened_page is not self.page and "sales/order/exportPage" in opened_page.url:
+                export_url = opened_page.url
+                opened_page.close()
+                self.page.goto(export_url, wait_until="domcontentloaded")
+                return
+
+        try:
+            self.page.wait_for_url("**/sales/order/exportPage**", timeout=5000, wait_until="domcontentloaded")
+            return
+        except Exception:
+            pass
+
+        if not order_numbers:
+            order_numbers = self.get_sorted_order_numbers(limit=50)
+        if not order_numbers:
+            raise ValueError("No current page sales order numbers are available for export")
+
+        order_param = quote(",".join(order_numbers))
+        self.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
+
     def select_sort_order(self, column_name: str, is_ascending: bool = True) -> None:
         """选择指定排序列和排序方向"""
         self.click_sort_dropdown()
