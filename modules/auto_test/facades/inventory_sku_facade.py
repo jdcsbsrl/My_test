@@ -40,6 +40,12 @@ class InventorySKUFacade:
         self.sku_page.wait_for_search_results()
 
     @allure.step("完整流程：按SKU编码查询")
+    def _ensure_inventory_search_page(self) -> None:
+        current_url = self.sku_page.page.url
+        if "product/productCenter/inventoryInfo" not in current_url:
+            self.sku_page.navigate_to_search_page()
+        self.page = self.sku_page.page
+
     def search_by_sku(self, sku_code: str) -> dict[str, Any]:
         """按SKU编码搜索
 
@@ -49,8 +55,7 @@ class InventorySKUFacade:
         Returns:
             包含搜索耗时、结果数量、结果列表的字典
         """
-        if "product/productCenter/inventoryInfo" not in self.page.url:
-            self.sku_page.navigate_to_search_page()
+        self._ensure_inventory_search_page()
         self.sku_page.click_reset()
         self.sku_page.fill_sku_code(sku_code)
         elapsed = self.sku_page.click_search()
@@ -129,6 +134,8 @@ class InventorySKUFacade:
         timestamp = int(time.time())
         save_path = f"{download_dir}/inventory_sku_{timestamp}.xlsx"
         result = self.export_page.download_to(save_path, timeout=180000)
+        self.sku_page.page = self.export_page.page
+        self.page = self.sku_page.page
 
         result["export_type"] = "current_search"
         result["select_all_fields"] = select_all_fields
