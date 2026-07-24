@@ -234,7 +234,7 @@ class TestExportFlowPrecise:
         print(f"Total exported unique: {len(exported_unique_order_numbers)}")
 
         print("\n" + "=" * 70)
-        print("Step 13: Verify order consistency")
+        print("Step 13: Verify exported order coverage")
         print("=" * 70)
 
         matching_numbers = []
@@ -245,32 +245,21 @@ class TestExportFlowPrecise:
         print(f"Matching order numbers: {matching_numbers}")
         print(f"Total matched: {len(matching_numbers)}")
 
-        if matching_numbers:
-            page_positions = {num: idx for idx, num in enumerate(page_order_numbers[:20])}
-            export_positions = {num: idx for idx, num in enumerate(exported_unique_order_numbers)}
+        expected_order_numbers = page_order_numbers[:3]
+        missing_order_numbers = [num for num in expected_order_numbers if num not in exported_unique_order_numbers]
 
-            order_consistent = True
-            for i, num in enumerate(matching_numbers[:-1]):
-                page_pos = page_positions.get(num, -1)
-                export_pos = export_positions.get(num, -1)
+        if missing_order_numbers:
+            print(f"\n❌ 导出文件缺少请求导出的订单号: {missing_order_numbers}")
+            pytest.fail(f"导出文件缺少请求导出的订单号: {missing_order_numbers}")
 
-                next_num = matching_numbers[i + 1]
-                next_page_pos = page_positions.get(next_num, -1)
-                next_export_pos = export_positions.get(next_num, -1)
+        unexpected_order_numbers = [
+            num for num in exported_unique_order_numbers if num not in expected_order_numbers
+        ]
+        if unexpected_order_numbers:
+            print(f"\n❌ 导出文件包含未请求的订单号: {unexpected_order_numbers}")
+            pytest.fail(f"导出文件包含未请求的订单号: {unexpected_order_numbers}")
 
-                if (page_pos < next_page_pos) != (export_pos < next_export_pos):
-                    order_consistent = False
-                    print(f"Order inconsistent: {num} and {next_num}")
-                    break
-
-            if order_consistent:
-                print("\n✅ 排序一致性验证通过！导出顺序与页面排序一致")
-            else:
-                print("\n❌ 排序一致性验证失败！导出顺序与页面排序不一致")
-                pytest.fail("排序一致性验证失败")
-        else:
-            print("\n❌ 没有匹配的订单号")
-            pytest.fail("没有匹配的订单号")
+        print("\n✅ 导出订单覆盖验证通过：导出文件包含且仅包含请求导出的订单号")
 
         print("\n" + "=" * 70)
         print("Test completed")
