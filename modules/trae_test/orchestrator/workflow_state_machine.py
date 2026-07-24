@@ -220,6 +220,54 @@ class WorkflowStateMachine:
         """获取所有工作流（需要在实际使用时注入）"""
         return []
 
+    def apply_audit_result(self, current_state: WorkflowState, audit_result) -> tuple[WorkflowState, list[str]]:
+        """根据 AuditResult 驱动状态转换
+
+        延迟导入 AuditResult, AuditIssue 避免循环依赖。
+
+        Args:
+            current_state: 当前状态
+            audit_result: 审核结果
+
+        Returns:
+            tuple[WorkflowState, list[str]]: (新状态, 转换消息列表)
+        """
+        from .audit_models import AuditResult, AuditIssue  # 延迟导入避免循环依赖
+
+        messages = []
+
+        # 检查是否有 manual_review 级别的问题
+        has_manual_review = any(
+            issue.severity == "manual_review" for issue in audit_result.issues
+        )
+
+        # 检查是否通过
+        if audit_result.passed:
+            if current_state in (WorkflowState.AWAITING_REVIEW, WorkflowState.REVIEWING):
+                new_state = self._find_next_after_review(current_state)
+                messages.append("审核通过，状态推进")
+                return (new_state, messages)
+            return (current_state, messages)
+
+        # 有 manual_review 问题 → 待人工审核
+        if has_manual_review:
+            messages.append(
+                f"发现 {sum(1 for i in audit_result.issues if i.severity == 'manual_review')} 个待人工确认问题"
+            )
+            return (WorkflowState.AWAITING_REVIEW, messages)
+
+        # 审核未通过且有 error → 失败
+        messages.append(f"审核未通过：{len(audit_result.errors)} 个错误")
+        return (WorkflowState.FAILED, messages)
+
+    def _find_next_after_review(self, current: WorkflowState) -> WorkflowState:
+        """查找审核通过后的下一个状态"""
+        review_transitions = {
+            WorkflowState.AWAITING_REVIEW: WorkflowState.REVIEWING,
+            WorkflowState.REVIEWING: WorkflowState.COMPLETED,
+        }
+        return review_transitions.get(current, WorkflowState.COMPLETED)
+
     def get_available_transitions(self, workflow) -> list[WorkflowState]:
         """获取当前状态可转换到的目标状态"""
         current_state = self._get_workflow_state(workflow)
