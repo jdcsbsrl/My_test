@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 
 import allure
@@ -72,7 +74,7 @@ class CustomerApiResourceAPI(BaseAPI):
     @allure.step("删除对外接口")
     def delete(self, ids: list[int]) -> Any:
         endpoint = f"{self.base_path}/{ids}"
-        response = self.delete(endpoint)
+        response = super().delete(endpoint)
         self.attach_request_info(response)
         return response
 

@@ -98,6 +98,7 @@ class LoginService:
     def clear_token(self) -> None:
         self._token = None
         self._token_obtain_time = None
+        self._last_login_response = None
         logger.info("Token cleared")
 
     def get_token_info(self) -> dict[str, Any]:
@@ -107,6 +108,12 @@ class LoginService:
             "token_obtain_time": self._token_obtain_time,
             "elapsed_seconds": time.time() - self._token_obtain_time if self._token_obtain_time else None,
         }
+
+    @classmethod
+    def reset(cls) -> None:
+        if cls._instance is not None:
+            cls._instance.clear_token()
+        cls._instance = None
 
 
 def get_login_service() -> LoginService:

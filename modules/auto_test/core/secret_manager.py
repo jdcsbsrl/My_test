@@ -138,6 +138,12 @@ class SecretManager:
     def clear_cache(self) -> None:
         self._secrets_cache.clear()
 
+    @classmethod
+    def reset(cls) -> None:
+        if cls._instance is not None:
+            cls._instance.clear_cache()
+        cls._instance = None
+
 
 def get_secret_manager() -> SecretManager:
     return SecretManager()

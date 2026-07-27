@@ -124,6 +124,12 @@ class TokenManager:
             f"{env.upper()}_OBTAINED_AT": info.obtained_at,
         }
 
+    @classmethod
+    def reset(cls) -> None:
+        if cls._instance is not None:
+            cls._instance._tokens.clear()
+        cls._instance = None
+
 
 def get_token_manager() -> TokenManager:
     return TokenManager()
