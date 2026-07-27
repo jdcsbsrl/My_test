@@ -206,16 +206,11 @@ generator.export_to_excel(cases, output_path)
 - 有需求ID：`需求1001236销售订单SKU图片显示.xlsx`
 - 无需求ID：`需求销售订单导出时间优化.xlsx`
 
-**输出路径**：
-
-| 类型 | 路径 | 说明 |
-|------|------|------|
-| 正式成果 | `workspace/YYYYMMDD/formal/` | 审核通过的正式测试用例 |
-| 草稿 | `workspace/YYYYMMDD/draft/` | 未经审核或待修改的草稿 |
+**输出路径**：`workspace/YYYYMMDD/`
 
 示例：
-- 正式成果：`workspace/20260513/formal/需求1001236销售订单SKU图片显示.xlsx`
-- 草稿：`workspace/20260513/draft/需求销售订单导出时间优化.xlsx`
+- `workspace/20260513/需求1001236销售订单SKU图片显示.xlsx`
+- `workspace/20260513/需求销售订单导出时间优化.xlsx`
 
 **输出要求**：
 - 明确只生成 `.xlsx` 格式的 Excel 文件

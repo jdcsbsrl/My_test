@@ -197,24 +197,24 @@ from modules.trae_test.utils.test_case_generator import TestCaseGenerator
 
 generator = TestCaseGenerator()
 cases = generator.generate_cases(requirement_text)
-generator.export_to_json(cases, 'output/test_cases.json')
+generator.export_to_json(cases, 'workspace/20260727/test_cases.json')
 
 # auto_test 执行测试
 from modules.auto_test.api.api_client import ApiClient
 import json
 
-with open('output/test_cases.json', 'r') as f:
+with open('workspace/20260727/test_cases.json', 'r') as f:
     test_cases = json.load(f)
 
 client = ApiClient('test')
 results = client.run_tests(test_cases)
 
 # 保存执行结果
-with open('output/test_results.json', 'w') as f:
+with open('workspace/20260727/test_results.json', 'w') as f:
     json.dump(results, f, ensure_ascii=False, indent=2)
 
 # trae_test 导入执行结果
-generator.import_results('output/test_results.json')
+generator.import_results('workspace/20260727/test_results.json')
 ```
 
 ## 错误处理机制

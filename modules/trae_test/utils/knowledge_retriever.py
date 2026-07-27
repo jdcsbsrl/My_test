@@ -758,7 +758,7 @@ class KnowledgeRetriever:
     # ── 倒排索引 ─────────────────────────────────────────────────
 
     def search_historical_cases(self, keyword: str, top_k: int = 3) -> list[dict[str, Any]]:
-        """检索历史测试用例（双源：知识库JSON + workspace/formal/ Excel）
+        """检索历史测试用例（双源：知识库JSON + workspace Excel）
 
         通过学习已有用例的步骤和预期结果中的高频模式，优化生成策略。
 
@@ -796,7 +796,7 @@ class KnowledgeRetriever:
                 if len(results) >= top_k:
                     break
 
-        # ── 源2：workspace/formal/ Excel ──────────────────────
+        # ── 源2：workspace Excel ─────────────────────────────
         if len(results) < top_k:
             try:
                 results.extend(self._search_workspace_excel(keyword, top_k - len(results)))
@@ -806,7 +806,7 @@ class KnowledgeRetriever:
         return results[:top_k]
 
     def _search_workspace_excel(self, keyword: str, top_k: int) -> list[dict[str, Any]]:
-        """从 workspace/ 目录下最近30天的 formal/ Excel 中检索"""
+        """从 workspace/ 目录下最近30天的 Excel 中检索，兼容旧 formal/draft 子目录"""
         from datetime import datetime, timedelta
 
         project_root = find_project_root(__file__)
@@ -819,11 +819,19 @@ class KnowledgeRetriever:
         cutoff = datetime.now() - timedelta(days=30)
         keyword_lower = keyword.lower()
 
-        # 扫描 workspace/YYYYMMDD/formal/*.xlsx
+        # 扫描 workspace/YYYYMMDD/*.xlsx，并兼容历史 workspace/YYYYMMDD/formal|draft/*.xlsx
         from .excel_generator import ExcelGenerator
 
-        pattern = os.path.join(workspace_dir, "**", "formal", "*.xlsx")
-        for excel_path in sorted(glob_mod.iglob(pattern, recursive=True), reverse=True):
+        patterns = [
+            os.path.join(workspace_dir, "[0-9]" * 8, "*.xlsx"),
+            os.path.join(workspace_dir, "[0-9]" * 8, "formal", "*.xlsx"),
+            os.path.join(workspace_dir, "[0-9]" * 8, "draft", "*.xlsx"),
+        ]
+        excel_paths = sorted(
+            {path for pattern in patterns for path in glob_mod.iglob(pattern, recursive=True)},
+            reverse=True,
+        )
+        for excel_path in excel_paths:
             try:
                 mod_time = datetime.fromtimestamp(os.path.getmtime(excel_path))
                 if mod_time < cutoff:

@@ -341,13 +341,13 @@ def test_historical_cases_uses_knowledge_base_then_workspace_fallback(tmp_path, 
     assert results[1]["case_name"] == "workspace"
 
 
-def test_search_workspace_excel_reads_recent_formal_workbooks(tmp_path, monkeypatch):
+def test_search_workspace_excel_reads_recent_date_workbooks(tmp_path, monkeypatch):
     from modules.trae_test.utils.excel_generator import ExcelGenerator
 
     retriever, _ = _retriever(tmp_path)
-    formal = tmp_path / "workspace" / "20260727" / "formal"
-    formal.mkdir(parents=True)
-    workbook = formal / "cases.xlsx"
+    date_dir = tmp_path / "workspace" / "20260727"
+    date_dir.mkdir(parents=True)
+    workbook = date_dir / "cases.xlsx"
     workbook.write_text("placeholder", encoding="utf-8")
     monkeypatch.setattr(knowledge_retriever, "find_project_root", lambda start: str(tmp_path))
     monkeypatch.setattr(
@@ -357,6 +357,24 @@ def test_search_workspace_excel_reads_recent_formal_workbooks(tmp_path, monkeypa
     )
 
     assert retriever._search_workspace_excel("order", top_k=1)[0]["source"] == "workspace:cases.xlsx"
+
+
+def test_search_workspace_excel_keeps_legacy_formal_compatibility(tmp_path, monkeypatch):
+    from modules.trae_test.utils.excel_generator import ExcelGenerator
+
+    retriever, _ = _retriever(tmp_path)
+    legacy_formal = tmp_path / "workspace" / "20260727" / "formal"
+    legacy_formal.mkdir(parents=True)
+    workbook = legacy_formal / "legacy.xlsx"
+    workbook.write_text("placeholder", encoding="utf-8")
+    monkeypatch.setattr(knowledge_retriever, "find_project_root", lambda start: str(tmp_path))
+    monkeypatch.setattr(
+        ExcelGenerator,
+        "read_excel_worksheet",
+        lambda path: [{"case_name": "order legacy", "steps": "open order", "expected_result": "done"}],
+    )
+
+    assert retriever._search_workspace_excel("order", top_k=1)[0]["source"] == "workspace:legacy.xlsx"
 
 
 def test_search_db_disabled_and_enabled_session_paths(tmp_path, monkeypatch):

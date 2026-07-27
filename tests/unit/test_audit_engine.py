@@ -1,6 +1,7 @@
 """测试审核引擎"""
 
 from modules.trae_test.orchestrator.audit_engine import AuditEngine, AuditType
+from modules.trae_test.orchestrator.audit_models import AuditResult
 
 
 class TestAuditEngine:
@@ -35,3 +36,23 @@ class TestAuditEngine:
         types = engine._auto_select_audit_types("test string")
         assert isinstance(types, list)
         assert len(types) > 0
+
+    def test_audit_file_path_accepts_date_directory(self, tmp_path):
+        """Excel 文件应允许直接存放在 workspace/YYYYMMDD/ 下"""
+        engine = AuditEngine()
+        result = AuditResult()
+        path = tmp_path / "workspace" / "20260727" / "需求demo.xlsx"
+
+        engine._audit_file_path(str(path), result)
+
+        assert not [issue for issue in result.issues if issue.rule_id == "FILE_PATH_INVALID"]
+
+    def test_audit_file_path_rejects_legacy_formal_directory(self, tmp_path):
+        """新规范不再允许 formal/draft 子目录作为 Excel 输出位置"""
+        engine = AuditEngine()
+        result = AuditResult()
+        path = tmp_path / "workspace" / "20260727" / "formal" / "需求demo.xlsx"
+
+        engine._audit_file_path(str(path), result)
+
+        assert [issue for issue in result.issues if issue.rule_id == "FILE_PATH_INVALID"]
