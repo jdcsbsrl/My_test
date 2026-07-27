@@ -38,9 +38,10 @@ python tools/kb_manager.py validate --title file_title --keyword keyword
 - 优先使用 `retrieve()` / `search_business_rules()` 获取精准片段。
 - 只有用户明确要求全量分析时，才使用 `get_all_chunks()`，并设置 `max_chunks`。
 
-**版本**: 3.2.0  
+**文档版本**: 3.2.0  
+**知识库 API 版本**: 3.0.0  
 **架构**: HarnessEngineer  
-**更新时间**: 2026-07-16
+**最近审查时间**: 2026-07-27
 
 ---
 
@@ -116,11 +117,11 @@ except Exception as e:
 **v3.0 存储架构**：
 ```
 assets/knowledge_base/
-├── data/original/    ← 34个原始JSON+MD（~2MB）    → 直接文件路径可能变化，勿硬编码
-├── data/chunks/      ← 82个分块文件（>80KB自动切） → 通过 get_all_chunks() 读取
+├── data/original/    ← 原始JSON+MD（数量以 registry/API 为准） → 直接文件路径可能变化，勿硬编码
+├── data/chunks/      ← 分块文件（>80KB自动切）                 → 通过 get_all_chunks() 读取
 ├── index/global/     ← v3.0 全局索引               → 通过 get_index() 读取
-├── index/inverted/   ← 倒排索引（424关键词）       → 通过 search_by_inverted_index() 读取
-└── metadata/         ← 文件注册表（Tag映射）        → 通过 _load_registry() 读取
+├── index/inverted/   ← 倒排索引（关键词数量以索引元数据为准） → 通过 search_by_inverted_index() 读取
+└── metadata/         ← 文件注册表（Tag映射）        → 通过 refresh_registry() / list_available_files() / get_retrieval_stats() 间接访问状态
 ```
 
 ---
@@ -132,7 +133,7 @@ assets/knowledge_base/
 | 索引项 | 文档位置 | 用途 |
 |-------|---------|------|
 | 工作流程 | [docs/TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | 测试用例生成完整流程（含质量评分/优化/重生闭环） |
-| 用例生成器 | [modules/trae_test/utils/test_case_generator.py](modules/trae_test/utils/test_case_generator.py) | 15字段标准格式生成 |
+| 用例生成器 | [modules/trae_test/utils/test_case_generator.py](modules/trae_test/utils/test_case_generator.py) | 15字段标准格式生成；字段顺序以 `docs/TRAE_TEST_WORKFLOW.md` 的 Excel 表头规范为准 |
 | 知识检索 | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | 知识库检索工具 |
 | Excel生成 | [modules/trae_test/utils/excel_generator.py](modules/trae_test/utils/excel_generator.py) | 统一Excel文件生成 |
 | CLI工具 | [tools/case_generator_cli.py](tools/case_generator_cli.py) | 命令行用例生成 |
@@ -171,13 +172,13 @@ assets/knowledge_base/
 | 索引项 | 文档位置 | 用途 |
 |-------|---------|------|
 | **检索 API（入口）** | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | **Agent 唯一访问入口** |
-| 知识库全局索引 | [assets/knowledge_base/index/global/global_index.json](assets/knowledge_base/index/global/global_index.json) | v3.0 全局索引 |
-| 文件注册表 | [assets/knowledge_base/metadata/file_registry.json](assets/knowledge_base/metadata/file_registry.json) | Tag→File 映射 |
-| 倒排索引 | [assets/knowledge_base/index/inverted/inverted_index.json](assets/knowledge_base/index/inverted/inverted_index.json) | 关键词检索 |
+| 知识库全局索引 | [assets/knowledge_base/index/global/global_index.json](assets/knowledge_base/index/global/global_index.json) | v3.0 全局索引；仅供维护工具/状态核查使用 |
+| 文件注册表 | [assets/knowledge_base/metadata/file_registry.json](assets/knowledge_base/metadata/file_registry.json) | Tag→File 映射；Agent 检索必须走 API |
+| 倒排索引 | [assets/knowledge_base/index/inverted/inverted_index.json](assets/knowledge_base/index/inverted/inverted_index.json) | 关键词检索底层索引；Agent 检索必须走 API |
 | 更新工作流程 | [docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | 知识库更新标准化流程 |
+| 检索使用指南 | [docs/KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | 智能检索系统使用说明 |
 
 > **注意**: 业务数据文件列表应通过 `r.get_index()` 或 `r.list_available_files()` 动态获取，禁止在系统提示词中硬编码具体文件清单。
-| 检索使用指南 | [docs/KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | 智能检索系统使用说明 |
 
 ### 知识库更新
 
@@ -186,7 +187,7 @@ assets/knowledge_base/
 | 更新工作流程 | [docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | 标准化更新流程（四阶段） |
 | 知识库管理器 | [tools/kb_manager.py](tools/kb_manager.py) | CLI管理工具（scan / process / migrate） |
 | 文件分割器 | [modules/trae_test/utils/file_splitter.py](modules/trae_test/utils/file_splitter.py) | >80KB自动语义分割（SHA256验证） |
-| 索引构建器 | [modules/trae_test/utils/index_builder.py](modules/trae_test/utils/index_builder.py) | TF-IDF关键词 + 三层索引 |
+| 索引构建器 | [modules/trae_test/utils/index_builder_v3.py](modules/trae_test/utils/index_builder_v3.py) | TF-IDF关键词 + 三层索引 |
 | 变更监控器 | [modules/trae_test/utils/kb_monitor.py](modules/trae_test/utils/kb_monitor.py) | 文件大小检测 + 自动触发处理 |
 | 完整性验证 | [tools/verify_knowledge_base.py](tools/verify_knowledge_base.py) | SHA256哈希 + 分块重建校验 |
 | 检索系统 | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | 智能检索API（Agent入口） |
@@ -197,7 +198,7 @@ assets/knowledge_base/
 |-------|---------|------|
 | 虚拟环境 | [docs/VIRTUAL_ENV.md](docs/VIRTUAL_ENV.md) | 虚拟环境详细说明 |
 | 环境配置 | [configs/](configs/) | 配置文件目录 |
-| 测试配置 | [modules/auto_test/configs/](modules/auto_test/configs/) | 测试环境配置 |
+| 测试配置 | [modules/auto_test/configs/](modules/auto_test/configs/) | 自动化测试常量/模块内配置代码 |
 
 ---
 
@@ -206,9 +207,9 @@ assets/knowledge_base/
 | 智能体 | 职责 | 触发条件 | 核心入口 |
 |-------|------|----------|----------|
 | TestCaseGenerator | 测试用例生成 | 用户提交测试需求 | [test_case_generator.py](modules/trae_test/utils/test_case_generator.py) |
-| AutoTestExecutor | 自动化测试执行 | 测试用例生成完成 | [test_data_factory.py](modules/auto_test/core/test_data_factory.py) |
+| AutoTestExecutor | 自动化测试执行 | 测试用例生成完成 | [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) / [run_regression.py](tools/run_regression.py) |
 | KnowledgeRetriever | 知识检索 | 其他智能体请求检索 | [knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) |
-| ReportGenerator | 报告生成 | 测试执行完成 | [report_generator.py](tools/report_generator.py) |
+| TestReportGenerator | 报告生成 | 测试执行完成 | [report_generator.py](tools/report_generator.py) |
 | **AuditAgent** | **全能审核（阻塞式网关）** | 任何任务输出交付给用户前（拦截器/网关） | [audit_agent_enhanced.py](modules/trae_test/orchestrator/audit_agent_enhanced.py) |
 
 > **协同编排入口**: [multi_agent_runner.py](tools/multi_agent_runner.py) - 多Agent协同编排统一入口
