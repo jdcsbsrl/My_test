@@ -86,7 +86,13 @@ jobs:
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run unit tests
-        run: pytest tests/unit/ -v --tb=short -n auto --alluredir reports/allure-results
+        run: >
+          pytest tests/unit/ -v --tb=short -n auto --alluredir reports/allure-results
+          --cov=modules/auto_test --cov=modules/trae_test
+          --cov-report=html:reports/coverage/html
+          --cov-report=xml:reports/coverage/coverage.xml
+          --cov-report=term
+          --cov-fail-under=60
       - name: Upload unit test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -114,7 +120,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --alluredir reports/allure-results
+        run: pytest tests/integration/ -v --tb=short --no-cov --alluredir reports/allure-results
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -172,7 +178,7 @@ jobs:
         run: playwright install --with-deps chromium
       - name: Run UI tests (shard ${{ matrix.shard }})
         run: |
-          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright --alluredir reports/allure-results
+          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright --no-cov --alluredir reports/allure-results
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
