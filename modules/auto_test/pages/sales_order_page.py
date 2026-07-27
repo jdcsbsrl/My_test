@@ -139,8 +139,22 @@ class SalesOrderPage(BasePage):
         ]
 
         self.page.wait_for_timeout(3000)
-        self.page.wait_for_load_state("networkidle", timeout=15000)
-        self.page.locator(".el-tabs--top.demo-tabs").first.wait_for(timeout=15000)
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception as e:
+            logger.warning("销售订单页等待 networkidle 超时，继续等待业务控件: {}", e)
+
+        tab_container = self.page.locator(".el-tabs--top.demo-tabs, [role='tab'], .el-tabs__item").first
+        try:
+            tab_container.wait_for(timeout=15000)
+        except Exception:
+            logger.warning(
+                "销售订单页标签未出现，刷新重试: url={}, title={}",
+                self.page.url,
+                self.page.title(),
+            )
+            self.page.reload(wait_until="domcontentloaded", timeout=60000)
+            tab_container.wait_for(timeout=30000)
 
         clicked = False
         for name in tab_variants:

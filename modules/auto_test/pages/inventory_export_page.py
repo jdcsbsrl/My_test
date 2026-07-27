@@ -517,7 +517,16 @@ class InventoryExportPage(BasePage):
                 ".el-message:visible, .el-notification:visible, [role='alert']:visible"
             ).all_text_contents()
             logger.warning("实时导出未产生文件，页面提示: {}，导出响应: {}", messages, export_responses[-10:])
-            return {"success": False, "error": str(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            return {
+                "success": False,
+                "error": api_result.get("error") or str(e),
+                "filename": None,
+                "file_path": None,
+                "file_size": 0,
+                "url": None,
+                "messages": messages,
+                "export_responses": export_responses[-10:],
+            }
         finally:
             self.page.remove_listener("response", capture_file_response)
 
