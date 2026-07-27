@@ -2,7 +2,7 @@ import re
 import time
 
 import allure
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -19,7 +19,17 @@ class InventorySKUPage(BasePage):
     def navigate_to_search_page(self) -> None:
         self.navigate_to(self.search_url)
         self.wait_for_load_state("domcontentloaded")
-        self.page.locator("input, button, table, [role='table']").first.wait_for(state="attached", timeout=30000)
+        ready_locator = self.page.locator("input, button, table, [role='table']").first
+        try:
+            ready_locator.wait_for(state="attached", timeout=30000)
+        except PlaywrightTimeoutError:
+            logger.warning(
+                "库存SKU页面首屏控件未在30秒内出现，准备刷新重试: url={}, title={}",
+                self.page.url,
+                self.page.title(),
+            )
+            self.page.reload(wait_until="domcontentloaded", timeout=60000)
+            ready_locator.wait_for(state="attached", timeout=45000)
         logger.info("导航到库存SKU页面")
 
     @allure.step("输入SKU编码: {sku_code}")
