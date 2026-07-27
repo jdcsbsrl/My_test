@@ -1,3 +1,4 @@
+import copy
 import os
 from dataclasses import dataclass
 from enum import Enum
@@ -137,7 +138,7 @@ class Environment:
 
     @property
     def config(self) -> dict[str, Any]:
-        return self._config.copy()
+        return copy.deepcopy(self._config)
 
     @property
     def name(self) -> str:

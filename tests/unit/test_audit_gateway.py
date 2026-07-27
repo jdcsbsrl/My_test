@@ -71,8 +71,9 @@ class TestAuditGateway:
 
     def test_query_logs(self):
         gw = AuditGateway()
+        gw.logger.query = lambda **kwargs: [{"id": 1, "limit": kwargs.get("limit")}]
         logs = gw.query_logs(limit=10)
-        assert isinstance(logs, list)
+        assert logs == [{"id": 1, "limit": 10}]
 
     def test_get_summary(self):
         gw = AuditGateway()
