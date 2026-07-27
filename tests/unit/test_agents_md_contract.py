@@ -8,6 +8,7 @@ pytestmark = pytest.mark.unit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_MD = PROJECT_ROOT / "AGENTS.md"
+DOCUMENTED_LOCAL_STORAGE_PREFIXES = ("assets/knowledge_base/",)
 
 
 def _read_agents_md() -> str:
@@ -47,6 +48,8 @@ def test_agents_md_relative_links_exist_and_heading_anchors_resolve():
                 missing_anchors.append(link)
             continue
         if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", link):
+            continue
+        if link.startswith(DOCUMENTED_LOCAL_STORAGE_PREFIXES):
             continue
         if not (PROJECT_ROOT / link).exists():
             missing_paths.append(link)
