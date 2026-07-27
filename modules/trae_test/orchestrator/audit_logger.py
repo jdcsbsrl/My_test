@@ -68,18 +68,20 @@ class AuditLogger:
     def _get_memory_connection(self) -> sqlite3.Connection:
         """获取 SQLite 内存数据库连接"""
         conn = sqlite3.connect(self._memory_db_path, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
+        self._enable_sqlite_wal(conn)
         conn.row_factory = sqlite3.Row
         return conn
 
     def _init_memory_db(self):
         """初始化 SQLite 内存数据库（降级方案）"""
         workspace_root = Path(__file__).resolve().parent.parent.parent.parent / "workspace"
-        self._memory_db_path = str(workspace_root / "audit_logs" / "audit_history.db")
+        worker_id = os.getenv("PYTEST_XDIST_WORKER")
+        db_name = f"audit_history_{worker_id}.db" if worker_id else "audit_history.db"
+        self._memory_db_path = str(workspace_root / "audit_logs" / db_name)
         os.makedirs(os.path.dirname(self._memory_db_path), exist_ok=True)
 
         conn = sqlite3.connect(self._memory_db_path, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
+        self._enable_sqlite_wal(conn)
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -104,6 +106,13 @@ class AuditLogger:
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _enable_sqlite_wal(conn: sqlite3.Connection) -> None:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass
 
     def _init_db(self):
         """初始化数据库表结构和索引"""

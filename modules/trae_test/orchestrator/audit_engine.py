@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from .audit_models import AuditIssue, AuditResult
-from .audit_logger import AuditLogger
 from .audit_rules import RuleManager
 from .config import AuditConfig, AuditType
 
@@ -38,10 +37,18 @@ class AuditEngine:
         """
         self.config = config or AuditConfig()
         self.rule_manager = RuleManager()
-        self.logger = AuditLogger()
+        self._logger = None
 
         # 各审核器（延迟初始化）
         self._auditors: dict[str, Any] = {}
+
+    @property
+    def logger(self):
+        if self._logger is None:
+            from .audit_logger import AuditLogger
+
+            self._logger = AuditLogger()
+        return self._logger
 
     def _get_auditor(self, auditor_type: str):
         """获取或创建审核器
