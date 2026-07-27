@@ -117,13 +117,13 @@ class WorkspaceManager:
         """生成规范的文件路径
 
         文件名格式：需求{id}-{需求名}.xlsx
-        输出路径：workspace/YYYYMMDD/{sub_dir}/
+        输出路径：workspace/YYYYMMDD/
 
         Args:
             requirement_name: 需求名称
             requirement_id: 需求ID（可选）
             date_str: 日期字符串（可选，默认当前北京日期）
-            sub_dir: 子目录名称（可选，如 formal/draft，为None时直接输出到日期目录）
+            sub_dir: 历史兼容参数，已不再创建 formal/draft 等子目录
 
         Returns:
             Path: 完整的文件路径
@@ -134,8 +134,7 @@ class WorkspaceManager:
         filename = self.generate_filename(requirement_name, requirement_id)
         output_dir = self.get_date_dir(date_str)
         if sub_dir:
-            output_dir = output_dir / sub_dir
-            output_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("Ignoring deprecated workspace sub_dir=%s; writing directly to date directory", sub_dir)
         file_path = output_dir / filename
         logger.debug(f"Generated file path: {file_path}")
         return file_path

@@ -44,26 +44,20 @@ result = retriever.retrieve("日志", mode="requirements")  # 检索需求清单
 ### kb_manager.py - 知识库管理CLI
 
 ```bash
-# 列出所有知识库文件
-python tools/kb_manager.py list
+# 检查待导入知识文件是否包含敏感内容或格式问题
+python tools/kb_manager.py lint --file path/to/source.json
 
-# 分割单个文件
-python tools/kb_manager.py split --file path/to/file.json
+# 迁移新文件到本地知识库
+python tools/kb_manager.py migrate --source path/to/source.json
 
-# 为文件构建索引
-python tools/kb_manager.py index --file path/to/file.json
+# 处理已存在的知识文件（分割+索引）
+python tools/kb_manager.py process --file assets/knowledge_base/data/original/file_title.json
 
-# 完整处理文件（分割+索引）
-python tools/kb_manager.py process --file path/to/file.json
-
-# 验证文件完整性
-python tools/kb_manager.py verify --title "销售模块"
-
-# 批量处理所有大文件
-python tools/kb_manager.py process-all
-
-# 扫描知识库
+# 扫描知识库并刷新注册表/索引
 python tools/kb_manager.py scan
+
+# 验证迁移后是否可通过检索命中
+python tools/kb_manager.py validate --title file_title --keyword keyword
 ```
 
 ### verify_knowledge_base.py - 完整性验证
@@ -73,31 +67,18 @@ python tools/kb_manager.py scan
 python tools/verify_knowledge_base.py
 
 # 验证特定文件
-python tools/kb_manager.py verify --title "销售模块"
-```
-
-### demo_retriever.py - 功能演示
-
-```bash
-# 运行演示脚本
-python tools/demo_retriever.py
+python tools/kb_manager.py validate --title file_title --keyword keyword
 ```
 
 ## 📁 目录结构
 
 ```
 assets/knowledge_base/
-├── original/                    # 原始文件备份
-│   ├── 销售模块.json
-│   ├── 需求清单.json
-│   └── ...
-├── content/                    # 分割后的块文件
-│   ├── 销售模块_chunk_*.json
-│   ├── 需求清单_chunk_*.json
-│   └── ...
-└── index/                      # 索引文件
-    ├── knowledge_base_index.json
-    └── *_index.json
+├── data/original/              # 原始知识文件
+├── data/chunks/                # 分割后的块文件
+├── index/global/               # 全局索引
+├── index/inverted/             # 倒排索引
+└── metadata/                   # 文件注册表
 ```
 
 ## 🔧 API参考
@@ -176,8 +157,8 @@ DEFAULT_THRESHOLD_KB = 80
 ```python
 KNOWLEDGE_BASE_DIR = "assets/knowledge_base"
 INDEX_DIR = "assets/knowledge_base/index"
-CONTENT_DIR = "assets/knowledge_base/content"
-ORIGINAL_DIR = "assets/knowledge_base/original"
+CHUNKS_DIR = "assets/knowledge_base/data/chunks"
+ORIGINAL_DIR = "assets/knowledge_base/data/original"
 ```
 
 ## 📊 最佳实践
@@ -189,7 +170,7 @@ ORIGINAL_DIR = "assets/knowledge_base/original"
 添加新文件后，运行验证工具确保数据完整：
 
 ```bash
-python tools/kb_manager.py verify --title "新文件"
+python tools/kb_manager.py validate --title file_title --keyword keyword
 ```
 
 ### 3. 使用索引加速检索
@@ -208,17 +189,22 @@ python tools/kb_manager.py scan
 A: 分割后的块使用格式化JSON（有缩进），而原始文件使用紧凑格式。这是正常的，不影响内容完整性。
 
 ### Q: 如何添加新文件到知识库？
-A: 使用 `add_file` 方法或 `migrate` 命令：
+A: 先 lint，再使用 `migrate` 命令：
 
-```python
-retriever.add_file("path/to/new_file.json")
+```bash
+python tools/kb_manager.py lint --file path/to/new_file.json
+python tools/kb_manager.py migrate --source path/to/new_file.json
+python tools/kb_manager.py scan
+python tools/kb_manager.py validate --title file_title --keyword keyword
 ```
 
 ### Q: 如何更新已分割的文件？
-A: 重新分割并构建索引：
+A: 使用 `process` 处理原始知识文件，再扫描并验证：
 
 ```bash
-python tools/kb_manager.py split --file path/to/file.json --force
+python tools/kb_manager.py process --file assets/knowledge_base/data/original/file_title.json
+python tools/kb_manager.py scan
+python tools/kb_manager.py validate --title file_title --keyword keyword
 ```
 
 ## 📝 版本历史

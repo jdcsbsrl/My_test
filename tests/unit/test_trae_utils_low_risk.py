@@ -188,12 +188,12 @@ class TestWorkspaceManager:
         assert ":" not in filename
         assert len(long_name) <= 205
 
-    def test_generate_file_path_creates_date_and_sub_directory(self, tmp_path):
+    def test_generate_file_path_ignores_deprecated_sub_directory(self, tmp_path):
         manager = WorkspaceManager(str(tmp_path))
 
         path = manager.generate_file_path("demo", requirement_id="REQ-1", date_str="20260727", sub_dir="draft")
 
-        assert path.parent == tmp_path / "workspace" / "20260727" / "draft"
+        assert path.parent == tmp_path / "workspace" / "20260727"
         assert path.parent.exists()
         assert path.name.endswith(".xlsx")
 
@@ -244,6 +244,16 @@ class TestTemplateBuilderAndExcelGenerator:
         assert ExcelGenerator.validate_excel(path) == (True, "")
         rows = ExcelGenerator.read_excel_worksheet(path)
         assert rows[0]["case_name"] == "case name"
+
+    def test_generate_excel_defaults_to_date_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ExcelGenerator, "TEMPLATE_PATH", str(tmp_path / "missing-template.xlsx"))
+        monkeypatch.setattr("modules.trae_test.utils.excel_generator.workspace_manager", WorkspaceManager(str(tmp_path)))
+
+        path = Path(ExcelGenerator.generate_excel([_case()], requirement_name="demo", date_str="20260727"))
+
+        assert path.parent == tmp_path / "workspace" / "20260727"
+        assert path.name == "需求demo.xlsx"
+        assert ExcelGenerator.validate_excel(str(path)) == (True, "")
 
     def test_execute_accepts_json_string_and_data_wrapper(self, tmp_path, monkeypatch):
         output = tmp_path / "execute.xlsx"

@@ -298,11 +298,11 @@ class AuditEngine:
                 )
 
         # 验证存放路径
-        path_pattern = r".*workspace[\\/](\d{8})[\\/](formal|draft)[\\/].*"
+        path_pattern = r".*workspace[\\/](\d{8})[\\/][^\\/]+\.xlsx$"
         if not re.match(path_pattern, file_path, re.IGNORECASE):
             result.add_error(
                 "FILE_PATH_INVALID",
-                f"文件存放路径不符合规范，应存放在workspace/YYYYMMDD/formal/或workspace/YYYYMMDD/draft/目录下，当前路径: {file_path}",
+                f"文件存放路径不符合规范，应存放在workspace/YYYYMMDD/目录下，当前路径: {file_path}",
                 file_path,
             )
         else:

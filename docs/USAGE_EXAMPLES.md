@@ -31,7 +31,7 @@ python tools/multi_agent_runner.py --task test_case --requirement-id 1001345 --r
 - `--requirement-id`: 需求ID
 - `--requirement-name`: 需求名称
 
-**输出位置**: `workspace/outputs/` 目录
+**输出位置**: `workspace/YYYYMMDD/` 目录。
 
 ---
 
@@ -114,7 +114,7 @@ AuditAgent 会提供详细的错误反馈和修正建议，根据建议修改后
 
 ### Q: 输出文件在哪里？
 
-所有生成的文件默认保存在 `workspace/outputs/` 目录下。
+生成文件默认保存在 `workspace/YYYYMMDD/` 目录下。
 
 ---
 
@@ -122,4 +122,4 @@ AuditAgent 会提供详细的错误反馈和修正建议，根据建议修改后
 
 - [工作流程总览](WORKFLOW.md)
 - [多Agent协同模块](../modules/trae_test/orchestrator/)
-- [AuditAgent 详细规范](../.trae/specs/audit-agent-v2/spec.md)
+- [Agent 规则](../.trae/rules/agent_rules.md)
