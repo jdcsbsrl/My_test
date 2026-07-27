@@ -3,6 +3,7 @@ from playwright.sync_api import Locator, Page, expect
 
 from modules.auto_test.core.config_manager import get_config
 from modules.auto_test.core.logger import get_logger
+from modules.auto_test.core.self_healing import LocatorContext, SelfHealingLocator
 
 logger = get_logger()
 
@@ -12,6 +13,7 @@ class BasePage:
         self.page = page
         self.config = get_config()
         self.base_url = self.config.base_url
+        self.self_healing = SelfHealingLocator(page, env=getattr(self.config, "env", "test"))
 
     @allure.step("Navigate to {url}")
     def navigate_to(self, url: str) -> None:
@@ -27,13 +29,29 @@ class BasePage:
 
     @allure.step("Click element: {selector}")
     def click(self, selector: str) -> None:
-        self.page.locator(selector).click()
-        logger.info(f"Clicked: {selector}")
+        try:
+            self.page.locator(selector).click()
+            logger.info(f"Clicked: {selector}")
+        except Exception:
+            if not self.self_healing.enabled:
+                raise
+            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
+            if not self.self_healing.execute("click", context, lambda locator: locator.click()):
+                raise
+            logger.info(f"Self-healed click: {selector}")
 
     @allure.step("Fill input {selector} with value")
     def fill(self, selector: str, value: str) -> None:
-        self.page.locator(selector).fill(value)
-        logger.info(f"Filled {selector}")
+        try:
+            self.page.locator(selector).fill(value)
+            logger.info(f"Filled {selector}")
+        except Exception:
+            if not self.self_healing.enabled:
+                raise
+            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
+            if not self.self_healing.execute("fill", context, lambda locator: locator.fill(value)):
+                raise
+            logger.info(f"Self-healed fill: {selector}")
 
     @allure.step("Type text into {selector}")
     def type_text(self, selector: str, value: str, delay: int = 0) -> None:
@@ -63,7 +81,16 @@ class BasePage:
 
     @allure.step("Wait for element: {selector}")
     def wait_for_element(self, selector: str, timeout: int = 10000) -> None:
-        self.page.locator(selector).wait_for(timeout=timeout)
+        try:
+            self.page.locator(selector).wait_for(timeout=timeout)
+        except Exception:
+            if not self.self_healing.enabled:
+                raise
+            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
+            if not self.self_healing.execute(
+                "wait_for_element", context, lambda locator: locator.wait_for(timeout=timeout)
+            ):
+                raise
 
     @allure.step("Wait for page load")
     def wait_for_load_state(self, state: str = "domcontentloaded") -> None:
@@ -127,6 +154,12 @@ class BasePage:
         Returns:
             是否成功点击
         """
+        context = LocatorContext(selector=selectors[0] if selectors else None, selectors=selectors)
+        if len(selectors) > 1 and self.self_healing.enabled and self.self_healing.execute(
+            "try_click", context, lambda locator: locator.click(), timeout=timeout
+        ):
+            return True
+
         for selector in selectors:
             try:
                 self.wait_for_element(selector, timeout)
@@ -151,6 +184,12 @@ class BasePage:
         Returns:
             是否成功填充
         """
+        context = LocatorContext(selector=selectors[0] if selectors else None, selectors=selectors)
+        if len(selectors) > 1 and self.self_healing.enabled and self.self_healing.execute(
+            "try_fill", context, lambda locator: locator.fill(value), timeout=timeout
+        ):
+            return True
+
         for selector in selectors:
             try:
                 self.wait_for_element(selector, timeout)
@@ -175,6 +214,16 @@ class BasePage:
         Returns:
             是否成功点击
         """
+        context = LocatorContext(
+            role=role,
+            names=name_variants,
+            description=name_variants[0] if name_variants else role,
+        )
+        if len(name_variants) > 1 and self.self_healing.enabled and self.self_healing.execute(
+            "try_click_by_role", context, lambda locator: locator.click(), timeout=timeout
+        ):
+            return True
+
         for name in name_variants:
             try:
                 element = self.get_by_role(role, name=name)
