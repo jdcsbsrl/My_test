@@ -1,0 +1,22 @@
+enabled: false
+allowed_envs:
+  - test
+  - test_env
+  - uat
+max_attempts_per_action: 6
+max_heals_per_page: 20
+strict_unique_match: true
+attach_allure: true
+screenshot_on_success: true
+metrics_enabled: true
+timeout_ms: 10000
+strategies:
+  - exact_selector
+  - selector_chain
+  - role_name
+  - text
+  - semantic_attr
+  - dom_text
+circuit_breaker:
+  failure_threshold: 5
+  cooldown_seconds: 300
