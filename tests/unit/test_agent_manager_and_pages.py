@@ -8,6 +8,7 @@ import pytest
 from modules.auto_test.pages import base_page as base_page_module
 from modules.auto_test.pages.base_page import BasePage
 from modules.auto_test.pages.export_page import ExportPage
+from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.trae_test.orchestrator.agent_manager import AgentContext, AgentManager, DomainMetadata
 
 
@@ -277,3 +278,54 @@ class TestBaseAndExportPage:
 
         page.wait_for_url = lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("timeout"))
         assert not export_page.wait_for_export_page()
+
+    def test_inventory_export_api_fallback_respects_requested_timeout(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        timeouts = []
+
+        class FakeAPIResponse:
+            ok = True
+            status = 200
+            url = "https://example.test/oms-api/oms-admin/base/inventory/inventoryExport"
+            headers = {
+                "content-type": "application/octet-stream",
+                "content-disposition": 'attachment; filename="x.xlsx"',
+            }
+
+            def json(self):
+                return {"data": {"OmsInventory": [{"label": "SKU", "prop": "sku"}], "OmsLocation": []}}
+
+            def body(self):
+                return b"excel-bytes"
+
+        class FakeRequest:
+            def get(self, *args, **kwargs):
+                timeouts.append(("get", kwargs.get("timeout")))
+                return FakeAPIResponse()
+
+            def post(self, *args, **kwargs):
+                timeouts.append(("post", kwargs.get("timeout")))
+                return FakeAPIResponse()
+
+        class FakeInventoryPage(FakePage):
+            def __init__(self):
+                super().__init__()
+                self.url = "https://example.test/product/productCenter/exportPage"
+                self.context = SimpleNamespace(request=FakeRequest())
+                self._evaluate_calls = 0
+
+            def evaluate(self, script):
+                self._evaluate_calls += 1
+                if self._evaluate_calls == 1:
+                    return ["SKU-1"]
+                if self._evaluate_calls == 2:
+                    return "token"
+                return ["SKU"]
+
+        page = FakeInventoryPage()
+        export_page = InventoryExportPage(page)
+        result = export_page._download_inventory_export_via_api(str(tmp_path / "inventory.xlsx"), timeout=180000)
+
+        assert result["success"]
+        assert ("get", 180000) in timeouts
+        assert ("post", 180000) in timeouts

@@ -595,7 +595,7 @@ class InventoryExportPage(BasePage):
             columns_response = self.page.context.request.get(
                 f"{api_base}/base/inventory/getExportColumnInfo",
                 headers=headers,
-                timeout=min(timeout, 60000),
+                timeout=timeout,
             )
             if not columns_response.ok:
                 return {
@@ -652,7 +652,7 @@ class InventoryExportPage(BasePage):
                 f"{api_base}/base/inventory/inventoryExport",
                 data={"checkColumns": check_columns, "itemIds": item_ids},
                 headers=headers,
-                timeout=min(timeout, 60000),
+                timeout=timeout,
             )
             if not export_response.ok:
                 return {
@@ -682,7 +682,7 @@ class InventoryExportPage(BasePage):
                         "url": None,
                     }
                 source_url = urljoin(export_response.url, download_url)
-                file_response = self.page.context.request.get(source_url, headers=headers, timeout=min(timeout, 60000))
+                file_response = self.page.context.request.get(source_url, headers=headers, timeout=timeout)
                 if not file_response.ok:
                     return {"success": False, "error": f"导出文件下载失败: {file_response.status}", "filename": None, "file_path": None, "file_size": 0, "url": source_url}
                 disposition = file_response.headers.get("content-disposition", "")
