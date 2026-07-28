@@ -6,8 +6,10 @@ import pytest
 
 from modules.auto_test.core import self_healing as self_healing_module
 from modules.auto_test.core.self_healing import (
+    HealingHistoryCase,
     LocatorContext,
     SelfHealingConfig,
+    SelfHealingHistoryStore,
     SelfHealingLocator,
     load_self_healing_config,
 )
@@ -83,6 +85,7 @@ def _config(**overrides):
         "attach_allure": False,
         "screenshot_on_success": False,
         "metrics_enabled": False,
+        "history_enabled": False,
         "strategies": ["exact_selector", "selector_chain", "role_name", "text"],
     }
     values.update(overrides)
@@ -181,6 +184,10 @@ strict_unique_match: false
 attach_allure: false
 screenshot_on_success: false
 metrics_enabled: false
+history_enabled: true
+history_path: custom/history.jsonl
+prefer_history: false
+min_history_successes: 3
 timeout_ms: 1234
 strategies: [text]
 circuit_breaker:
@@ -201,6 +208,10 @@ circuit_breaker:
     assert config.strategies == ["text"]
     assert config.failure_threshold == 2
     assert config.cooldown_seconds == 9
+    assert config.history_enabled
+    assert config.history_path == "custom/history.jsonl"
+    assert not config.prefer_history
+    assert config.min_history_successes == 3
 
 
 def test_metrics_event_is_written_to_jsonl(tmp_path):
@@ -264,3 +275,90 @@ def test_max_heals_per_page_limits_additional_self_healing():
     assert first.healed
     assert second.locator is None
     assert second.strategy == "heal_limit"
+
+
+def test_history_store_records_reviewable_cases_and_summary(tmp_path):
+    history = SelfHealingHistoryStore(tmp_path / "history.jsonl")
+
+    history.record(
+        HealingHistoryCase(
+            key="save-button",
+            action="click",
+            strategy="selector_chain",
+            selector="#new",
+            original_selector="#old",
+            description="Save",
+            success=True,
+            healed=True,
+            candidate_count=1,
+            error=None,
+            url="https://example.test",
+        )
+    )
+
+    selectors = history.successful_selectors("save-button")
+    summary = history.summarize()
+
+    assert selectors == ["#new"]
+    assert summary == {"total": 1, "success": 1, "failed": 0, "healed": 1, "needs_review": 1}
+
+
+def test_execute_records_history_for_success_and_failure(tmp_path):
+    page = FakePage()
+    config = _config(history_enabled=True, history_path=str(tmp_path / "history.jsonl"))
+    healer = SelfHealingLocator(page, config, env="test")
+
+    assert healer.execute(
+        "try_click",
+        LocatorContext(selector="#old", selectors=["#old", "#new"], description="Save"),
+        lambda locator: locator.click(),
+        timeout=5,
+    )
+    assert not healer.execute(
+        "try_click",
+        LocatorContext(selector="#missing", selectors=["#missing"], description="Missing"),
+        lambda locator: locator.click(),
+        timeout=5,
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["success"] is True
+    assert events[0]["needs_review"] is True
+    assert events[0]["selector"] == "#new"
+    assert events[1]["success"] is False
+    assert events[1]["needs_review"] is False
+
+
+def test_history_strategy_reuses_previous_successful_selector(tmp_path):
+    page = FakePage()
+    history_path = tmp_path / "history.jsonl"
+    history = SelfHealingHistoryStore(history_path)
+    history.record(
+        HealingHistoryCase(
+            key="Save",
+            action="try_click",
+            strategy="selector_chain",
+            selector="#new",
+            original_selector="#old",
+            description="Save",
+            success=True,
+            healed=True,
+            url="https://example.test",
+        )
+    )
+    config = _config(
+        history_enabled=True,
+        history_path=str(history_path),
+        prefer_history=True,
+        strategies=["selector_chain"],
+    )
+    healer = SelfHealingLocator(page, config, env="test")
+
+    result = healer.locate(LocatorContext(selector="#old", selectors=["#old"], description="Save"), timeout=5)
+
+    assert result.locator is page.locators["#new"]
+    assert result.strategy == "history"
+    assert result.healed
