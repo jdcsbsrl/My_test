@@ -293,6 +293,7 @@ def test_history_store_records_reviewable_cases_and_summary(tmp_path):
             candidate_count=1,
             error=None,
             url="https://example.test",
+            approved=True,
         )
     )
 
@@ -328,8 +329,7 @@ def test_execute_records_history_for_success_and_failure(tmp_path):
     assert events[0]["success"] is True
     assert events[0]["needs_review"] is True
     assert events[0]["selector"] == "#new"
-    assert events[1]["success"] is False
-    assert events[1]["needs_review"] is False
+    assert len(events) == 1
 
 
 def test_history_strategy_reuses_previous_successful_selector(tmp_path):
@@ -346,6 +346,7 @@ def test_history_strategy_reuses_previous_successful_selector(tmp_path):
             description="Save",
             success=True,
             healed=True,
+            approved=True,
             url="https://example.test",
         )
     )
@@ -362,3 +363,92 @@ def test_history_strategy_reuses_previous_successful_selector(tmp_path):
     assert result.locator is page.locators["#new"]
     assert result.strategy == "history"
     assert result.healed
+
+
+def test_history_strategy_requires_approved_review_status(tmp_path):
+    page = FakePage()
+    history_path = tmp_path / "history.jsonl"
+    history = SelfHealingHistoryStore(history_path)
+    history.record(
+        HealingHistoryCase(
+            key="Save",
+            action="try_click",
+            strategy="selector_chain",
+            selector="#new",
+            original_selector="#old",
+            description="Save",
+            success=True,
+            healed=True,
+            approved=False,
+            url="https://example.test",
+        )
+    )
+    config = _config(history_enabled=True, history_path=str(history_path), prefer_history=True)
+    healer = SelfHealingLocator(page, config, env="test")
+
+    result = healer.locate(LocatorContext(selector="#old", selectors=["#old"], description="Save"), timeout=5)
+
+    assert result.strategy != "history"
+
+
+def test_history_min_successes_filters_low_confidence_selectors(tmp_path):
+    history_path = tmp_path / "history.jsonl"
+    history = SelfHealingHistoryStore(history_path)
+    history.record(
+        HealingHistoryCase(
+            key="Save",
+            action="try_click",
+            strategy="selector_chain",
+            selector="#new",
+            original_selector="#old",
+            description="Save",
+            success=True,
+            healed=True,
+            approved=True,
+            url="https://example.test",
+        )
+    )
+
+    assert history.successful_selectors("Save", min_successes=2) == []
+    assert history.successful_selectors("Save", min_successes=1) == ["#new"]
+
+
+def test_history_excludes_non_healed_successes(tmp_path):
+    history = SelfHealingHistoryStore(tmp_path / "history.jsonl")
+    history.record(
+        HealingHistoryCase(
+            key="Save",
+            action="click",
+            strategy="exact_selector",
+            selector="#old",
+            original_selector="#old",
+            description="Save",
+            success=True,
+            healed=False,
+            approved=True,
+            url="https://example.test",
+        )
+    )
+
+    assert history.successful_selectors("Save") == []
+
+
+def test_operation_failure_records_failure_without_reuse(tmp_path):
+    page = FakePage()
+    config = _config(history_enabled=True, history_path=str(tmp_path / "history.jsonl"))
+    healer = SelfHealingLocator(page, config, env="test")
+
+    assert not healer.execute(
+        "try_click",
+        LocatorContext(selector="#old", selectors=["#old", "#new"], description="Save"),
+        lambda locator: (_ for _ in ()).throw(RuntimeError("click failed")),
+        timeout=5,
+    )
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["success"] is False
+    assert events[0]["needs_review"] is False
+    assert SelfHealingHistoryStore(tmp_path / "history.jsonl").successful_selectors("Save") == []
