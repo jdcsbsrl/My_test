@@ -78,6 +78,7 @@ class HealingHistoryCase:
     ts: float = field(default_factory=time.time)
     candidate_count: int | None = None
     error: str | None = None
+    approved: bool = False
 
 
 class SelfHealingHistoryStore:
@@ -103,6 +104,7 @@ class SelfHealingHistoryStore:
             "error": case.error,
             "url": case.url,
             "needs_review": case.healed and case.success,
+            "approved": case.approved,
         }
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
@@ -116,6 +118,7 @@ class SelfHealingHistoryStore:
                 or not event.get("success")
                 or not event.get("healed")
                 or not event.get("selector")
+                or not event.get("approved")
             ):
                 continue
             selector = str(event["selector"])
@@ -469,6 +472,8 @@ class SelfHealingLocator:
 
     def _record_history(self, action: str, context: LocatorContext, result: HealingResult) -> None:
         if not self.config.history_enabled:
+            return
+        if result.locator is None and result.strategy in {"circuit_open", "heal_limit", "not_found"}:
             return
         try:
             self.history.record(

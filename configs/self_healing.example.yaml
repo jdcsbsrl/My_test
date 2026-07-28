@@ -12,6 +12,7 @@ metrics_enabled: true
 timeout_ms: 10000
 history_enabled: true
 history_path: reports/self_healing/history.jsonl
+# Reuse only history rows manually marked with approved=true.
 prefer_history: true
 min_history_successes: 1
 strategies:
