@@ -37,6 +37,10 @@ class SelfHealingConfig:
     failure_threshold: int = 5
     cooldown_seconds: int = 300
     metrics_root: str | None = None
+    history_enabled: bool = True
+    history_path: str = "reports/self_healing/history.jsonl"
+    prefer_history: bool = True
+    min_history_successes: int = 1
 
 
 @dataclass
@@ -58,6 +62,100 @@ class HealingResult:
     selector: str | None = None
     candidate_count: int | None = None
     error: str | None = None
+
+
+@dataclass
+class HealingHistoryCase:
+    key: str
+    action: str
+    strategy: str
+    selector: str | None
+    original_selector: str | None
+    description: str | None
+    success: bool
+    healed: bool
+    url: str
+    ts: float = field(default_factory=time.time)
+    candidate_count: int | None = None
+    error: str | None = None
+
+
+class SelfHealingHistoryStore:
+    """Append-only self-healing case store for review and strategy reuse."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def record(self, case: HealingHistoryCase) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "type": "self_healing_case",
+            "ts": case.ts,
+            "key": case.key,
+            "action": case.action,
+            "strategy": case.strategy,
+            "selector": case.selector,
+            "original_selector": case.original_selector,
+            "description": case.description,
+            "success": case.success,
+            "healed": case.healed,
+            "candidate_count": case.candidate_count,
+            "error": case.error,
+            "url": case.url,
+            "needs_review": case.healed and case.success,
+        }
+        with self.path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def successful_selectors(self, key: str, *, min_successes: int = 1) -> list[str]:
+        counts: dict[str, int] = {}
+        latest: dict[str, float] = {}
+        for event in self._iter_events():
+            if (
+                event.get("key") != key
+                or not event.get("success")
+                or not event.get("healed")
+                or not event.get("selector")
+            ):
+                continue
+            selector = str(event["selector"])
+            counts[selector] = counts.get(selector, 0) + 1
+            latest[selector] = float(event.get("ts", 0.0))
+        candidates = [selector for selector, count in counts.items() if count >= min_successes]
+        return sorted(candidates, key=lambda selector: (counts[selector], latest[selector]), reverse=True)
+
+    def summarize(self) -> dict[str, int]:
+        summary = {
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "healed": 0,
+            "needs_review": 0,
+        }
+        for event in self._iter_events():
+            summary["total"] += 1
+            if event.get("success"):
+                summary["success"] += 1
+            else:
+                summary["failed"] += 1
+            if event.get("healed"):
+                summary["healed"] += 1
+            if event.get("needs_review"):
+                summary["needs_review"] += 1
+        return summary
+
+    def _iter_events(self):
+        if not self.path.exists():
+            return
+        with self.path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug("Skip malformed self-healing history line: {}", line[:120])
 
 
 class SelfHealingCircuitBreaker:
@@ -93,6 +191,7 @@ class SelfHealingLocator:
         self.config = config or load_self_healing_config()
         self.env = env
         self.heal_count = 0
+        self.history = SelfHealingHistoryStore(self.config.history_path)
         if SelfHealingLocator._breaker is None:
             SelfHealingLocator._breaker = SelfHealingCircuitBreaker(
                 self.config.failure_threshold, self.config.cooldown_seconds
@@ -106,11 +205,19 @@ class SelfHealingLocator:
 
     def locate(self, context: LocatorContext, *, timeout: int | None = None) -> HealingResult:
         timeout = timeout or self.config.timeout_ms
-        key = context.description or context.selector or ",".join(context.selectors) or context.role or "unknown"
+        key = self._history_key(context)
         if self._breaker and self._breaker.is_open(key):
             return HealingResult(None, False, "circuit_open", error="self-healing circuit breaker is open")
         if self.heal_count >= self.config.max_heals_per_page:
             return HealingResult(None, False, "heal_limit", error="self-healing page limit reached")
+
+        if self.config.history_enabled and self.config.prefer_history:
+            result = self._try_history(context, key, timeout)
+            if result.locator is not None:
+                self.heal_count += 1
+                if self._breaker:
+                    self._breaker.record_success(key)
+                return result
 
         for strategy in self.config.strategies[: self.config.max_attempts_per_action]:
             result = self._try_strategy(strategy, context, timeout)
@@ -137,12 +244,14 @@ class SelfHealingLocator:
         result = self.locate(context, timeout=timeout)
         if result.locator is None:
             self._record_event(action, context, result, started)
+            self._record_history(action, context, result)
             return False
         try:
             operation(result.locator)
             if result.healed:
                 self._attach_success(action, context, result)
                 self._record_event(action, context, result, started)
+            self._record_history(action, context, result)
             return True
         except Exception as exc:
             failed = HealingResult(
@@ -154,7 +263,21 @@ class SelfHealingLocator:
                 error=str(exc),
             )
             self._record_event(action, context, failed, started)
+            self._record_history(action, context, failed)
             return False
+
+    def history_summary(self) -> dict[str, int]:
+        return self.history.summarize()
+
+    def _history_key(self, context: LocatorContext) -> str:
+        return context.description or context.selector or ",".join(context.selectors) or context.role or "unknown"
+
+    def _try_history(self, context: LocatorContext, key: str, timeout: int) -> HealingResult:
+        for selector in self.history.successful_selectors(key, min_successes=self.config.min_history_successes):
+            result = self._candidate(self.page.locator(selector), "history", selector, True, timeout)
+            if result.locator is not None:
+                return result
+        return HealingResult(None, False, "history")
 
     def _try_strategy(self, strategy: str, context: LocatorContext, timeout: int) -> HealingResult:
         try:
@@ -344,6 +467,28 @@ class SelfHealingLocator:
         except Exception as exc:
             logger.debug("Failed to record self-healing metric: {}", exc)
 
+    def _record_history(self, action: str, context: LocatorContext, result: HealingResult) -> None:
+        if not self.config.history_enabled:
+            return
+        try:
+            self.history.record(
+                HealingHistoryCase(
+                    key=self._history_key(context),
+                    action=action,
+                    strategy=result.strategy,
+                    selector=result.selector,
+                    original_selector=context.selector,
+                    description=context.description,
+                    success=result.locator is not None,
+                    healed=result.healed,
+                    candidate_count=result.candidate_count,
+                    error=result.error,
+                    url=getattr(self.page, "url", ""),
+                )
+            )
+        except Exception as exc:
+            logger.debug("Failed to record self-healing history: {}", exc)
+
 
 def load_self_healing_config(path: str | Path = "configs/self_healing.yaml") -> SelfHealingConfig:
     config_path = Path(path)
@@ -369,4 +514,8 @@ def load_self_healing_config(path: str | Path = "configs/self_healing.yaml") -> 
         failure_threshold=int(breaker.get("failure_threshold", 5)),
         cooldown_seconds=int(breaker.get("cooldown_seconds", 300)),
         metrics_root=raw.get("metrics_root"),
+        history_enabled=bool(raw.get("history_enabled", True)),
+        history_path=str(raw.get("history_path", "reports/self_healing/history.jsonl")),
+        prefer_history=bool(raw.get("prefer_history", True)),
+        min_history_successes=int(raw.get("min_history_successes", 1)),
     )
