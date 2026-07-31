@@ -20,6 +20,7 @@ class SalesReportPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.last_search_payload: dict[str, Any] | None = None
+        self.last_sort_payloads: list[dict[str, Any] | None] = []
 
     @allure.step("Navigate to sales product sales report")
     def navigate_to_report(self) -> None:
@@ -348,6 +349,19 @@ class SalesReportPage(BasePage):
         return True
 
     def click_sort(self, column_name: str, direction: str = "desc") -> list[float]:
+        captured_payload: dict[str, Any] | None = None
+
+        def on_request(request: Any) -> None:
+            nonlocal captured_payload
+            if "salesproductreport/productsalesreport" not in request.url.lower():
+                return
+            try:
+                post_data_json = request.post_data_json
+                captured_payload = post_data_json() if callable(post_data_json) else post_data_json
+            except Exception:
+                captured_payload = {"raw": request.post_data or ""}
+
+        self.page.on("request", on_request)
         clicked = self.page.evaluate(
             """([columnName, direction]) => {
                 const visible = (el) => {
@@ -376,9 +390,12 @@ class SalesReportPage(BasePage):
             [column_name, direction],
         )
         if not clicked:
+            self.page.remove_listener("request", on_request)
             raise ValueError(f"Sortable header not found: {column_name}")
         self.wait_for_table_ready()
         self.page.wait_for_timeout(1200)
+        self.page.remove_listener("request", on_request)
+        self.last_sort_payloads.append(captured_payload)
         return self.numeric_column_values(column_name)
 
     def numeric_column_values(self, column_name: str, limit: int = 20) -> list[float]:
@@ -445,6 +462,7 @@ class SalesReportPage(BasePage):
         return ascending or descending
 
     def sort_and_assert_numeric_order(self, column_name: str) -> dict[str, Any]:
+        self.last_sort_payloads = []
         desc_values = self.click_sort(column_name, "desc")
         desc_sorted = self.is_sorted(desc_values, "desc")
         asc_values = self.click_sort(column_name, "asc")
@@ -453,6 +471,7 @@ class SalesReportPage(BasePage):
             "column": column_name,
             "desc_values": desc_values,
             "asc_values": asc_values,
+            "payloads": self.last_sort_payloads,
             "passed": bool(desc_values) and bool(asc_values) and desc_sorted and asc_sorted,
         }
 
@@ -510,6 +529,39 @@ class SalesReportPage(BasePage):
         )
         return after
 
+    def expanded_detail_rows(self, limit: int = 20) -> list[dict[str, str]]:
+        return self.page.evaluate(
+            """(limit) => {
+                const visible = (el) => {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 0 && rect.height > 0
+                        && style.display !== 'none'
+                        && style.visibility !== 'hidden';
+                };
+                const table = Array.from(document.querySelectorAll('.p-6px .vxe-table')).find(visible);
+                if (!table) return [];
+                const headers = Array.from(table.querySelectorAll('.vxe-header--column, th'))
+                    .filter(visible)
+                    .map((el) => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' '));
+                const uniqueHeaders = headers.filter((header, index) => header && headers.indexOf(header) === index);
+                const rows = Array.from(table.querySelectorAll('.vxe-body--row, tbody tr'))
+                    .filter((row) => visible(row))
+                    .slice(0, limit);
+                return rows.map((row) => {
+                    const cells = Array.from(row.querySelectorAll('.vxe-body--column, td'))
+                        .filter(visible)
+                        .map((cell) => (cell.innerText || cell.textContent || '').trim().replace(/\\s+/g, ' '));
+                    const result = {};
+                    for (let i = 0; i < Math.min(uniqueHeaders.length, cells.length); i += 1) {
+                        if (uniqueHeaders[i]) result[uniqueHeaders[i]] = cells[i];
+                    }
+                    return result;
+                });
+            }""",
+            limit,
+        )
+
     def has_expand_control(self) -> bool:
         return bool(
             self.page.evaluate(
@@ -537,7 +589,7 @@ class SalesReportPage(BasePage):
             + ".vxe-table--expanded-row:visible, .p-6px .vxe-table:visible"
         ).count()
 
-    def export_menu_options(self) -> list[str]:
+    def _legacy_export_menu_options(self) -> list[str]:
         dropdown = self.page.locator(".el-dropdown").filter(has_text="导出").first
         dropdown.hover(timeout=10000)
         dropdown.locator("button").first.click(force=True, timeout=10000)
@@ -555,7 +607,7 @@ class SalesReportPage(BasePage):
                 .filter(Boolean)"""
         )
 
-    def export_by_menu_text(self, menu_text: str, download_dir: str, timeout: int = 60000) -> dict[str, Any]:
+    def _legacy_export_by_menu_text(self, menu_text: str, download_dir: str, timeout: int = 60000) -> dict[str, Any]:
         Path(download_dir).mkdir(parents=True, exist_ok=True)
         downloads = []
         responses = []
@@ -617,6 +669,176 @@ class SalesReportPage(BasePage):
         finally:
             self.page.remove_listener("download", on_download)
             self.page.remove_listener("response", on_response)
+
+    # The current UI exports the active search result directly; keep these
+    # definitions after the legacy menu helpers so older callers stay compatible.
+    def export_menu_options(self) -> list[str]:
+        return self.page.evaluate(
+            """() => Array.from(document.querySelectorAll('button'))
+                .filter((el) => {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 0 && rect.height > 0
+                        && style.display !== 'none' && style.visibility !== 'hidden';
+                })
+                .map((el) => (el.innerText || el.textContent || '').trim())
+                .filter((text) => text.includes('导出'))"""
+        )
+
+    def export_by_menu_text(self, menu_text: str, download_dir: str, timeout: int = 60000) -> dict[str, Any]:
+        Path(download_dir).mkdir(parents=True, exist_ok=True)
+        downloads = []
+        responses = []
+
+        def on_download(download: Any) -> None:
+            downloads.append(download)
+
+        def on_response(response: Any) -> None:
+            url = response.url.lower()
+            if "export" in url or "salesproductreport" in url or "salesreport" in url:
+                responses.append({"url": response.url, "status": response.status})
+
+        self.page.on("download", on_download)
+        self.page.on("response", on_response)
+        try:
+            clicked = self.page.evaluate(
+                """() => {
+                    const visible = (el) => {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none' && style.visibility !== 'hidden';
+                    };
+                    const button = Array.from(document.querySelectorAll('button'))
+                        .filter(visible)
+                        .find((el) => (el.innerText || el.textContent || '').includes('导出'));
+                    if (!button) return false;
+                    button.click();
+                    return true;
+                }"""
+            )
+            if not clicked:
+                raise ValueError("Export button not found")
+            deadline = time.time() + timeout / 1000
+            while time.time() < deadline:
+                if downloads:
+                    download = downloads[0]
+                    target = Path(download_dir) / download.suggested_filename
+                    download.save_as(str(target))
+                    return {
+                        "success": target.exists() and target.stat().st_size > 0,
+                        "mode": "download",
+                        "file_path": str(target),
+                        "file_size": target.stat().st_size if target.exists() else 0,
+                        "filename": download.suggested_filename,
+                    }
+                if any(item["status"] < 400 for item in responses):
+                    return {"success": True, "mode": "async_response", "responses": responses}
+                self.page.wait_for_timeout(1000)
+            return {"success": False, "mode": "timeout", "responses": responses}
+        finally:
+            self.page.remove_listener("download", on_download)
+            self.page.remove_listener("response", on_response)
+
+    def trigger_async_export(self, payload: dict[str, Any]) -> dict[str, Any]:
+        result = self.page.evaluate(
+            """async (payload) => {
+                const authHeaders = (() => {
+                    const read = (key) => localStorage.getItem(key) || sessionStorage.getItem(key) || '';
+                    const tokenKeys = ['Admin-Token', 'access_token', 'accessToken', 'token', 'Authorization'];
+                    let token = '';
+                    for (const key of tokenKeys) {
+                        token = read(key);
+                        if (token) break;
+                    }
+                    const clientid = read('clientid') || read('client_id') || read('Clientid') || read('CLIENT_ID');
+                    const headers = {};
+                    if (token) {
+                        const bearer = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+                        headers.Authorization = bearer;
+                        headers['Admin-Token'] = token.replace(/^Bearer\\s+/i, '');
+                    }
+                    if (clientid) headers.clientid = clientid;
+                    return headers;
+                })();
+                const response = await fetch(
+                    '/oms-api/oms-admin/sales/salesProductReport/syncProductSalesReportExport',
+                    {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'content-type': 'application/json;charset=UTF-8', ...authHeaders },
+                        body: JSON.stringify(payload),
+                    },
+                );
+                const contentType = response.headers.get('content-type') || '';
+                let body;
+                if (contentType.toLowerCase().includes('json')) {
+                    body = await response.json();
+                } else {
+                    body = await response.text();
+                }
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    url: response.url,
+                    body,
+                    headers: Object.fromEntries(response.headers.entries()),
+                };
+            }""",
+            payload,
+        )
+        return {
+            "ok": result["ok"],
+            "status": result["status"],
+            "url": result["url"],
+            "payload": payload,
+            "body": result["body"],
+            "headers": result["headers"],
+        }
+
+    def query_report_api(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.page.evaluate(
+            """async (payload) => {
+                const authHeaders = (() => {
+                    const read = (key) => localStorage.getItem(key) || sessionStorage.getItem(key) || '';
+                    const tokenKeys = ['Admin-Token', 'access_token', 'accessToken', 'token', 'Authorization'];
+                    let token = '';
+                    for (const key of tokenKeys) {
+                        token = read(key);
+                        if (token) break;
+                    }
+                    const clientid = read('clientid') || read('client_id') || read('Clientid') || read('CLIENT_ID');
+                    const headers = {};
+                    if (token) {
+                        const bearer = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+                        headers.Authorization = bearer;
+                        headers['Admin-Token'] = token.replace(/^Bearer\\s+/i, '');
+                    }
+                    if (clientid) headers.clientid = clientid;
+                    return headers;
+                })();
+                const response = await fetch(
+                    '/oms-api/oms-admin/sales/salesProductReport/productSalesReport',
+                    {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: { 'content-type': 'application/json;charset=UTF-8', ...authHeaders },
+                        body: JSON.stringify(payload),
+                    },
+                );
+                const contentType = response.headers.get('content-type') || '';
+                const body = contentType.toLowerCase().includes('json')
+                    ? await response.json()
+                    : await response.text();
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    url: response.url,
+                    body,
+                };
+            }""",
+            payload,
+        )
 
     def snapshot(self, name: str) -> str:
         path = Path("reports/screenshots") / f"{name}_{int(time.time())}.png"
