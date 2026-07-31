@@ -1,0 +1,127 @@
+[
+  {
+    "query": "销售订单批量锁定库存需要哪些角色权限",
+    "gold": ["66e03216f1e10fc3"],
+    "keyphrase": "manualLockInventory"
+  },
+  {
+    "query": "手动锁定库存按钮权限控制 IT 业务经理",
+    "gold": ["66e03216f1e10fc3"],
+    "keyphrase": "manualLockInventory"
+  },
+  {
+    "query": "批量锁定库存有哪些状态 待处理 配货中 待付款",
+    "gold": ["1b5e94fac1e01d055a9f8011eb1907a2110feb93"],
+    "keyphrase": "待付款且计算缺口"
+  },
+  {
+    "query": "SKU必须存在客户报价",
+    "gold": ["f47ade185c70fe4a"],
+    "keyphrase": "SKU报价约束"
+  },
+  {
+    "query": "商品SKU报价约束 客户报价",
+    "gold": ["f47ade185c70fe4a"],
+    "keyphrase": "SKU报价约束"
+  },
+  {
+    "query": "转WMS前置条件是什么",
+    "gold": ["5c159d66c0331559"],
+    "keyphrase": "转WMS前置条件"
+  },
+  {
+    "query": "销售订单转WMS需要库存充足和运单号吗",
+    "gold": ["5c159d66c0331559"],
+    "keyphrase": "转WMS前置条件"
+  },
+  {
+    "query": "余额付款约束 客户余额大于应收",
+    "gold": ["b21b0094623ff27e"],
+    "keyphrase": "余额付款约束"
+  },
+  {
+    "query": "客户余额不足能否付款",
+    "gold": ["b21b0094623ff27e"],
+    "keyphrase": "余额付款约束"
+  },
+  {
+    "query": "币种更换约束 付款金额不等于收款金额",
+    "gold": ["92e62a69e37bd4af"],
+    "keyphrase": "币种更换约束"
+  },
+  {
+    "query": "更换币种付款的约束",
+    "gold": ["92e62a69e37bd4af"],
+    "keyphrase": "币种更换约束"
+  },
+  {
+    "query": "组合SKU更换接口优化",
+    "gold": ["65bce65ea7f946d8"],
+    "keyphrase": "组合SKU更换"
+  },
+  {
+    "query": "更换组合SKU后不会重复拉取",
+    "gold": ["65bce65ea7f946d8"],
+    "keyphrase": "组合SKU更换"
+  },
+  {
+    "query": "销售订单算钱规则 减三位获取报价",
+    "gold": ["92a6aef24ee5dbd3"],
+    "keyphrase": "减三位获取报价"
+  },
+  {
+    "query": "SKU长度多一位 减四位获取报价",
+    "gold": ["92a6aef24ee5dbd3"],
+    "keyphrase": "减四位"
+  },
+  {
+    "query": "销售订单国家显示英文 如瑞典Sweden",
+    "gold": ["2a4bea350c55c709", "c49f79a5b3301bed"],
+    "keyphrase": "国家显示英文"
+  },
+  {
+    "query": "销售订单国家英文显示格式",
+    "gold": ["2a4bea350c55c709", "c49f79a5b3301bed"],
+    "keyphrase": "国家显示英文"
+  },
+  {
+    "query": "销售订单固定分类增加有物流渠道搜索",
+    "gold": ["5c3decf4c14a278f"],
+    "keyphrase": "有物流渠道"
+  },
+  {
+    "query": "有物流渠道搜索条件参考有货运单号",
+    "gold": ["5c3decf4c14a278f"],
+    "keyphrase": "有物流渠道"
+  },
+  {
+    "query": "到账金额判定 到账金额等于应收金额",
+    "gold": ["d27ce8f1901e211eb3e20ffe339d9ae0e87b672c"],
+    "keyphrase": "到账金额"
+  },
+  {
+    "query": "付款单状态变更 手续费 到账判定",
+    "gold": ["d27ce8f1901e211eb3e20ffe339d9ae0e87b672c"],
+    "keyphrase": "手续费"
+  },
+  {
+    "query": "有备注搜索改成有发货备注 有销售备注",
+    "gold": ["dbda1ad4ea9df16646134755d5d2e6a320a6c31e"],
+    "keyphrase": "有发货备注"
+  },
+  {
+    "query": "销售备注搜索条件",
+    "gold": ["dbda1ad4ea9df16646134755d5d2e6a320a6c31e"],
+    "keyphrase": "有销售备注"
+  },
+  {
+    "query": "销售订单加一列序号",
+    "gold": ["ff168a4181b2e9b68f9676d505ea491113515bd4"],
+    "keyphrase": "加一列序号"
+  },
+  {
+    "query": "前端直接给序号列",
+    "gold": ["ff168a4181b2e9b68f9676d505ea491113515bd4"],
+    "keyphrase": "加一列序号"
+  }
+]

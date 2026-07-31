@@ -10,7 +10,6 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from openpyxl import load_workbook
 from sqlalchemy.orm import joinedload
 
 from modules.trae_test.core import cache_manager
@@ -29,6 +28,7 @@ from .file_management_service import FileManagementService
 from .file_repository import FileRepository
 from .metadata_repository import MetadataRepository
 from .path_utils import PathManager, find_project_root
+from .rag_semantic import SemanticConfig, SemanticIndexer, validate_rag_environment
 
 API_VERSION = "3.0.0"
 
@@ -86,6 +86,7 @@ class KnowledgeRetriever:
         self._prefix_index: dict[str, list[str]] = {}
         self._pages_cache: dict[str, list[dict[str, Any]]] | None = None
         self._registry_last_loaded: float = 0
+        self._semantic_indexer: SemanticIndexer | None = None
 
         self._load_registry()
 
@@ -619,6 +620,70 @@ class KnowledgeRetriever:
 
     # ── 智能检索 ─────────────────────────────────────────────────
 
+    def _get_semantic_indexer(self) -> SemanticIndexer:
+        if self._semantic_indexer is None:
+            self._semantic_indexer = SemanticIndexer(SemanticConfig.from_env())
+        return self._semantic_indexer
+
+    def retrieve_semantic(
+        self,
+        keyword: str,
+        top_k: int | None = None,
+        similarity_threshold: float | None = None,
+    ) -> list[dict[str, Any]]:
+        """语义检索接口（RAG PoC 增强层）。
+
+        原有 retrieve() 默认行为保持不变；调用方需要显式使用 semantic/hybrid。
+        """
+        if not keyword:
+            return []
+        validate_rag_environment()
+        return self._get_semantic_indexer().search(
+            keyword.strip(),
+            top_k=top_k,
+            threshold=similarity_threshold,
+        )
+
+    def retrieve_hybrid(
+        self,
+        keyword: str,
+        top_k: int = 10,
+        semantic_weight: float = 0.6,
+        lexical_weight: float = 0.4,
+    ) -> list[dict[str, Any]]:
+        """混合检索：倒排索引 + 语义检索合并重排。"""
+        if not keyword:
+            return []
+        validate_rag_environment()
+
+        semantic_results = self.retrieve_semantic(keyword, top_k=top_k)
+        lexical_results = self.search_by_inverted_index(keyword, top_k=top_k)
+
+        ranked: dict[str, dict[str, Any]] = {}
+        for index, item in enumerate(semantic_results):
+            key = item.get("chunk_id") or item.get("id") or f"semantic:{index}"
+            merged = dict(item)
+            merged["retrieval_sources"] = ["semantic"]
+            merged["hybrid_score"] = semantic_weight * float(item.get("similarity_score", 0))
+            ranked[str(key)] = merged
+
+        for index, item in enumerate(lexical_results):
+            key = item.get("chunk_id") or f"lexical:{index}"
+            score = float(item.get("similarity_score", item.get("weight", 0)) or 0)
+            normalized = min(score, 1.0)
+            if str(key) in ranked:
+                ranked[str(key)]["retrieval_sources"].append("lexical")
+                ranked[str(key)]["hybrid_score"] += lexical_weight * normalized
+            else:
+                merged = dict(item)
+                merged["retrieval_sources"] = ["lexical"]
+                merged["hybrid_score"] = lexical_weight * normalized
+                ranked[str(key)] = merged
+
+        results = list(ranked.values())
+        results.sort(key=lambda item: item.get("hybrid_score", 0), reverse=True)
+        return results[:top_k]
+
     def retrieve(self, keyword: str, mode: str = "auto") -> Any:
         """智能检索接口 - 按关键词检索知识库内容
 
@@ -629,6 +694,8 @@ class KnowledgeRetriever:
                 - "module": 按模块检索
                 - "rules": 检索业务规则
                 - "requirements": 检索需求清单
+                - "semantic": 语义检索（显式启用）
+                - "hybrid": 倒排 + 语义混合检索（显式启用）
 
         Returns:
             检索结果
@@ -654,6 +721,12 @@ class KnowledgeRetriever:
 
         if mode == "requirements":
             return self.search_requirements(keyword=keyword)
+
+        if mode == "semantic":
+            return self.retrieve_semantic(keyword)
+
+        if mode == "hybrid":
+            return self.retrieve_hybrid(keyword)
 
         # auto 模式
         cache_result = self._search_cache(keyword, mode="auto")

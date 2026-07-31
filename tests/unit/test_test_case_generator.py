@@ -28,7 +28,7 @@ class TestTestCaseGenerator:
         cases = generator.generate_cases("销售", limit=2)
 
         assert len(cases) == 2
-        mock_retriever.retrieve.assert_called_once_with("销售")
+        mock_retriever.retrieve.assert_called_once_with("销售", mode="hybrid")
 
         for case in cases:
             assert isinstance(case, dict)
@@ -92,10 +92,11 @@ class TestTestCaseGenerator:
             assert "销售" in case["用例步骤"]
             assert "销售" in case["预期结果"]
             assert case["用例类型"] == "功能测试"
-            assert case["用例等级"] == "P1"
-            assert case["优先级"] == "高"
+            assert case["用例等级"] == "高"
+            assert case["优先级"] == "P1"
             assert case["是否可自动化"] == "是"
-            assert case["知识库关联"] == "销售"
+            assert case["知识库关联"].startswith("销售")
+            assert "内容" in case["知识库关联"]
 
     def test_export_to_excel(self, tmp_path):
         mock_retriever = Mock()
@@ -123,7 +124,7 @@ class TestTestCaseGenerator:
         generator = TestCaseGenerator(retriever=mock_retriever)
         generator.excel_generator = mock_excel_generator
 
-        output_path = generator.generate_and_export("测试")
+        generator.generate_and_export("测试")
 
         mock_retriever.retrieve.assert_called_once()
         mock_excel_generator.generate.assert_called_once()

@@ -32,6 +32,7 @@ from modules.trae_test.utils.index_builder_v3 import IndexBuilderV3
 from modules.trae_test.utils.kb_monitor import KnowledgeBaseMonitor
 from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
 from modules.trae_test.utils.metadata_manager import MetadataManager
+from modules.trae_test.utils.rag_semantic import SemanticIndexer
 
 
 class KnowledgeBaseManager:
@@ -115,7 +116,7 @@ class KnowledgeBaseManager:
             result["index_path"] = index_path
         return result
 
-    def process_file(self, file_path: str) -> Dict:
+    def process_file(self, file_path: str, sync_vector: bool = False) -> Dict:
         """完整处理文件（分割+索引）
 
         Args:
@@ -124,7 +125,33 @@ class KnowledgeBaseManager:
         Returns:
             处理结果
         """
-        return self.monitor.process_file_complete(file_path)
+        result = self.monitor.process_file_complete(file_path)
+        if sync_vector:
+            result["vector"] = self.sync_vector_file(file_path)
+        return result
+
+    def sync_vector_file(self, file_path: str) -> Dict:
+        """将指定知识文件的 chunks 同步到本地语义向量索引。"""
+        file_title = os.path.splitext(os.path.basename(file_path))[0]
+        try:
+            self.retriever.refresh_registry()
+            chunks = self.retriever.get_all_chunks(file_title)
+            if not chunks:
+                content = self.retriever.load_aggregated_data(file_title)
+                if content:
+                    chunks = [
+                        {
+                            "chunk_id": file_title,
+                            "metadata": {"file_title": file_title, "source_file": os.path.basename(file_path)},
+                            "content": content,
+                        }
+                    ]
+            if not chunks:
+                return {"success": False, "file_title": file_title, "indexed": 0, "error": "no chunks found"}
+            indexed = SemanticIndexer().index_chunks(chunks, source_file=os.path.basename(file_path))
+            return {"success": True, "file_title": file_title, "indexed": indexed}
+        except Exception as exc:
+            return {"success": False, "file_title": file_title, "indexed": 0, "error": str(exc)}
 
     def verify_file(self, file_title: str) -> Dict:
         """验证文件完整性
@@ -610,6 +637,18 @@ def print_process_all_result(result: Dict):
             print(f"  - {filename}")
 
 
+def print_vector_result(result: Dict):
+    """打印向量同步结果"""
+    print("=" * 80)
+    print("RAG 向量同步结果")
+    print("=" * 80)
+    print(f"文件: {result.get('file_title')}")
+    print(f"成功: {OK_SIGN if result.get('success') else FAIL_SIGN}")
+    print(f"索引条目: {result.get('indexed', 0)}")
+    if result.get("error"):
+        print(f"错误: {result['error']}")
+
+
 def print_validate_result(result: Dict):
     print("=" * 80)
     print("Knowledge base validation result")
@@ -680,6 +719,7 @@ def main():
     # process 命令
     process_parser = subparsers.add_parser("process", help="完整处理文件（分割+索引）")
     process_parser.add_argument("--file", required=True, help="要处理的文件路径")
+    process_parser.add_argument("--sync-vector", action="store_true", help="同步写入 RAG 本地语义向量索引")
 
     # verify 命令
     verify_parser = subparsers.add_parser("verify", help="验证文件完整性")
@@ -717,11 +757,13 @@ def main():
         result = manager.index_file(args.file)
         print_index_result(result)
     elif args.command == "process":
-        result = manager.process_file(args.file)
+        result = manager.process_file(args.file, sync_vector=args.sync_vector)
         if result["split"]:
             print_split_result(result["split"])
         if result["index"]:
             print_index_result(result["index"])
+        if result.get("vector"):
+            print_vector_result(result["vector"])
     elif args.command == "verify":
         result = manager.verify_file(args.title)
         print_verify_result(result)

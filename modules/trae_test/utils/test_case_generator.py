@@ -10,8 +10,6 @@
 from __future__ import annotations
 
 import logging
-import os
-from datetime import datetime
 from typing import Any
 
 from .dir_validator import _load_module_hierarchy
@@ -59,7 +57,9 @@ class TestCaseGenerator:
         keyword = keyword.strip()
         # ──────────────────────────────────────────────────────
 
-        knowledge = self.retriever.retrieve(keyword)
+        knowledge = self.retriever.retrieve(keyword, mode="hybrid")
+        if not knowledge:
+            knowledge = self.retriever.retrieve(keyword)
         if not knowledge:
             return []
 
@@ -133,8 +133,8 @@ class TestCaseGenerator:
             constraint="",
             scenario_type=scenario_type,
         )
-        priority_map = {"P0": "高", "P1": "高", "P2": "中", "P3": "中"}
-        priority = priority_map.get(priority_p, "中")
+        case_level_map = {"P0": "高", "P1": "高", "P2": "中", "P3": "中"}
+        case_level = case_level_map.get(priority_p, "中")
         # ──────────────────────────────────────────────────────
 
         # ── 步骤与预期结果智能生成 ────────────────────────────
@@ -175,16 +175,21 @@ class TestCaseGenerator:
             "预期结果": expected_str,
             "用例类型": "功能测试",
             "用例状态": "正常",
-            "用例等级": priority_p,
+            "用例等级": case_level,
             "创建人": "余小龙",
-            "优先级": priority,
+            "优先级": priority_p,
             "是否可自动化": "是",
             "关联缺陷ID": "",
             "回归测试标识": "否",
-            "知识库关联": keyword,
+            "知识库关联": f"{keyword}\n{knowledge_str[:8000]}",
         }
 
-    def export_to_excel(self, cases: list[dict[str, Any]], output_path: str | None = None, extra_fields: list[str] | None = None) -> str:
+    def export_to_excel(
+        self,
+        cases: list[dict[str, Any]],
+        output_path: str | None = None,
+        extra_fields: list[str] | None = None,
+    ) -> str:
         """导出测试用例到Excel文件
 
         Args:
@@ -199,7 +204,14 @@ class TestCaseGenerator:
 
         return self.excel_generator.generate(cases, output_path, extra_fields=extra_fields)
 
-    def generate_and_export(self, keyword: str, limit: int = 10, output_path: str | None = None, extra_fields: list[str] | None = None, block_on_audit_fail: bool = False) -> str:
+    def generate_and_export(
+        self,
+        keyword: str,
+        limit: int = 10,
+        output_path: str | None = None,
+        extra_fields: list[str] | None = None,
+        block_on_audit_fail: bool = False,
+    ) -> str:
         """生成测试用例并导出到Excel（包含评分和审核）
 
         Args:
