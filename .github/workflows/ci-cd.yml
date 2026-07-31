@@ -155,6 +155,8 @@ jobs:
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
           - shard: 9
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
+          - shard: 10
+            test_files: "modules/auto_test/tests/test_sales_report_regression.py"
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
