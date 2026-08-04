@@ -732,9 +732,9 @@ class SalesReportPage(BasePage):
                         "file_size": target.stat().st_size if target.exists() else 0,
                         "filename": download.suggested_filename,
                     }
-                if any(item["status"] < 400 for item in responses):
-                    return {"success": True, "mode": "async_response", "responses": responses}
                 self.page.wait_for_timeout(1000)
+            if any(item["status"] < 400 for item in responses):
+                return {"success": True, "mode": "async_response", "responses": responses}
             return {"success": False, "mode": "timeout", "responses": responses}
         finally:
             self.page.remove_listener("download", on_download)
