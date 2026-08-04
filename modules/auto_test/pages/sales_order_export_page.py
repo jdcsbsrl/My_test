@@ -498,7 +498,8 @@ class SalesOrderExportPage(BasePage):
         self.page.on("response", capture_file_response)
         try:
             logger.info("等待文件下载（浏览器事件监听）...")
-            with self.page.expect_download(timeout=min(timeout, 30000)) as download_info:
+            # Respect the caller's timeout; CI exports can exceed 30 seconds.
+            with self.page.expect_download(timeout=timeout) as download_info:
                 self.click_realtime_export()
 
             download = download_info.value
