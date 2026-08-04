@@ -182,7 +182,7 @@ jobs:
         run: playwright install --with-deps chromium
       - name: Run UI tests (shard ${{ matrix.shard }})
         run: |
-          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright --no-cov --reruns 1 --reruns-delay 5 --alluredir reports/allure-results
+          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio --no-cov --reruns 1 --reruns-delay 5 --alluredir reports/allure-results
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
