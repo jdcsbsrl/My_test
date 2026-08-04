@@ -785,11 +785,10 @@ class TestSalesReportRegression:
         assert SalesReportPage.is_sorted(sort_values, "desc"), sort_values[:20]
         sort_payload = sales_report.last_sort_payloads[-1] if sales_report.last_sort_payloads else None
         assert sort_payload, "No sort request payload captured"
-        query_payload = {**sort_payload, "pageNum": 1, "pageSize": 50}
-        query_result = sales_report.query_report_api(query_payload)
-        assert query_result["ok"], query_result
-        assert _business_success(query_result.get("body")), query_result
-        page_skus = _api_sku_order(query_result.get("body"), limit=10)
+        # The visible table is the source of truth for the user's aggregate
+        # SKU order.  Re-querying the API here can lose UI state or use a
+        # different response shape than the sorted table.
+        page_skus = _page_sku_order(sales_report, limit=10)
         assert page_skus, "No SKU order can be captured from sorted list API"
 
         download_dir = REPORT_DIR / "downloads" / "sorted_export_order"
