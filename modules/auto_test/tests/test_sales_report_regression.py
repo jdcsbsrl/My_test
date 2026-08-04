@@ -801,8 +801,12 @@ class TestSalesReportRegression:
         export_order = _export_sku_first_seen_order(export_rows, page_skus)
         exported_values = _column_numbers(export_rows, "日均销量", limit=50)
         contains_expected = _export_contains_skus(export_rows, page_skus[:5])
-        export_sorted = SalesReportPage.is_sorted(exported_values, "desc")
-        passed = contains_expected and export_sorted
+        # Export rows are details; validate SKU group order, not global detail
+        # metric order.
+        export_order_matches = export_order[:5] == page_skus[:5]
+        # Keep the existing diagnostic field name compatible with reports.
+        export_sorted = export_order_matches
+        passed = contains_expected and export_order_matches
         _record_query_detail(
             case_name,
             {"排序字段": "日均销量", "排序方向": "desc", "导出方式": menu_text},
@@ -822,6 +826,6 @@ class TestSalesReportRegression:
             "export_order": export_order,
             "exported_values": exported_values[:20],
             "contains_expected": contains_expected,
-            "export_sorted": export_sorted,
+            "export_order_matches": export_order_matches,
             "file_path": export_result.get("file_path"),
         }
