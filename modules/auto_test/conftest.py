@@ -3,7 +3,6 @@
 import os
 import time
 import uuid
-from pathlib import Path
 
 import pytest
 import requests
@@ -22,7 +21,6 @@ from modules.auto_test.drivers.browser_driver import BrowserDriver
 from modules.auto_test.pages.login_page import LoginPage
 
 load_dotenv()
-os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(Path(__file__).resolve().parents[2] / "browsers")
 
 USERNAME = os.getenv("TEST_USERNAME")
 PASSWORD = os.getenv("TEST_PASSWORD")
@@ -203,8 +201,6 @@ def login_response(
         if "/auth/login" in response.url:
             try:
                 login_result["response"] = response.json()
-                request_headers = response.request.all_headers()
-                login_result["clientid"] = request_headers.get("clientid") or request_headers.get("client-id")
             except Exception:
                 pass
 
@@ -222,9 +218,6 @@ def login_response(
 
             if "response" not in login_result:
                 pytest.fail("Failed to capture login API response")
-
-            login_result["response"]["_cookies"] = page.context.cookies()
-            login_result["response"]["_clientid"] = login_result.get("clientid")
 
             return login_result["response"]
 
@@ -263,7 +256,7 @@ def http_client():
 
 
 @pytest.fixture(scope="function")
-def authenticated_http_client(http_client, login_token: str, login_response: dict) -> requests.Session:
+def authenticated_http_client(http_client, login_token: str) -> requests.Session:
     """Provide an HTTP client with authentication token already set.
 
     The Authorization header is automatically added to all requests.
@@ -271,17 +264,7 @@ def authenticated_http_client(http_client, login_token: str, login_response: dic
     Returns:
         requests.Session: HTTP session with Authorization header
     """
-    clientid = (
-        login_response.get("_clientid")
-        or os.getenv("TEST_TEST_CLIENTID")
-        or os.getenv("TEST_CLIENTID")
-    )
-    headers = {"Authorization": f"Bearer {login_token}", "Content-Type": "application/json"}
-    if clientid:
-        headers["clientid"] = clientid
-    http_client.headers.update(headers)
-    for cookie in login_response.get("_cookies", []):
-        http_client.cookies.set(cookie["name"], cookie["value"], domain=cookie.get("domain"), path=cookie.get("path", "/"))
+    http_client.headers.update({"Authorization": f"Bearer {login_token}", "Content-Type": "application/json"})
     yield http_client
 
 

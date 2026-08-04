@@ -139,24 +139,11 @@ class ConfigManager:
         origin = self._config.get("origin", os.getenv("TEST_WEB_API_BASE_URL"))
         ui_path = self._config.get("ui_path", "")
         api_path = self._config.get("api_path", "/oms-uat-api")
-        configured_api_base = str(self._config.get("api", {}).get("base_url", "")).rstrip("/")
-        origin = str(origin).rstrip("/")
-        normalized_api_path = f"/{str(api_path).strip('/')}"
-        if origin.endswith(normalized_api_path):
-            api_base_url = origin
-        elif configured_api_base:
-            duplicated_api_suffix = f"{normalized_api_path}{normalized_api_path}"
-            if configured_api_base.endswith(duplicated_api_suffix):
-                configured_api_base = configured_api_base[: -len(normalized_api_path)]
-            api_base_url = configured_api_base
-        else:
-            api_base_url = f"{origin}{normalized_api_path}"
-        ui_origin = origin[: -len(normalized_api_path)] if origin.endswith(normalized_api_path) else origin
 
         self._endpoints = EndpointConfig(
-            base_url=f"{ui_origin}{ui_path}",
-            api_base_url=api_base_url,
-            auth_url=f"{api_base_url}/oms-admin/auth/login",
+            base_url=f"{origin}{ui_path}",
+            api_base_url=f"{origin}{api_path}",
+            auth_url=f"{origin}{api_path}/oms-admin/auth/login",
             admin_path="/oms-admin",
         )
 
@@ -197,7 +184,7 @@ class ConfigManager:
 
     @property
     def api_base_url(self) -> str:
-        return self._endpoints.api_base_url
+        return str(self.get("api.base_url", self._config.get("api_base_url", "")))
 
     @property
     def endpoints(self) -> EndpointConfig:
