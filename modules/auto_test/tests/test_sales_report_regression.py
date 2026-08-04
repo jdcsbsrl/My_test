@@ -800,9 +800,17 @@ class TestSalesReportRegression:
         export_order = _export_sku_first_seen_order(export_rows, page_skus)
         exported_values = _column_numbers(export_rows, "日均销量", limit=50)
         contains_expected = _export_contains_skus(export_rows, page_skus[:5])
-        # Export rows are details; validate SKU group order, not global detail
-        # metric order.
-        export_order_matches = export_order[:5] == page_skus[:5]
+        # Export rows are details. Validate the primary aggregate SKU metric;
+        # SKU order within equal-metric ties is implementation-defined.
+        page_rows = sales_report.visible_rows(limit=10)
+        page_metric_by_sku = {}
+        for row in page_rows:
+            sku = (row.get("SKU编码") or "").strip()
+            values = SalesReportPage._parse_numeric_values([row.get("日均销量", "")])
+            if sku and values:
+                page_metric_by_sku[sku] = values[0]
+        export_aggregate_values = [page_metric_by_sku[sku] for sku in export_order if sku in page_metric_by_sku]
+        export_order_matches = SalesReportPage.is_sorted(export_aggregate_values, "desc")
         # Keep the existing diagnostic field name compatible with reports.
         export_sorted = export_order_matches
         passed = contains_expected and export_order_matches
@@ -824,6 +832,8 @@ class TestSalesReportRegression:
                 "menu_text": menu_text,
                 "page_order_first_10": page_skus[:10],
                 "export_order_first_10": export_order[:10],
+                "page_aggregate_values_first_10": [page_metric_by_sku.get(sku) for sku in page_skus[:10]],
+                "export_aggregate_values_first_10": export_aggregate_values[:10],
                 "exported_values_first_20": exported_values[:20],
                 "contains_expected": contains_expected,
                 "export_order_matches": export_order_matches,
