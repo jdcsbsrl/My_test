@@ -819,12 +819,16 @@ class TestSalesReportRegression:
                 f"包含前5个列表SKU={contains_expected}；导出明细降序={export_sorted}"
             ),
         )
-        assert passed, {
-            "menu_text": menu_text,
-            "page_order": page_skus,
-            "export_order": export_order,
-            "exported_values": exported_values[:20],
-            "contains_expected": contains_expected,
-            "export_order_matches": export_order_matches,
-            "file_path": export_result.get("file_path"),
-        }
+        if not passed:
+            diagnostic = {
+                "menu_text": menu_text,
+                "page_order_first_10": page_skus[:10],
+                "export_order_first_10": export_order[:10],
+                "exported_values_first_20": exported_values[:20],
+                "contains_expected": contains_expected,
+                "export_order_matches": export_order_matches,
+                "sort_payload": sort_payload,
+                "file_path": export_result.get("file_path"),
+            }
+            print(f"SORTED_EXPORT_DIAGNOSTIC={json.dumps(diagnostic, ensure_ascii=False, default=str)}")
+            pytest.fail(json.dumps(diagnostic, ensure_ascii=False, default=str))
