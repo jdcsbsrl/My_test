@@ -249,6 +249,20 @@ class SelfHealingLocator:
             self._record_event(action, context, result, started)
             self._record_history(action, context, result)
             return False
+        if result.healed and self._is_high_risk_action(action):
+            # High-risk business actions must fail visibly when their primary
+            # locator is missing; a guessed fallback could mutate real data.
+            result = HealingResult(
+                None,
+                True,
+                result.strategy,
+                selector=result.selector,
+                candidate_count=result.candidate_count,
+                error="self-healing disabled for high-risk action",
+            )
+            self._record_event(action, context, result, started)
+            self._record_history(action, context, result)
+            return False
         try:
             operation(result.locator)
             if result.healed:
@@ -271,6 +285,14 @@ class SelfHealingLocator:
 
     def history_summary(self) -> dict[str, int]:
         return self.history.summarize()
+
+    @staticmethod
+    def _is_high_risk_action(action: str) -> bool:
+        action_name = action.lower()
+        return any(
+            keyword in action_name
+            for keyword in ("delete", "remove", "submit", "approve", "audit", "permission", "export")
+        )
 
     def _history_key(self, context: LocatorContext) -> str:
         return context.description or context.selector or ",".join(context.selectors) or context.role or "unknown"

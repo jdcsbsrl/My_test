@@ -121,7 +121,11 @@ class LoginPage(BasePage):
         """
         import random
 
-        max_retries = 2
+        # One retry is sufficient for transient navigation issues. Failed
+        # credentials should return promptly instead of polling for 45s three
+        # times and then being rerun by pytest again.
+        max_retries = 1
+        effective_timeout = min(timeout, 15000) if (not username or not password) else min(timeout, 20000)
         for attempt in range(max_retries + 1):
             try:
                 self.navigate_to_login()
@@ -130,7 +134,7 @@ class LoginPage(BasePage):
                 if attempt > 0:
                     delay = random.uniform(1, 3)
                     logger.info(f"登录重试 {attempt}/{max_retries}，等待 {delay:.2f} 秒")
-                    self.page.wait_for_timeout(int(delay * 1000))
+                    self.wait_for_poll_interval(int(delay * 1000))
 
                 self.enter_username(username)
                 self.enter_password(password)
@@ -141,13 +145,13 @@ class LoginPage(BasePage):
 
                 login_success = False
                 polling_interval = 500
-                max_polls = timeout // polling_interval
+                max_polls = max(1, effective_timeout // polling_interval)
 
                 for poll in range(max_polls):
                     if self._is_login_successful():
                         login_success = True
                         break
-                    self.page.wait_for_timeout(polling_interval)
+                    self.wait_for_poll_interval(polling_interval)
                     logger.debug(f"登录检测中，尝试 {poll + 1}/{max_polls}")
 
                 if login_success:

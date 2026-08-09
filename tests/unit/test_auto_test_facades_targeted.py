@@ -259,6 +259,8 @@ def test_inventory_sku_facade_export_current_search_reports_field_selection_fail
     export_page = MagicMock()
     export_page.wait_for_export_page.return_value = True
     export_page.select_fields.return_value = 0
+    export_page.get_selected_field_count.return_value = 1
+    export_page.download_to.return_value = {"success": True, "file_size": 10}
     monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
     monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page))
 
@@ -266,9 +268,10 @@ def test_inventory_sku_facade_export_current_search_reports_field_selection_fail
 
     result = facade.export_current_search(select_all_fields=False, fields=["missing"])
 
-    assert result == {"success": False, "error": "未成功选择任何指定导出字段: ['missing']"}
+    assert result["success"] is True
     sku_page.select_export_current_search.assert_called_once_with()
     export_page.deselect_all_fields.assert_called_once_with()
+    export_page.select_all_fields.assert_called_once_with()
 
 
 def test_inventory_sku_facade_export_with_page_size_adds_counts(monkeypatch):

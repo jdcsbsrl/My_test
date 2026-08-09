@@ -313,6 +313,7 @@ def sales_report_large_account(page: Page) -> SalesReportPage:
 @pytest.mark.regression
 @pytest.mark.ui
 @pytest.mark.p1
+@pytest.mark.core
 class TestSalesReportRegression:
     def test_default_query_loads_table(self, sales_report: SalesReportPage) -> None:
         first_row = sales_report.first_row()

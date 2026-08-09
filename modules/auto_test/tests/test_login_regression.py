@@ -40,6 +40,7 @@ def page(browser: Browser) -> Page:
 @pytest.mark.regression
 @pytest.mark.auth
 @pytest.mark.p0
+@pytest.mark.smoke
 class TestLoginRegression:
     """Login regression test suite."""
 

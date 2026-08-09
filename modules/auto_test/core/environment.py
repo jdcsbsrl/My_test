@@ -184,6 +184,7 @@ def get_environment(env: str | None = None) -> Environment:
 
 
 def validate_environment(env: str) -> None:
+    """Validate the environment using the single supported policy."""
     if not EnvironmentType.is_allowed(env):
         raise EnvironmentSecurityError(
             f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"
@@ -191,3 +192,9 @@ def validate_environment(env: str) -> None:
             f"允许的环境: test, uat\n"
             f"如需执行测试，请联系项目负责人获取授权。"
         )
+
+    # Keep this legacy module compatible while making ConfigManager the
+    # authoritative configuration implementation.
+    from modules.auto_test.core.config_manager import get_config
+
+    get_config(env)

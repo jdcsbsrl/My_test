@@ -85,7 +85,26 @@ class ConfigManager:
         self._config = self._resolve_env_vars(env_config)
         self._config["env"] = env
 
+        self._validate_loaded_config()
+
         self._load_endpoints()
+
+    def _validate_loaded_config(self) -> None:
+        """Validate resolved configuration before any client is created."""
+        origin = str(self._config.get("origin", "")).strip()
+        if not origin:
+            raise ValueError(
+                f"Missing test environment origin for '{self.env}'. "
+                "Set the environment YAML or the corresponding *_WEB_API_BASE_URL variable."
+            )
+        if origin.lower().startswith(("http://", "https://")) is False:
+            raise ValueError(f"Invalid test environment origin: {origin!r}")
+
+        forbidden_tokens = ("production", "/prod", "prod.")
+        if any(token in origin.lower() for token in forbidden_tokens):
+            raise EnvironmentSecurityError(
+                f"Refusing to run automation against a production-looking endpoint: {origin}"
+            )
 
     @staticmethod
     def _build_environment_config(env: str) -> dict[str, Any]:

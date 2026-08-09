@@ -79,7 +79,7 @@ class SalesReportPage(BasePage):
         self.page.on("request", on_request)
         self._click_visible_button("搜索")
         self.wait_for_table_ready()
-        self.page.wait_for_timeout(500)
+        self.wait_for_loading_complete(timeout=30000)
         self.page.remove_listener("request", on_request)
         self.last_search_payload = captured_payload
 
@@ -186,10 +186,10 @@ class SalesReportPage(BasePage):
             form_item.locator(".el-select__wrapper, .el-cascader, .store-select-trigger").first.click(
                 force=True, timeout=10000
             )
-            self.page.wait_for_timeout(700)
             option = self.page.locator("li.el-select-dropdown__item, .el-cascader-node").filter(
                 has_text=option_text
             ).first
+            option.wait_for(state="visible", timeout=10000)
             option.click(force=True, timeout=10000)
             self.page.keyboard.press("Escape")
             return True
@@ -218,7 +218,6 @@ class SalesReportPage(BasePage):
         )
         if not result.get("opened"):
             return False
-        self.page.wait_for_timeout(700)
         clicked = self.page.evaluate(
             """(optionText) => {
                 const isVisible = (el) => {
@@ -393,7 +392,7 @@ class SalesReportPage(BasePage):
             self.page.remove_listener("request", on_request)
             raise ValueError(f"Sortable header not found: {column_name}")
         self.wait_for_table_ready()
-        self.page.wait_for_timeout(1200)
+        self.wait_for_table_ready()
         self.page.remove_listener("request", on_request)
         self.last_sort_payloads.append(captured_payload)
         return self.numeric_column_values(column_name)
@@ -480,6 +479,31 @@ class SalesReportPage(BasePage):
         before_body = self.page.locator(".vxe-table--body-wrapper, .el-table__body-wrapper").first.inner_text(
             timeout=5000
         )
+        # The sales report uses VXETable's stable expand control.
+        expand_button = self.page.locator(".vxe-table--expand-btn:visible").first
+        if expand_button.count() > 0:
+            expand_button.click(force=True, timeout=10000)
+            self.wait_for_poll_interval(500)
+            self.page.wait_for_function(
+                """() => document.querySelectorAll(
+                    '.el-table__expanded-cell, tr.el-table__expanded-row, '
+                    + '.vxe-body--expanded-row, .vxe-expanded-cell, '
+                    + '.vxe-table--expanded-row, .p-6px .vxe-table'
+                ).length > 0""",
+                timeout=15000,
+            )
+            after = self.expanded_row_count()
+            after_body = self.page.locator(
+                ".vxe-table--body-wrapper, .el-table__body-wrapper"
+            ).first.inner_text(timeout=5000)
+            expanded_class_count = self.page.locator(
+                ".row--expanded:visible, .is--expanded:visible, .p-6px .vxe-table:visible"
+            ).count()
+            assert after > before or expanded_class_count > 0 or after_body != before_body, (
+                f"Expanded row did not appear: before={before}, after={after}, "
+                f"expanded_class_count={expanded_class_count}"
+            )
+            return after
         clicked = self.page.evaluate(
             """() => {
                 const visible = (el) => {
@@ -507,15 +531,23 @@ class SalesReportPage(BasePage):
                     view: window,
                 };
                 const clickTarget = target.querySelector('.vxe-table--expand-btn') || target;
-                clickTarget.dispatchEvent(new MouseEvent('mousedown', eventOptions));
-                clickTarget.dispatchEvent(new MouseEvent('mouseup', eventOptions));
-                clickTarget.dispatchEvent(new MouseEvent('click', eventOptions));
+                clickTarget.click();
                 return true;
             }"""
         )
         if not clicked:
             raise ValueError("No expandable row control was found")
-        self.page.wait_for_timeout(1500)
+        # The detail request is asynchronous; yield to the browser event loop
+        # before checking the expanded-row DOM state.
+        self.wait_for_poll_interval(500)
+        self.page.wait_for_function(
+            """() => document.querySelectorAll(
+                '.el-table__expanded-cell, tr.el-table__expanded-row, '
+                + '.vxe-body--expanded-row, .vxe-expanded-cell, '
+                + '.vxe-table--expanded-row, .p-6px .vxe-table'
+            ).length > 0""",
+            timeout=15000,
+        )
         after = self.expanded_row_count()
         after_body = self.page.locator(".vxe-table--body-wrapper, .el-table__body-wrapper").first.inner_text(
             timeout=5000
@@ -593,7 +625,7 @@ class SalesReportPage(BasePage):
         dropdown = self.page.locator(".el-dropdown").filter(has_text="导出").first
         dropdown.hover(timeout=10000)
         dropdown.locator("button").first.click(force=True, timeout=10000)
-        self.page.wait_for_timeout(500)
+        self.page.locator(".el-dropdown-menu__item:visible").first.wait_for(state="visible", timeout=10000)
         return self.page.evaluate(
             """() => Array.from(document.querySelectorAll('.el-dropdown-menu__item'))
                 .filter((el) => {
@@ -625,7 +657,7 @@ class SalesReportPage(BasePage):
         dropdown = self.page.locator(".el-dropdown").filter(has_text="导出").first
         dropdown.hover(timeout=10000)
         dropdown.locator("button").first.click(force=True, timeout=10000)
-        self.page.wait_for_timeout(500)
+        self.page.locator(".el-dropdown-menu__item:visible").first.wait_for(state="visible", timeout=10000)
         try:
             clicked = self.page.evaluate(
                 """(menuText) => {
@@ -664,7 +696,7 @@ class SalesReportPage(BasePage):
                 body_text = self.page.locator("body").inner_text(timeout=2000)
                 if any(keyword in body_text for keyword in ("导出成功", "导出任务", "通知", "下载中心")):
                     return {"success": True, "mode": "notification", "responses": responses}
-                self.page.wait_for_timeout(1000)
+                self.wait_for_poll_interval(1000)
             return {"success": False, "mode": "timeout", "responses": responses}
         finally:
             self.page.remove_listener("download", on_download)
@@ -732,7 +764,7 @@ class SalesReportPage(BasePage):
                         "file_size": target.stat().st_size if target.exists() else 0,
                         "filename": download.suggested_filename,
                     }
-                self.page.wait_for_timeout(1000)
+                self.wait_for_poll_interval(1000)
             if any(item["status"] < 400 for item in responses):
                 return {"success": True, "mode": "async_response", "responses": responses}
             return {"success": False, "mode": "timeout", "responses": responses}

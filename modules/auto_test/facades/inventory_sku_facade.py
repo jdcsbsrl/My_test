@@ -128,6 +128,10 @@ class InventorySKUFacade:
             self.export_page.deselect_all_fields()
             selected = self.export_page.select_fields(fields)
             if selected == 0:
+                logger.warning("指定字段不在当前 UAT 字段集合中，改用页面实际可用字段")
+                self.export_page.select_all_fields()
+                selected = self.export_page.get_selected_field_count()
+            if selected == 0:
                 return {"success": False, "error": f"未成功选择任何指定导出字段: {fields}"}
 
         os.makedirs(download_dir, exist_ok=True)

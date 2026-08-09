@@ -38,7 +38,7 @@ class SalesOrderExportPage(BasePage):
                     logger.info(f"当前所有页面: {pages_info}")
                     logger.info(f"当前页面URL: {self.page.url}, 标题: {self.page.title()}")
 
-                time.sleep(1)
+                self.wait_for_poll_interval(1000)
 
             pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
             logger.warning(f"超时，所有页面: {pages_info}")
@@ -58,7 +58,7 @@ class SalesOrderExportPage(BasePage):
 
     @allure.step("全选导出字段")
     def select_all_fields(self, fast_mode: bool = False) -> None:
-        self.page.wait_for_timeout(500)
+        self.wait_for_loading_complete(timeout=10000)
 
         if fast_mode:
             try:
@@ -96,7 +96,7 @@ class SalesOrderExportPage(BasePage):
                 if btn.is_visible():
                     btn.click()
                     logger.info(f"点击{selector}按钮")
-                    self.page.wait_for_timeout(500)
+                    self.wait_for_loading_complete(timeout=10000)
                     return
             except Exception:
                 continue
@@ -120,14 +120,14 @@ class SalesOrderExportPage(BasePage):
 
     @allure.step("清空已选导出字段")
     def deselect_all_fields(self) -> None:
-        self.page.wait_for_timeout(500)
+        self.wait_for_loading_complete(timeout=10000)
         clear_selectors = ['button:has-text("清空")', 'button:has-text("全选/清空")']
         for selector in clear_selectors:
             try:
                 btn = self.page.locator(selector).first
                 if btn.is_visible():
                     btn.click()
-                    self.page.wait_for_timeout(500)
+                    self.wait_for_loading_complete(timeout=10000)
                     logger.info(f"点击{selector}清空按钮")
                     return
             except Exception:
@@ -161,7 +161,7 @@ class SalesOrderExportPage(BasePage):
                             el.check(force=True)
                     else:
                         el.click(force=True)
-                    self.page.wait_for_timeout(300)
+                    self.wait_for_loading_complete(timeout=10000)
                     logger.info(f"已选择字段: {field_name} (通过选择器: {selector[:50]}...)")
                     return True
             except Exception:
@@ -204,7 +204,7 @@ class SalesOrderExportPage(BasePage):
             """
             )
             if result:
-                self.page.wait_for_timeout(300)
+                self.wait_for_loading_complete(timeout=10000)
                 logger.info(f"已选择字段: {field_name} (通过JS回退)")
                 return True
         except Exception as e:
@@ -256,7 +256,7 @@ class SalesOrderExportPage(BasePage):
     @allure.step("选择导出模板: {template_name}")
     def select_export_template(self, template_name: str) -> bool:
         try:
-            self.page.wait_for_timeout(3000)
+            self.wait_for_page_settle(timeout=30000)
 
             template_variants = [
                 template_name,
@@ -266,7 +266,7 @@ class SalesOrderExportPage(BasePage):
 
             # 1. 先点击空白处关闭任何已打开的下拉菜单
             self.page.locator("body").click()
-            self.page.wait_for_timeout(500)
+            self.wait_for_loading_complete(timeout=10000)
 
             # 2. 精确找到"请选择导出模板"所在的选择器
             #    使用 XPath 定位包含"请选择导出模板"文本的 el-select 元素
@@ -346,7 +346,7 @@ class SalesOrderExportPage(BasePage):
             if not clicked:
                 return False
 
-            self.page.wait_for_timeout(2000)
+            self.wait_for_page_settle(timeout=30000)
 
             # 3. 获取下拉选项并验证
             items = self.page.locator(".el-select-dropdown__item:visible").all()
@@ -377,7 +377,7 @@ class SalesOrderExportPage(BasePage):
             )
             if js_clicked:
                 logger.info("成功选择模板: {}", template_name)
-                self.page.wait_for_timeout(500)
+                self.wait_for_loading_complete(timeout=10000)
                 return True
 
             # 先尝试精确匹配
@@ -390,7 +390,7 @@ class SalesOrderExportPage(BasePage):
                         if name_variant in text or text in name_variant:
                             item.click()
                             logger.info(f"成功选择模板: {text}")
-                            self.page.wait_for_timeout(1000)
+                            self.wait_for_loading_complete(timeout=10000)
                             return True
                     except Exception:
                         continue
@@ -410,7 +410,7 @@ class SalesOrderExportPage(BasePage):
                     if all(kw in text_clean for kw in keywords):
                         item.click()
                         logger.info(f"模糊匹配成功（归一化后），选择模板: {text}")
-                        self.page.wait_for_timeout(1000)
+                        self.wait_for_loading_complete(timeout=10000)
                         return True
                 except Exception:
                     continue
@@ -436,7 +436,7 @@ class SalesOrderExportPage(BasePage):
                 )
                 if js_clicked:
                     logger.info("JS兜底选择模板成功")
-                    self.page.wait_for_timeout(1000)
+                    self.wait_for_loading_complete(timeout=10000)
                     return True
             except Exception as e:
                 logger.warning(f"JS兜底选择模板失败: {e}")
@@ -618,7 +618,7 @@ class SalesOrderExportPage(BasePage):
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with self.page.expect_download(timeout=timeout) as download_info:
                 self.click_realtime_export()
-                self.page.wait_for_timeout(1000)
+                self.wait_for_page_settle(timeout=30000)
 
             download = download_info.value
             filename = download.suggested_filename
@@ -657,7 +657,7 @@ class SalesOrderExportPage(BasePage):
                             "file_size": file_size,
                             "url": None,
                         }
-                    time.sleep(2)
+                    self.wait_for_poll_interval(2000)
 
                 logger.warning("轮询检测下载文件超时")
             except Exception as poll_e:
@@ -672,7 +672,7 @@ class SalesOrderExportPage(BasePage):
 
     @allure.step("检查是否有导出结果")
     def has_export_results(self) -> bool:
-        self.page.wait_for_timeout(2000)
+        self.wait_for_page_settle(timeout=30000)
         no_data = self.page.locator('span:has-text("暂无数据"), div:has-text("暂无数据")')
         if no_data.count() > 0:
             logger.info("导出页面显示暂无数据")

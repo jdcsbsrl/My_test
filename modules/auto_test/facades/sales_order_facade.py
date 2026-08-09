@@ -57,7 +57,6 @@ class SalesOrderFacade:
             }
         """
         )
-        self.page.wait_for_load_state("networkidle")
         self.order_page.wait_for_table_data()
         logger.info("搜索完成")
 

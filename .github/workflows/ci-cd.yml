@@ -33,12 +33,15 @@ jobs:
       - name: Ruff code check
         run: ruff check .
         continue-on-error: true
+        if: always()
       - name: Black format check
         run: black --check --config pyproject.toml .
         continue-on-error: true
+        if: always()
       - name: Mypy type check
         run: mypy modules/
         continue-on-error: true
+        if: always()
 
   security-scan:
     name: 安全扫描
@@ -61,6 +64,7 @@ jobs:
       - name: Bandit security scan
         run: bandit -r modules/ -f json -o bandit-report.json --severity-level medium
         continue-on-error: true
+        if: always()
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         with:
@@ -180,7 +184,10 @@ jobs:
         run: playwright install --with-deps chromium
       - name: Run UI tests (shard ${{ matrix.shard }})
         run: |
-          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio --no-cov --reruns 1 --reruns-delay 5 --alluredir reports/allure-results
+          # UI tests use Playwright Sync API; pytest-rerunfailures can create
+          # an asyncio loop around fixture setup, so UI retries are disabled.
+          # The test itself and the framework retain bounded domain retries.
+          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir reports/allure-results
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}

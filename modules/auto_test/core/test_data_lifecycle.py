@@ -10,7 +10,10 @@
 """
 
 import logging
+import json
+import os
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime
@@ -35,6 +38,7 @@ class TestDataLifecycleManager:
 
     def __init__(self, env: str = "test"):
         self.env = env
+        self.run_id = os.getenv("TEST_RUN_ID", uuid.uuid4().hex)
         self.db_helper = DBHelper()
         self._setup_tasks: list[tuple] = []
         self._cleanup_tasks: list[dict[str, Any]] = []
@@ -46,6 +50,7 @@ class TestDataLifecycleManager:
         self._dependency_graph: dict[str, list[str]] = {}
         # 已创建的测试数据记录（用于清理）
         self._created_data: list[dict[str, Any]] = []
+        self._cleanup_failures: list[dict[str, Any]] = []
         # 是否启用DB直连兜底清理（仅限测试环境）
         self._enable_db_fallback = env != "production"
 
@@ -113,6 +118,7 @@ class TestDataLifecycleManager:
                 "id": data_id,
                 "cleanup": cleanup_func,
                 "created_at": datetime.now(),
+                "run_id": self.run_id,
             }
         )
 
@@ -167,8 +173,10 @@ class TestDataLifecycleManager:
                     logger.info("Fallback cleanup (DB) succeeded")
                 except Exception as db_error:
                     logger.error(f"Both API and DB cleanup failed: {db_error}")
+                    self._record_cleanup_failure(cleanup_item, api_error, db_error)
                     self._log_cleanup_failure(cleanup_item, str(api_error), str(db_error))
             else:
+                self._record_cleanup_failure(cleanup_item, api_error, None)
                 self._log_cleanup_failure(cleanup_item, str(api_error), None)
 
     def _execute_data_cleanup(self, data_item: dict[str, Any]) -> None:
@@ -180,6 +188,26 @@ class TestDataLifecycleManager:
             # 尝试DB兜底清理
             if self._enable_db_fallback:
                 self._db_fallback_cleanup(data_item)
+            self._record_cleanup_failure(data_item, e, None)
+
+    def _record_cleanup_failure(self, item: Any, api_error: Exception, db_error: Exception | None) -> None:
+        """Persist a local fallback record even when the database is unavailable."""
+        failure = {
+            "run_id": self.run_id,
+            "environment": self.env,
+            "item": str(item),
+            "api_error": str(api_error),
+            "db_error": str(db_error) if db_error else None,
+            "created_at": datetime.now().isoformat(),
+        }
+        self._cleanup_failures.append(failure)
+        os.makedirs("reports", exist_ok=True)
+        with open("reports/cleanup-failures.jsonl", "a", encoding="utf-8") as stream:
+            stream.write(json.dumps(failure, ensure_ascii=False) + "\n")
+
+    @property
+    def cleanup_failures(self) -> list[dict[str, Any]]:
+        return list(self._cleanup_failures)
 
     def _db_fallback_cleanup(self, data_item: dict[str, Any]) -> None:
         """DB直连兜底清理（仅限测试环境）"""
