@@ -306,6 +306,8 @@ def login_response(
         if "/auth/login" in response.url:
             try:
                 login_result["response"] = response.json()
+                headers = response.request.all_headers()
+                login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
             except Exception:
                 pass
 
@@ -324,6 +326,8 @@ def login_response(
             if "response" not in login_result:
                 pytest.fail("Failed to capture login API response")
 
+            login_result["response"]["_clientid"] = login_result.get("clientid")
+            login_result["response"]["_cookies"] = page.context.cookies()
             return login_result["response"]
 
         except Exception as e:
@@ -361,7 +365,7 @@ def http_client():
 
 
 @pytest.fixture(scope="function")
-def authenticated_http_client(http_client, login_token: str) -> requests.Session:
+def authenticated_http_client(http_client, login_token: str, login_response: dict) -> requests.Session:
     """Provide an HTTP client with authentication token already set.
 
     The Authorization header is automatically added to all requests.
@@ -369,7 +373,13 @@ def authenticated_http_client(http_client, login_token: str) -> requests.Session
     Returns:
         requests.Session: HTTP session with Authorization header
     """
-    http_client.headers.update({"Authorization": f"Bearer {login_token}", "Content-Type": "application/json"})
+    clientid = login_response.get("_clientid") or os.getenv("TEST_CLIENTID")
+    headers = {"Authorization": f"Bearer {login_token}", "Content-Type": "application/json"}
+    if clientid:
+        headers["clientid"] = clientid
+    http_client.headers.update(headers)
+    for cookie in login_response.get("_cookies", []):
+        http_client.cookies.set(cookie["name"], cookie["value"], domain=cookie.get("domain"), path=cookie.get("path", "/"))
     yield http_client
 
 
