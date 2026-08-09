@@ -76,6 +76,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: code-quality
     timeout-minutes: 20
+    env:
+      TEST_ENV: test
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -110,6 +115,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: unit-tests
     timeout-minutes: 20
+    env:
+      TEST_ENV: test
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
