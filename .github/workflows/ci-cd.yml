@@ -171,6 +171,8 @@ jobs:
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
           - shard: 10
             test_files: "modules/auto_test/tests/test_sales_report_regression.py"
+          - shard: 11
+            test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
     steps:
       - uses: actions/checkout@v4
