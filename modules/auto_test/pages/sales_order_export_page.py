@@ -348,8 +348,16 @@ class SalesOrderExportPage(BasePage):
 
             self.wait_for_page_settle(timeout=30000)
 
+            # The selector can render before the async template request has
+            # populated its options. Wait for an actual visible option.
+            visible_items = self.page.locator(".el-select-dropdown__item:visible")
+            try:
+                visible_items.first.wait_for(state="visible", timeout=30000)
+            except Exception:
+                logger.warning("模板下拉已打开但选项未在限定时间内出现")
+
             # 3. 获取下拉选项并验证
-            items = self.page.locator(".el-select-dropdown__item:visible").all()
+            items = visible_items.all()
             logger.info(f"下拉选项数量: {len(items)}")
             for item in items:
                 text = item.text_content() or ""
