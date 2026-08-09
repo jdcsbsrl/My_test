@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
@@ -24,6 +25,14 @@ class BrowserDriver:
     def start_browser(self, *, browser: str, headless: bool, slow_mo: int) -> Browser:
         if self.browser is not None:
             return self.browser
+
+        # Prefer the repository-managed browser bundle so local runs and CI
+        # use the same executable. An explicit environment override still wins.
+        repo_browsers = Path(__file__).resolve().parents[3] / "browsers"
+        configured_browsers = Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]) if os.getenv("PLAYWRIGHT_BROWSERS_PATH") else None
+        if repo_browsers.is_dir() and (configured_browsers is None or not configured_browsers.is_dir()):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(repo_browsers)
+            logger.info("BrowserDriver: using repository browsers at %s", repo_browsers)
 
         self._playwright = sync_playwright().start()
         cdp_url = (os.getenv("PLAYWRIGHT_CDP_ENDPOINT") or "").strip()

@@ -1,6 +1,8 @@
 """Shared pytest fixtures for auto_test module."""
 
 import os
+import json
+import sys
 import time
 import uuid
 
@@ -17,6 +19,7 @@ from modules.auto_test.core.test_data_factory import (
     TestDataFactory,
 )
 from modules.auto_test.core.token_manager import TokenManager, get_token_manager
+from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager
 from modules.auto_test.drivers.browser_driver import BrowserDriver
 from modules.auto_test.pages.login_page import LoginPage
 
@@ -24,12 +27,100 @@ load_dotenv()
 
 USERNAME = os.getenv("TEST_USERNAME")
 PASSWORD = os.getenv("TEST_PASSWORD")
+TEST_RUN_ID = os.getenv("TEST_RUN_ID", uuid.uuid4().hex)
+_TEST_ATTEMPTS: dict[str, int] = {}
+_TEST_RESULTS: list[dict] = []
 
 if not USERNAME or not PASSWORD:
     raise RuntimeError(
         "TEST_USERNAME and/or TEST_PASSWORD not set. "
         "Ensure .env file exists or environment variables are configured."
     )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Publish stable metadata for every local and CI test run."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure:
+            reconfigure(encoding="utf-8", errors="replace")
+    metadata = {
+        "run_id": TEST_RUN_ID,
+        "environment": os.getenv("TEST_ENV", "test"),
+        "browser": os.getenv("PLAYWRIGHT_BROWSER_CHANNEL", "chromium"),
+        "commit_sha": os.getenv("GITHUB_SHA", "local"),
+    }
+    config._test_run_metadata = metadata
+    os.makedirs("reports", exist_ok=True)
+    with open("reports/test-run.json", "w", encoding="utf-8") as stream:
+        json.dump(metadata, stream, ensure_ascii=False, indent=2)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
+    """Record attempts and identify tests that pass only after a rerun."""
+    outcome = yield
+    report = outcome.get_result()
+    if report.when != "call":
+        return
+
+    _TEST_ATTEMPTS[item.nodeid] = _TEST_ATTEMPTS.get(item.nodeid, 0) + 1
+    attempts = _TEST_ATTEMPTS[item.nodeid]
+    metadata = getattr(item.config, "_test_run_metadata", {})
+    payload = {
+        **metadata,
+        "nodeid": item.nodeid,
+        "outcome": report.outcome,
+        "attempt": attempts,
+        "failure_category": _classify_failure(report) if report.failed else None,
+    }
+    if attempts > 1 and report.outcome == "passed":
+        payload["status"] = "flaky_passed"
+        report.user_properties.append(("flaky_passed", "true"))
+        try:
+            import allure
+
+            allure.attach(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                "flaky-test-attempt",
+                allure.attachment_type.JSON,
+            )
+        except Exception:
+            pass
+    with open("reports/test-attempts.jsonl", "a", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    _TEST_RESULTS.append(payload)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Write a compact result summary for CI and local triage."""
+    summary = {"passed": 0, "failed": 0, "flaky_passed": 0, "categories": {}}
+    for result in _TEST_RESULTS:
+        if result.get("status") == "flaky_passed":
+            summary["flaky_passed"] += 1
+        elif result.get("outcome") == "passed":
+            summary["passed"] += 1
+        elif result.get("outcome") == "failed":
+            summary["failed"] += 1
+        category = result.get("failure_category")
+        if category:
+            summary["categories"][category] = summary["categories"].get(category, 0) + 1
+    summary.update({"exitstatus": exitstatus, "run_id": TEST_RUN_ID})
+    with open("reports/test-summary.json", "w", encoding="utf-8") as stream:
+        json.dump(summary, stream, ensure_ascii=False, indent=2)
+
+
+def _classify_failure(report: pytest.TestReport) -> str:
+    text = str(getattr(report, "longrepr", "")).lower()
+    if "timeout" in text:
+        return "timeout"
+    if any(token in text for token in ("401", "403", "authentication", "login")):
+        return "authentication_failure"
+    if any(token in text for token in ("connectionerror", "connecttimeout", "502", "503", "504")):
+        return "environment_failure"
+    if any(token in text for token in ("assertionerror", "assert ")):
+        return "product_or_test_assertion"
+    return "unknown"
 
 
 @pytest.fixture(scope="session")
@@ -42,6 +133,14 @@ def config_manager() -> ConfigManager:
 def test_data_factory() -> TestDataFactory:
     """Provide a test data factory for generating test data (DB-backed when available)."""
     return EnhancedTestDataFactory()
+
+
+@pytest.fixture(scope="function")
+def data_lifecycle(config_manager: ConfigManager):
+    """Track test-created data and always attempt cleanup after the test."""
+    manager = TestDataLifecycleManager(env=config_manager.env)
+    yield manager
+    manager.execute_cleanup()
 
 
 @pytest.fixture(scope="session")

@@ -19,7 +19,10 @@ class TestExportFullFlow:
         export_page = SalesOrderExportPage(logged_in_page)
 
         sales_order_page.navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_timeout(3000)
+        logged_in_page.wait_for_function(
+            "() => document.querySelectorAll('.order-block, .el-table__body-wrapper tbody tr').length > 0",
+            timeout=30000,
+        )
         try:
             sales_order_page.click_tab("待处理")
         except Exception as exc:
@@ -40,7 +43,8 @@ class TestExportFullFlow:
         export_page.navigate_to(
             f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}"
         )
-        logged_in_page.wait_for_load_state("domcontentloaded")
+        assert export_page.wait_for_export_page(), "Export page failed to load"
+        logged_in_page.locator(".el-select:visible").first.wait_for(state="visible", timeout=30000)
 
         print(f"\n✅ 已导航到导出页面: {export_page.get_current_url()}")
 

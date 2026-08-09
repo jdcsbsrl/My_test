@@ -58,8 +58,8 @@ class InventorySKUPage(BasePage):
         locator = self.page.locator(selector)
         if locator.count() > 0:
             locator.first.click(force=True)
-            self.page.wait_for_timeout(500)
             option = self.page.locator(f'.el-select-dropdown__item:has-text("{warehouse}")').first
+            option.wait_for(state="visible", timeout=10000)
             if option.count() > 0:
                 option.click(force=True)
                 logger.info(f"选择仓库: {warehouse}")
@@ -110,7 +110,7 @@ class InventorySKUPage(BasePage):
     @allure.step("选择导出当前搜索的库存SKU")
     def select_export_current_search(self) -> None:
         self.click_export()
-        self.page.wait_for_timeout(1000)
+        self.wait_for_page_settle(timeout=30000)
 
         try:
             clicked = self.page.evaluate(
@@ -128,7 +128,7 @@ class InventorySKUPage(BasePage):
             )
             if not clicked:
                 raise ValueError("未找到导出当前搜索的库存SKU菜单项")
-            self.page.wait_for_timeout(3000)
+            self.wait_for_page_settle(timeout=30000)
             logger.info("选择导出当前搜索的库存SKU")
             return
         except Exception as e:
@@ -141,7 +141,7 @@ class InventorySKUPage(BasePage):
                 text = item.text_content() or ""
                 if "导出当前搜索的库存SKU" in text:
                     item.click(force=True)
-                    self.page.wait_for_timeout(3000)
+                    self.wait_for_page_settle(timeout=30000)
                     logger.info("选择导出当前搜索的库存SKU")
                     found = True
                     break
@@ -152,7 +152,7 @@ class InventorySKUPage(BasePage):
             export_menu_item = self.page.locator('span:has-text("导出当前搜索的库存SKU")')
             if export_menu_item.count() > 0:
                 export_menu_item.first.click(force=True)
-                self.page.wait_for_timeout(3000)
+                self.wait_for_page_settle(timeout=30000)
                 logger.info("选择导出当前搜索的库存SKU")
             else:
                 logger.warning("未找到导出当前搜索的库存SKU菜单")
@@ -161,7 +161,8 @@ class InventorySKUPage(BasePage):
     def select_export_current_search(self) -> None:
         """Select current-search inventory SKU export and wait for export page."""
         self.click_export()
-        self.page.wait_for_timeout(1000)
+        menu = self.page.locator(".el-dropdown-menu__item:visible").first
+        menu.wait_for(state="visible", timeout=10000)
 
         clicked = self.page.evaluate(
             """() => {
@@ -197,13 +198,13 @@ class InventorySKUPage(BasePage):
                 if "exportPage" in opened_page.url:
                     self.page = opened_page
                     return
-            self.page.wait_for_timeout(500)
+            self.wait_for_poll_interval(500)
         page_urls = [pg.url for pg in self.page.context.pages]
         raise TimeoutError(f"Inventory export page did not open. current={self.page.url}, pages={page_urls}")
 
     def select_export_selected(self) -> None:
         self.click_export()
-        self.page.wait_for_timeout(1000)
+        self.wait_for_page_settle(timeout=30000)
         menu_items = self.page.locator(".el-dropdown-menu__item").all()
         for item in menu_items:
             try:

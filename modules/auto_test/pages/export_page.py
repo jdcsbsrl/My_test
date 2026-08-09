@@ -31,7 +31,7 @@ class ExportPage(BasePage):
             logger.info("点击实时导出按钮")
         else:
             logger.warning("未找到实时导出按钮")
-            self.page.wait_for_timeout(1000)
+            self.wait_for_loading_complete(timeout=10000)
             real_time_btn = self.page.locator('button:has-text("实时导出")')
             if real_time_btn.count() > 0:
                 real_time_btn.first.click()

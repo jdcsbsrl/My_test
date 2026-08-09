@@ -339,7 +339,7 @@ class SKUSearchPage(BasePage):
                 options,
             )
             self.page.keyboard.press("Escape")
-            self.page.wait_for_timeout(1000)
+            self.wait_for_poll_interval(1000)
         raise ValueError(f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}")
 
     def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
@@ -370,7 +370,7 @@ class SKUSearchPage(BasePage):
                 options,
             )
             self.page.keyboard.press("Escape")
-            self.page.wait_for_timeout(1000)
+            self.wait_for_poll_interval(1000)
 
         raise ValueError(f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}")
 
@@ -391,7 +391,7 @@ class SKUSearchPage(BasePage):
 
     def _open_dropdown_by_placeholder(self, placeholder: str) -> bool:
         self.page.keyboard.press("Escape")
-        self.page.wait_for_timeout(200)
+        self.wait_for_poll_interval(200)
         for selector in self._dropdown_selectors(placeholder):
             try:
                 locator = self.page.locator(selector)
@@ -420,7 +420,7 @@ class SKUSearchPage(BasePage):
                 locator = self.page.locator(selector)
                 if locator.count() > 0 and locator.first.is_visible():
                     locator.first.click()
-                    self.page.wait_for_timeout(300)
+                    self.wait_for_poll_interval(300)
                     logger.info(f"点击下拉选择器: {selector}")
                     return True
             except Exception:

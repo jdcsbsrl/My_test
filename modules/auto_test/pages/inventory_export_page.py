@@ -34,7 +34,7 @@ class InventoryExportPage(BasePage):
                         logger.info(f"已切换到导出页面: {pg.url}")
                         return True
 
-                time.sleep(1)
+                self.wait_for_poll_interval(1000)
 
             logger.warning(f"未找到导出页面，当前页面URL: {self.page.url}")
             return False
@@ -63,14 +63,14 @@ class InventoryExportPage(BasePage):
 
     @allure.step("全选导出字段")
     def select_all_fields(self, fast_mode: bool = True) -> None:
-        self.page.wait_for_timeout(500)
+        self.wait_for_loading_complete(timeout=10000)
 
         if fast_mode:
             try:
                 result = self._click_select_all_checkbox()
                 logger.info("fast_mode 触发页面全选控件: {}", result)
                 if result.get("clicked") or result.get("already_checked"):
-                    self.page.wait_for_timeout(500)
+                    self.wait_for_loading_complete(timeout=10000)
                     if self.get_selected_field_count() > 0:
                         return
                     logger.warning("页面全选控件触发后未检测到已选字段，继续尝试逐项选择")
@@ -114,7 +114,7 @@ class InventoryExportPage(BasePage):
                 if btn.is_visible():
                     btn.click()
                     logger.info(f"点击{selector}按钮")
-                    self.page.wait_for_timeout(500)
+                    self.wait_for_loading_complete(timeout=10000)
                     return
             except Exception:
                 continue
@@ -166,14 +166,14 @@ class InventoryExportPage(BasePage):
 
     @allure.step("清空已选导出字段")
     def deselect_all_fields(self) -> None:
-        self.page.wait_for_timeout(500)
+        self.wait_for_loading_complete(timeout=10000)
         clear_selectors = ['button:has-text("清空")', 'button:has-text("全选/清空")']
         for selector in clear_selectors:
             try:
                 btn = self.page.locator(selector).first
                 if btn.is_visible():
                     btn.click()
-                    self.page.wait_for_timeout(500)
+                    self.wait_for_loading_complete(timeout=10000)
                     logger.info(f"点击{selector}清空按钮")
                     return
             except Exception:
@@ -249,13 +249,13 @@ class InventoryExportPage(BasePage):
                 field_name,
             )
             if result.get("selected"):
-                self.page.wait_for_timeout(300)
+                self.wait_for_loading_complete(timeout=10000)
                 logger.info("宸查€夋嫨瀛楁: {} -> {}", field_name, result)
                 return True
             field_label = self.page.locator(f'.el-checkbox__label:has-text("{field_name}")').first
             if field_label.count() > 0:
                 field_label.click(force=True)
-                self.page.wait_for_timeout(300)
+                self.wait_for_loading_complete(timeout=10000)
                 logger.info(f"已选择字段: {field_name}")
                 return True
             else:
@@ -294,7 +294,7 @@ class InventoryExportPage(BasePage):
             if not clicked:
                 return False
 
-            self.page.wait_for_timeout(500)
+            self.wait_for_loading_complete(timeout=10000)
             selected = self.page.evaluate(
                 """() => {
                     const ignored = new Set(['calibri', '微软雅黑', 'arial', 'times new roman', '宋体']);
@@ -376,7 +376,7 @@ class InventoryExportPage(BasePage):
 
     @allure.step("点击非实时导出按钮")
     def click_async_export(self) -> None:
-        self.page.wait_for_timeout(1000)
+        self.wait_for_loading_complete(timeout=10000)
         export_btns = self.page.locator('button:has-text("非实时导出")').all()
         if export_btns:
             export_btns[0].click()
@@ -738,7 +738,7 @@ class InventoryExportPage(BasePage):
 
     @allure.step("检查是否有导出结果")
     def has_export_results(self) -> bool:
-        self.page.wait_for_timeout(2000)
+        self.wait_for_loading_complete(timeout=30000)
         no_data = self.page.locator('span:has-text("暂无数据"), div:has-text("暂无数据")')
         if no_data.count() > 0:
             logger.info("导出页面显示暂无数据")
@@ -751,8 +751,8 @@ class InventoryExportPage(BasePage):
             template_input = self.page.locator('input[placeholder*="选择模板"]').first
             if template_input.count() > 0:
                 template_input.click(force=True)
-                self.page.wait_for_timeout(500)
                 option = self.page.locator(f'.el-select-dropdown__item:has-text("{template_name}")').first
+                option.wait_for(state="visible", timeout=10000)
                 if option.count() > 0:
                     option.click(force=True)
                     logger.info(f"已选择模板: {template_name}")

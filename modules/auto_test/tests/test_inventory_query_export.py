@@ -1,6 +1,7 @@
 """Inventory SKU Query and Export Regression Tests."""
 
 import os
+import time
 
 import pytest
 from playwright.sync_api import Page
@@ -12,6 +13,7 @@ from modules.auto_test.pages.inventory_sku_page import InventorySKUPage
 @pytest.mark.regression
 @pytest.mark.ui
 @pytest.mark.p1
+@pytest.mark.core
 class TestInventoryQuery:
     """Tests for inventory SKU query functionality."""
 
@@ -221,7 +223,11 @@ class TestInventoryExport:
         export_page.select_all_fields(fast_mode=True)
         print("\n✅ 已选择所有导出字段")
 
-        download_result = export_page.wait_for_download(timeout=60000)
+        download_result = export_page.download_to(
+            f"downloads/inventory_query_export_{int(time.time())}.xlsx", timeout=120000
+        )
+        assert download_result["success"], f"导出下载失败: {download_result.get('error')}"
+        assert download_result["file_size"] > 0, "导出文件为空"
 
         if download_result["success"]:
             print("\n✅ 导出下载成功")

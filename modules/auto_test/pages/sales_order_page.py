@@ -102,7 +102,7 @@ class SalesOrderPage(BasePage):
             self.wait_for_load_state()
             import time
 
-            time.sleep(5)
+            self.wait_for_page_settle(timeout=30000)
             self.take_screenshot("after_login")
 
             try:
@@ -138,7 +138,7 @@ class SalesOrderPage(BasePage):
             "[role='tab']:has-text('{name}')",
         ]
 
-        self.page.wait_for_timeout(3000)
+        self.wait_for_page_settle(timeout=30000)
         try:
             self.page.wait_for_load_state("networkidle", timeout=15000)
         except Exception as e:
@@ -402,7 +402,7 @@ class SalesOrderPage(BasePage):
                     self.wait_for_load_state()
                     import time
 
-                    time.sleep(2)
+                    self.wait_for_loading_complete(timeout=10000)
                     break
             except Exception as e:
                 print(f"尝试选择器 {selector} 失败: {e}")
@@ -436,7 +436,7 @@ class SalesOrderPage(BasePage):
                     self.wait_for_load_state()
                     import time
 
-                    time.sleep(2)
+                    self.wait_for_loading_complete(timeout=10000)
                     break
             except Exception as e:
                 print(f"尝试选择器 {selector} 失败: {e}")
@@ -454,7 +454,7 @@ class SalesOrderPage(BasePage):
             self.wait_for_load_state()
             import time
 
-            time.sleep(3)
+            self.wait_for_loading_complete(timeout=10000)
 
             selectors = [
                 "//table[@class='el-table__body']//tr",
@@ -634,7 +634,7 @@ class SalesOrderPage(BasePage):
         start_time = time.time()
         next_btn.click()
         self.wait_for_load_state("networkidle")
-        time.sleep(0.5)
+        self.wait_for_table_data(timeout=30000)
         elapsed = time.time() - start_time
         logger.info(f"下一页加载时间: {elapsed:.3f}s")
         return elapsed
@@ -669,7 +669,7 @@ class SalesOrderPage(BasePage):
         start_time = time.time()
         prev_btn.click()
         self.wait_for_load_state("networkidle")
-        time.sleep(0.5)
+        self.wait_for_table_data(timeout=30000)
         elapsed = time.time() - start_time
         logger.info(f"上一页加载时间: {elapsed:.3f}s")
         return elapsed
@@ -699,7 +699,7 @@ class SalesOrderPage(BasePage):
         start_time = time.time()
         page_btn.click()
         self.wait_for_load_state("networkidle")
-        time.sleep(0.5)
+        self.wait_for_table_data(timeout=30000)
         elapsed = time.time() - start_time
         logger.info(f"页码 {page_number} 加载时间: {elapsed:.3f}s")
         return elapsed
@@ -726,7 +726,7 @@ class SalesOrderPage(BasePage):
         if size_trigger is None:
             raise ValueError("无法找到每页条数选择器")
         size_trigger.click()
-        time.sleep(0.5)
+        self.wait_for_loading_complete(timeout=10000)
         option_selectors = [
             f"//li[contains(@class, 'el-select-dropdown__item')]//span[text()='{size}']",
             f"//li[contains(@class, 'el-select-dropdown__item') and text()='{size}']",
@@ -751,7 +751,7 @@ class SalesOrderPage(BasePage):
         start_time = time.time()
         option.click()
         self.wait_for_load_state("networkidle")
-        time.sleep(1)
+        self.wait_for_table_data(timeout=30000)
         elapsed = time.time() - start_time
         logger.info(f"切换每页 {size} 条加载时间: {elapsed:.3f}s")
         return elapsed

@@ -49,6 +49,11 @@ class BasePage:
             if not self.self_healing.enabled:
                 raise
             context = LocatorContext(selector=selector, selectors=[selector], description=selector)
+            if not self.self_healing.execute(
+                "wait_for_element", context, lambda locator: locator.wait_for(timeout=timeout)
+            ):
+                raise
+            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
             if not self.self_healing.execute("fill", context, lambda locator: locator.fill(value)):
                 raise
             logger.info(f"Self-healed fill: {selector}")
@@ -86,11 +91,41 @@ class BasePage:
         except Exception:
             if not self.self_healing.enabled:
                 raise
-            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
-            if not self.self_healing.execute(
-                "wait_for_element", context, lambda locator: locator.wait_for(timeout=timeout)
-            ):
-                raise
+
+    @allure.step("等待页面加载完成")
+    def wait_for_loading_complete(self, selectors: list[str] | None = None, timeout: int = 30000) -> None:
+        """Wait for common loading indicators to disappear instead of sleeping."""
+        loading_selectors = selectors or [
+            ".el-loading-mask",
+            ".el-loading-spinner",
+            "[aria-busy='true']",
+            "[data-loading='true']",
+        ]
+        for loading_selector in loading_selectors:
+            locator = self.page.locator(loading_selector)
+            if locator.count():
+                locator.first.wait_for(state="hidden", timeout=timeout)
+
+    @allure.step("等待页面稳定")
+    def wait_for_page_settle(self, timeout: int = 30000) -> None:
+        """Wait for navigation and common loading indicators to settle."""
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
+        except Exception:
+            logger.debug("DOM content load did not settle within timeout")
+        self.wait_for_loading_complete(timeout=timeout)
+
+    def wait_for_poll_interval(self, milliseconds: int = 250) -> None:
+        """Yield between bounded polling attempts; use only inside polling loops."""
+        self.page.wait_for_timeout(milliseconds)
+
+    @allure.step("等待业务元素可操作")
+    def wait_for_actionable(self, selector: str, timeout: int = 30000) -> Locator:
+        """Return a visible and enabled element for a deterministic action."""
+        locator = self.page.locator(selector).first
+        locator.wait_for(state="visible", timeout=timeout)
+        expect(locator).to_be_enabled(timeout=timeout)
+        return locator
 
     @allure.step("Wait for page load")
     def wait_for_load_state(self, state: str = "domcontentloaded") -> None:

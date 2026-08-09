@@ -15,6 +15,7 @@ EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
 @pytest.mark.regression
 @pytest.mark.ui
 @pytest.mark.p1
+@pytest.mark.smoke
 class TestSalesExportSimple:
     """Smoke coverage for exporting selected sales orders on the current page."""
 
