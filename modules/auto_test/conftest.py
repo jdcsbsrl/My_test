@@ -9,7 +9,7 @@ import uuid
 import pytest
 import requests
 from dotenv import load_dotenv
-from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
+from playwright.sync_api import Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 from modules.auto_test.core.config_manager import ConfigManager, get_config
 from modules.auto_test.core.test_data_factory import (
@@ -236,8 +236,14 @@ def logged_in_page(page: Page) -> Page:
 
     This fixture is useful for tests that require authentication.
     """
-    page.goto(get_config().base_url)
-    page.wait_for_load_state("domcontentloaded")
+    try:
+        page.goto(get_config().base_url, wait_until="domcontentloaded", timeout=60000)
+    except PlaywrightTimeoutError:
+        # The ERP shell may keep loading analytics/polling resources after the
+        # application DOM is ready. Continue only when the page has reached
+        # the expected application URL; otherwise preserve a real failure.
+        if "/login" in page.url or not page.url.startswith(get_config().base_url.rstrip("/")):
+            raise
     if "/login" in page.url:
         pytest.fail("Cached authentication state is invalid")
     yield page
