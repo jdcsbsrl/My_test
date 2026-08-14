@@ -88,10 +88,10 @@ class RegressionTestReport:
         return report
 
 
-class KnowledgeRetrieverRegressionTest:
+class TestKnowledgeRetrieverRegression:
     """KnowledgeRetriever回归测试类"""
 
-    def __init__(self):
+    def setup_method(self):
         self.retriever = KnowledgeRetriever()
         self.report = RegressionTestReport()
 

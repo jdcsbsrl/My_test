@@ -82,12 +82,7 @@ include = [
     "modules.auto_test.pages",
     "modules.auto_test.drivers",
     "modules.auto_test.facades",
-    "reporting",
-    "core",
-    "pages",
-    "api",
-    "utils",
-    "fixtures",
+    "modules.trae_test.orchestrator",
 ]
 
 [tool.black]

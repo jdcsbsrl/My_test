@@ -25,10 +25,10 @@ class TestSalesExportSimple:
         export_page = SalesOrderExportPage(logged_in_page)
 
         sales_order_page.navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_timeout(5000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         sales_order_page.click_tab("待处理")
-        logged_in_page.wait_for_timeout(3000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         order_numbers = sales_order_page.get_sorted_order_numbers(limit=10)
         assert order_numbers, "页面未获取到可导出的订单号"

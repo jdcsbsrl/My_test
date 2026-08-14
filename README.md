@@ -1,109 +1,61 @@
-# test_erp 测试管理平台
+# Test ERP
 
-将 trae_test（测试用例生成）与 auto_test（自动化测试执行）合并的完整测试管理平台。
+An integrated ERP test platform with test-case generation (`trae_test`) and automated execution (`auto_test`).
 
-## 项目结构
+## Project layout
 
-```
+```text
 test_erp/
-├── pyproject.toml              # 项目配置和依赖
-├── .env.example                # 环境变量示例
-├── .gitignore
-├── AGENTS.md                   # Agent 文档索引
-├── README.md                   # 本文件
-│
-├── modules/                    # 模块目录
-│   ├── trae_test/             # 测试用例生成模块
-│   │   └── utils/             # 核心工具类
-│   └── auto_test/             # 自动化测试执行模块
-│       └── core/              # 核心功能
-│
-├── configs/                    # 配置文件
-│   ├── test.yaml             # 测试环境配置
-│   ├── uat.yaml              # UAT 环境配置
-│   └── env_config.example.json
-│
-├── assets/                     # 资源文件
-│   └── knowledge_base/        # 知识库
-│
-├── testcases/                  # 测试用例存储
-│
-├── tools/                      # 项目工具
-│   ├── project_check.py       # 项目检查工具
-│   └── case_generator_cli.py  # 用例生成命令行
-│
-├── docs/                       # 文档
-│   └── ARCHITECTURE.md
-│
-└── .trae/                      # Trae 配置
-    ├── agents/
-    └── rules/
+├── modules/
+│   ├── trae_test/          test-case generation, knowledge retrieval, orchestration
+│   └── auto_test/          browser/API automation and regression tests
+├── tests/
+│   ├── unit/               unit tests
+│   └── integration/        integration tests
+├── assets/knowledge_base/  local knowledge base; business data stays out of Git
+├── configs/                environment and test configuration examples
+├── tools/                  project utilities and CLIs
+├── docs/                   architecture and workflow documentation
+└── .trae/                  agent rules and configuration
 ```
 
-## 快速开始
-
-### 1. 安装依赖
+## Quick start
 
 ```bash
-cd test_erp
 pip install -e .
-```
-
-### 2. 配置环境
-
-复制环境变量示例文件：
-
-```bash
 cp .env.example .env
+python tools/project_structure_auditor.py
 ```
 
-编辑 `.env`，配置相关环境变量。
-
-### 3. 项目检查
-
-运行项目检查工具，验证环境是否正确：
+Run the default test collection or a focused suite:
 
 ```bash
-python tools/project_check.py
+pytest --collect-only
+pytest tests/unit tests/integration
 ```
 
-### 4. 生成测试用例
+## Test-case generation
 
 ```bash
-# 查看可用模板
 python tools/case_generator_cli.py list-templates
-
-# 生成测试用例
-python tools/case_generator_cli.py generate \
-    --module 基础资料 \
-    --function 物料新增 \
-    --priority P1
+python tools/case_generator_cli.py generate --module "基础资料" --function "物料新增" --priority P1
 ```
 
-## 模块说明
+Generated cases follow the project's 15-field standard and pass through the AuditAgent gateway before delivery.
 
-### trae_test 模块
+## Knowledge base
 
-负责测试用例的自动生成，包括：
-- 测试场景分析
-- 测试数据生成
-- 测试用例模板管理
-- 知识库驱动生成
+Agents must access business knowledge through `KnowledgeRetriever`; do not read raw knowledge JSON files directly. See `docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md` and `docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md`.
 
-### auto_test 模块
+## Documentation
 
-负责自动化测试执行，包括：
-- 测试环境配置（多环境支持）
-- 测试脚本执行
-- 测试结果收集与分析
-- 浏览器/API 测试支持
+- [Architecture](docs/ARCHITECTURE.md)
+- [Workflow](docs/WORKFLOW.md)
+- [Test-case workflow](docs/TRAE_TEST_WORKFLOW.md)
+- [Automation workflow](docs/AUTO_TEST_WORKFLOW.md)
+- [Local knowledge-base guide](docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md)
+- [Agent workspace instructions](AGENTS.md)
 
-## 文档
+## Safety boundaries
 
-- [AGENTS.md](AGENTS.md) - Agent 文档索引
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - 架构设计文档
-- [configs/README.md](configs/README.md) - 配置文件说明
-
-## 开发规范
-
-参见 `.trae/rules/` 下的规则文档。
+Run automated tests only in approved UAT or internal test environments. Keep credentials, tokens, raw business knowledge, and environment-specific test data out of Git.

@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """端到端集成测试脚本 - 验证"需求输入→测试用例生成"核心工作流"""
 
-import io
 import os
 import sys
 import time
 from datetime import datetime
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

@@ -408,7 +408,7 @@ IF 同一用例在冷却期（3600秒）内重生次数 >= 3
 - 禁止文件名过长（建议不超过100字符）
 
 #### 5.2.2 输出位置规范
-**统一位置**: D:\Working\test_erp\workspace\{北京日期YYYYMMDD}\{formal|draft}\
+**统一位置**: `workspace/{YYYYMMDD}/{formal|draft}/`（相对于项目根目录；如需外置目录，请通过 `WORKSPACE_OUTPUT_DIR` 配置）
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
@@ -416,8 +416,8 @@ IF 同一用例在冷却期（3600秒）内重生次数 >= 3
 | 草稿 | `workspace/YYYYMMDD/draft/` | 未经审核或待修改的草稿 |
 
 **示例**:
-- D:\Working\test_erp\workspace\20260513\formal\需求1001236销售订单SKU图片显示.xlsx（正式成果）
-- D:\Working\test_erp\workspace\20260513\draft\需求销售订单导出时间优化.xlsx（草稿）
+- `workspace/20260513/formal/<需求名>.xlsx`（正式成果）
+- `workspace/20260513/draft/<需求名>.xlsx`（草稿）
 
 **禁止**:
 - 禁止输出到output/、test_cases_output/、modules/trae_test/output/等其他目录
@@ -611,7 +611,7 @@ AuditAgent接收
 
 ---
 
-## 六、执行要求
+## 八、执行要求
 
 ### 6.1 强制执行
 - 本规范v3.0自发布之日起强制执行
@@ -630,7 +630,7 @@ AuditAgent接收
 
 ---
 
-## 七、完整工作流示例
+## 九、完整工作流示例
 
 ### 7.1 测试用例生成完整流程示例
 
