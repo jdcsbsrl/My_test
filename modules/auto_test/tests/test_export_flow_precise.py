@@ -32,14 +32,14 @@ class TestExportFlowPrecise:
         print("Step 1: Navigate to sales order page")
         print("=" * 70)
         sales_order_page.navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_timeout(8000)
+        logged_in_page.wait_for_load_state("networkidle")
         print(f"URL: {sales_order_page.current_url}")
 
         print("\n" + "=" * 70)
         print("Step 2: Click pending tab")
         print("=" * 70)
         sales_order_page.click_tab("待处理")
-        logged_in_page.wait_for_timeout(8000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)
         print("Step 3: Get order numbers before sort")
@@ -51,10 +51,10 @@ class TestExportFlowPrecise:
         print("Step 4: Click sort dropdown and select payment time ascending")
         print("=" * 70)
         sales_order_page.click_sort_dropdown()
-        logged_in_page.wait_for_timeout(3000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         sales_order_page.select_sort_order("付款时间", is_ascending=True)
-        logged_in_page.wait_for_timeout(8000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)
         print("Step 5: Get order numbers after sort")
@@ -72,7 +72,7 @@ class TestExportFlowPrecise:
         order_param = ",".join(page_order_numbers[:3]) if page_order_numbers else ""
         print(f"Order param for export: {order_param}")
         export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo={order_param}")
-        logged_in_page.wait_for_timeout(15000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         print(f"Export page URL: {export_page.current_url}")
 
@@ -91,7 +91,7 @@ class TestExportFlowPrecise:
             }
         """
         )
-        logged_in_page.wait_for_timeout(5000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)
         print("Step 8: List available templates")
@@ -139,7 +139,7 @@ class TestExportFlowPrecise:
 
         assert selected_template_text is not None, "未找到Dayone模板"
 
-        logged_in_page.wait_for_timeout(2000)
+        logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)
         print("Step 10: Ensure order number field is selected (use template defaults)")

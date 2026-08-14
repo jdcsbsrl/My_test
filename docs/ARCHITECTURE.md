@@ -1,44 +1,73 @@
-# Test ERP 架构设计
+# Test ERP Architecture
 
-> 版本 2.0.0 · 2026/7/16 · 基于 HarnessEngineer 规范
+## Overview
 
----
+Test ERP separates test-case generation from test execution. The orchestration layer coordinates generation, audit, workflow state, reporting, and recovery.
 
-## 模块设计
+## Main modules
 
-### 1. modules/trae_test/ - 测试用例生成模块
+### `modules/trae_test`
 
-**职责**: 负责测试用例的生成、管理、导出等功能
+Generates and manages standardized 15-field test cases.
 
-**核心组件**:
-- `utils/test_case_generator.py`: 测试用例生成器（15 字段标准格式）
-- `utils/knowledge_retriever.py`: 知识库检索工具（v3.0）
-- `utils/template_builder.py`: 测试模板构建器
-- `utils/test_case_strategy.py`: 测试用例策略引擎（评分/优化/重生闭环）
-- `utils/file_splitter.py`: JSON文件分割器（语义分割）
-- `utils/index_builder_v3.py`: 索引构建器（TF-IDF关键词）
-- `orchestrator/audit_agent_enhanced.py`: 全能审核Agent
+- `utils/test_case_generator.py`: test-case generation.
+- `utils/test_case_strategy.py`: scoring, optimization, and regeneration.
+- `utils/knowledge_retriever.py`: the only agent-facing knowledge-base API.
+- `utils/file_splitter.py` and `utils/index_builder_v3.py`: chunking and index construction.
+- `orchestrator/`: workflow coordination and audit gateway.
+- `orchestrator/audit_agent_enhanced.py`: blocking quality and policy audit.
 
-### 2. modules/auto_test/ - 自动化测试执行模块
+### `modules/auto_test`
 
-**职责**: 负责测试脚本的执行、环境配置、结果收集
+Executes automated tests in approved UAT or internal test environments.
 
-**核心组件**:
-- `core/environment.py`: 环境配置管理
-- `core/logger.py`: 日志管理
-- `core/test_data_factory.py`: 测试数据工厂（加载/生成/版本管理）
-- `core/test_data_lifecycle.py`: 测试数据生命周期管理（setUp/cleanup）
-- `drivers/`: 浏览器和 HTTP 驱动
-- `pages/`: UI 页面对象模型
-- `api/`: API 接口封装
-- `facades/`: 业务逻辑封装层
-- `reporting/`: 测试报告生成
+- `core/`: environment, logging, authentication, data factory, and lifecycle management.
+- `drivers/`: browser and HTTP drivers.
+- `pages/`: UI page objects.
+- `api/`: API clients and resources.
+- `facades/`: business-level test operations.
+- `tests/`: unit, integration, regression, and UI tests.
 
----
+## Knowledge-base architecture
 
-## 工作流程
+Agents access knowledge through `KnowledgeRetriever`. The physical knowledge base is local and should not be committed with business-sensitive source data.
 
+```text
+assets/knowledge_base/
+├── data/original/   source documents
+├── data/chunks/     semantic chunks for large documents
+├── index/global/    global metadata index
+├── index/inverted/  keyword index
+└── metadata/        file registry and retrieval metadata
 ```
-需求分析 → 测试场景设计 → 测试用例生成 → 
-测试脚本转换 → 测试执行 → 结果收集与分析 → 报告生成
+
+## Workflow
+
+```text
+requirement
+  -> scenario analysis
+  -> 15-field test-case generation
+  -> AuditAgent gateway
+  -> workflow state transition
+  -> automated execution
+  -> result collection and report
 ```
+
+Audit failures block delivery. Test data is created through `TestDataFactory` and cleaned up through `TestDataLifecycleManager`, including dependency-aware cascading cleanup.
+
+## Quality and recovery
+
+- `AuditAgent` validates test cases, code, environment, and deliverables before handoff.
+- `TestCaseScoreEngine` evaluates generated cases across five dimensions.
+- `TestCaseRegenerationLoop` retries low-quality cases with a circuit breaker.
+- Self-healing and locator recovery belong in the execution layer and must remain observable through reports and logs.
+
+## CI boundaries
+
+CI runs unit, integration, and selected UI/regression suites separately. Test collection is configured in `pytest.ini`; CI commands must remain explicit so script-style E2E checks are not mistaken for pytest tests. Deployment is currently represented by `deploy-test-stub` until a real test-environment deployment is configured.
+
+## Data and security boundaries
+
+- Run automation only against approved UAT/internal test environments.
+- Keep credentials, tokens, raw business knowledge, and test data outside Git.
+- Use relative workspace output paths or `WORKSPACE_OUTPUT_DIR`; never hard-code a developer machine path.

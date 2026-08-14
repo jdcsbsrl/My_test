@@ -96,7 +96,7 @@ jobs:
         run: pip install -e . "pytest>=8,<9"
       - name: Run unit tests
         run: >
-          pytest tests/unit/ -v --tb=short -n auto --alluredir reports/allure-results
+          pytest tests/unit/ tests/test_knowledge_retriever_regression.py -v --tb=short -n auto --alluredir reports/allure-results
           --cov=modules/auto_test --cov=modules/trae_test
           --cov-report=html:reports/coverage/html
           --cov-report=xml:reports/coverage/coverage.xml
@@ -134,7 +134,7 @@ jobs:
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short --no-cov --alluredir reports/allure-results
+        run: pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir reports/allure-results
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -261,7 +261,7 @@ jobs:
           name: allure-report
           path: reports/allure-report/
 
-  deploy-test:
+  deploy-test-stub:
     name: 部署到测试环境
     runs-on: ubuntu-latest
     needs: report

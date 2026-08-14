@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
 """审核与自动化方案确认工作流集成测试"""
 
-import io
 import sys
 import time
-
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
 from modules.trae_test.orchestrator.auto_agent import auto_agent, confirmation_service
 from modules.trae_test.orchestrator.workflow_state_machine import WorkflowState, lock_manager, state_machine
@@ -71,7 +67,7 @@ def test_excel_export():
         print(f"文件路径: {result['path']}")
         print(f"文件大小: {result['file_size']} bytes")
 
-    return result["success"]
+    assert result["success"]
 
 
 def test_workflow_state_machine():
@@ -113,7 +109,7 @@ def test_workflow_state_machine():
     success = state_machine.transition(wf, WorkflowState.AUTO_SOLUTION_GENERATED)
     print(f"审核通过进入方案生成: {'✅' if success else '❌'}")
 
-    return True
+    assert success
 
 
 def test_auto_agent():
@@ -168,7 +164,7 @@ def test_auto_agent():
         f.write(report)
     print("方案报告已生成")
 
-    return elapsed < 30000  # 要求30秒内完成
+    assert elapsed < 30000  # 要求30秒内完成
 
 
 def test_audit_logs():
@@ -180,11 +176,59 @@ def test_audit_logs():
 
     test_cases = [{"用例名称": "测试审计日志", "测试步骤": "1. 创建测试用例\n2. 执行审核", "预期结果": "审核通过"}]
 
-    result = audit_agent.audit(test_cases, AuditType.TEST_CASE)
+    valid_test_cases = [
+        {
+            "鐢ㄤ緥鐩綍": "娴嬭瘯鐢ㄤ緥 - 瀹¤ - 鏃ュ織",
+            "鐢ㄤ緥鍚嶇О": "娴嬭瘯瀹¤鏃ュ織",
+            "闇€姹侷D": "REQ-AUDIT-001",
+            "鍓嶇疆鏉′欢": "瀹¤鏈嶅姟鍙敤",
+            "鐢ㄤ緥姝ラ": "1. 鍒涘缓娴嬭瘯鐢ㄤ緥\n2. 鎵ц瀹¤",
+            "棰勬湡缁撴灉": "瀹¤閫氳繃骞惰褰曟棩蹇?",
+            "鐢ㄤ緥绫诲瀷": "鍔熻兘娴嬭瘯",
+            "鐢ㄤ緥鐘舵€?": "姝ｅ父",
+            "鐢ㄤ緥绛夌骇": "涓?",
+            "鍒涘缓浜?": "test",
+            "浼樹紭绾?": "P1",
+            "鏄惁鍙嚜鍔ㄥ寲": "鏄?",
+            "鍏宠仈缂洪櫡ID": "",
+            "鍥炲綊娴嬭瘯鏍囪瘑": "鏄?",
+            "鐭ヨ瘑搴撳叧鑱?": "",
+        }
+    ]
+
+    from modules.trae_test.orchestrator.auditors.test_case_auditor import TestCaseAuditor
+
+    required_fields = TestCaseAuditor.REQUIRED_FIELDS
+    valid_test_cases = [
+        dict(
+            zip(
+                required_fields,
+                [
+                    "测试用例 - 审计 - 日志",
+                    "测试审计日志",
+                    "REQ-AUDIT-001",
+                    "审计服务可用",
+                    "1. 创建测试用例\n2. 执行审核",
+                    "审核通过并记录日志",
+                    "功能测试",
+                    "正常",
+                    "中",
+                    "余小龙",
+                    "P1",
+                    "是",
+                    "",
+                    "是",
+                    "",
+                ],
+            )
+        )
+    ]
+
+    result = audit_agent.audit(valid_test_cases, AuditType.TEST_CASE)
     print(f"审核结果: {'通过' if result.passed else '未通过'}")
     print(f"审核日志数: {len(audit_agent.audit_logs)}")
 
-    return True
+    assert result.passed
 
 
 def main():
