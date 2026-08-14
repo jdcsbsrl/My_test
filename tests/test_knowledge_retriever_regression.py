@@ -449,7 +449,8 @@ class TestKnowledgeRetrieverRegression:
 
 if __name__ == "__main__":
     # 创建测试实例
-    test_suite = KnowledgeRetrieverRegressionTest()
+    test_suite = TestKnowledgeRetrieverRegression()
+    test_suite.setup_method()
 
     # 运行所有测试
     success = test_suite.run_all_tests()

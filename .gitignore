@@ -118,3 +118,6 @@ auto_solution_report.md
 test_export.xlsx
 .pytest_cache/
 .ruff_cache/
+
+# Local business knowledge exports
+customer_billing_knowledge_*.json
