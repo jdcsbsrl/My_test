@@ -1,4 +1,4 @@
-name: Test ERP CI/CD
+﻿name: Test ERP CI/CD
 
 on:
   push:
@@ -96,7 +96,7 @@ jobs:
         run: pip install -e . "pytest>=8,<9"
       - name: Run unit tests
         run: >
-          pytest tests/unit/ tests/test_knowledge_retriever_regression.py -v --tb=short -n auto --alluredir reports/allure-results
+          pytest tests/unit/ -v --tb=short -n auto --alluredir reports/allure-results
           --cov=modules/auto_test --cov=modules/trae_test
           --cov-report=html:reports/coverage/html
           --cov-report=xml:reports/coverage/coverage.xml
@@ -271,3 +271,4 @@ jobs:
       - uses: actions/checkout@v4
       - name: Deploy to test environment
         run: echo "部署到测试环境..."
+

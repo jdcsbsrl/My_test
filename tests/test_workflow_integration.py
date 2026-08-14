@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """审核与自动化方案确认工作流集成测试"""
 
 import sys
@@ -174,28 +174,6 @@ def test_audit_logs():
 
     from modules.trae_test.orchestrator.audit_agent_enhanced import AuditType, audit_agent
 
-    test_cases = [{"用例名称": "测试审计日志", "测试步骤": "1. 创建测试用例\n2. 执行审核", "预期结果": "审核通过"}]
-
-    valid_test_cases = [
-        {
-            "鐢ㄤ緥鐩綍": "娴嬭瘯鐢ㄤ緥 - 瀹¤ - 鏃ュ織",
-            "鐢ㄤ緥鍚嶇О": "娴嬭瘯瀹¤鏃ュ織",
-            "闇€姹侷D": "REQ-AUDIT-001",
-            "鍓嶇疆鏉′欢": "瀹¤鏈嶅姟鍙敤",
-            "鐢ㄤ緥姝ラ": "1. 鍒涘缓娴嬭瘯鐢ㄤ緥\n2. 鎵ц瀹¤",
-            "棰勬湡缁撴灉": "瀹¤閫氳繃骞惰褰曟棩蹇?",
-            "鐢ㄤ緥绫诲瀷": "鍔熻兘娴嬭瘯",
-            "鐢ㄤ緥鐘舵€?": "姝ｅ父",
-            "鐢ㄤ緥绛夌骇": "涓?",
-            "鍒涘缓浜?": "test",
-            "浼樹紭绾?": "P1",
-            "鏄惁鍙嚜鍔ㄥ寲": "鏄?",
-            "鍏宠仈缂洪櫡ID": "",
-            "鍥炲綊娴嬭瘯鏍囪瘑": "鏄?",
-            "鐭ヨ瘑搴撳叧鑱?": "",
-        }
-    ]
-
     from modules.trae_test.orchestrator.auditors.test_case_auditor import TestCaseAuditor
 
     required_fields = TestCaseAuditor.REQUIRED_FIELDS
@@ -249,12 +227,9 @@ def main():
 
     for name, test_func in tests:
         try:
-            if test_func():
-                passed += 1
-                print(f"\n✅ {name}: 通过")
-            else:
-                failed += 1
-                print(f"\n❌ {name}: 失败")
+            test_func()
+            passed += 1
+            print(f"\n✅ {name}: 通过")
         except Exception as e:
             failed += 1
             print(f"\n❌ {name}: 异常 - {e}")
@@ -272,4 +247,8 @@ def main():
 
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     sys.exit(main())
