@@ -134,6 +134,27 @@ class MetadataRepository:
                     }
                 )
 
+        # Include newly imported structured knowledge files even when their
+        # classification/tag is not one of the historical module tags.  The
+        # extractor still decides whether a file actually contains rules, so
+        # this keeps registration extensible without treating arbitrary text
+        # as a business rule.
+        for file_id, file_info in self._registry.get("files", {}).items():
+            if file_id in seen_file_ids:
+                continue
+            original_path = file_info.get("original_path", "")
+            if not original_path.lower().endswith(".json"):
+                continue
+            seen_file_ids.add(file_id)
+            self._rule_file_index.append(
+                {
+                    "file_id": file_id,
+                    "title": file_info.get("title", ""),
+                    "classification": file_info.get("classification", ""),
+                    "original_path": original_path,
+                }
+            )
+
     def get_rule_file_index(self) -> list[dict[str, Any]]:
         """获取规则文件索引"""
         self.ensure_rules_loaded()
