@@ -1,11 +1,14 @@
 ---
-alwaysApply: false
-description: 智能体配置与交互规则
+title: 智能体配置与交互规则
+purpose: Agent 权限、知识访问、审核和交互约束
+version: 3.1.0
+updated: 2026-08-18
+authority: 专项规范
 ---
 # 智能体配置与交互规则
 
-> 版本：v3.0
-> 生效日期：2026-07-16
+> 版本：3.1.0
+> 生效日期：2026-08-18
 > 维护人：Test ERP Team
 
 ---
@@ -37,7 +40,7 @@ description: 智能体配置与交互规则
 6. 使用 `TestCaseOptimizer` 自动优化低分用例（补充步骤/预期结果/用例名称）
 7. 使用 `TestCaseRegenerationLoop` 执行自动重生闭环（最多3次，熔断保护）
 8. 标记 `needs_human_review` 的用例提交人工审查
-9. 导出优化后的测试用例（Excel/JSON），含质量评分列
+9. 导出优化后的测试用例 Excel，含质量评分列；JSON 仅作为运行时中间数据，不作为交付物
 
 **关键工具 v3.0**:
 | 工具 | 用途 |
@@ -131,7 +134,7 @@ description: 智能体配置与交互规则
 - **测试用例格式审核**: 验证15字段标准模板、字段顺序、用例目录格式
 - **测试用例质量审核**: 验证质量评分字段完整性，检查 needs_human_review 标记是否正确
 - **知识库访问权限审核**: 验证Agent只能访问其权限范围内的知识库文件
-- **输出格式审核**: 验证Excel/JSON文件格式、文件名命名规范
+- **输出格式审核**: 验证Excel交付文件格式、文件名和输出路径；JSON中间数据必须位于`.runtime/`
 
 ---
 
@@ -237,7 +240,7 @@ IF 用户需求已明确
     │       │
     │       └── THEN 提交人工审查队列
     │
-    └── THEN 导出优化后的测试用例（Excel/JSON），含质量评分列
+    └── THEN 导出优化后的测试用例 Excel，含质量评分列
 ```
 
 ### 4.2 AutoTestExecutor 工具调用决策
@@ -408,26 +411,24 @@ IF 同一用例在冷却期（3600秒）内重生次数 >= 3
 - 禁止文件名过长（建议不超过100字符）
 
 #### 7.2.2 输出位置规范
-**统一位置**: `workspace/{YYYYMMDD}/{formal|draft}/`（相对于项目根目录；如需外置目录，请通过 `WORKSPACE_OUTPUT_DIR` 配置）
+**统一位置**: `workspace/{YYYYMMDD}/`（相对于项目根目录；不创建 `formal/`、`draft/` 等子目录）
 
 | 类型 | 路径 | 说明 |
 |------|------|------|
-| 正式成果 | `workspace/YYYYMMDD/formal/` | 审核通过的正式测试用例 |
-| 草稿 | `workspace/YYYYMMDD/draft/` | 未经审核或待修改的草稿 |
+| 测试用例 | `workspace/YYYYMMDD/` | 最终测试用例交付文件 |
 
 **示例**:
-- `workspace/20260513/formal/<需求名>.xlsx`（正式成果）
-- `workspace/20260513/draft/<需求名>.xlsx`（草稿）
+- `workspace/20260513/<需求名>.xlsx`（测试用例交付文件）
 
 **禁止**:
 - 禁止输出到output/、test_cases_output/、modules/trae_test/output/等其他目录
 - 禁止在项目根目录创建输出文件
-- 禁止输出到非formal/draft子目录
+- 禁止在日期目录下创建 `formal/`、`draft/` 等子目录
 
 #### 7.2.3 文件格式规范
 **必须**: 仅生成.xlsx格式Excel文件
 **禁止**: 生成.json、.md、.csv等任何其他格式
-**模板**: 必须使用统一的15字段标准模板（assets/templates/测试用例模板.xlsx）
+**模板**: 必须使用统一的15字段标准模板（fixtures/templates/测试用例模板.xlsx）
 
 #### 7.2.4 Excel内容规范
 **必须包含**:
@@ -719,7 +720,7 @@ for case in test_cases:
 ```python
 from modules.trae_test.utils.excel_generator import ExcelGenerator
 excel_gen = ExcelGenerator()
-excel_gen.generate(test_cases, output_path="workspace/20260716/formal/需求销售订单创建.xlsx")
+excel_gen.generate(test_cases, output_path="workspace/20260716/需求销售订单创建.xlsx")
 # 导出的Excel包含：15字段标准模板 + quality_score列 + needs_human_review列
 ```
 
@@ -728,7 +729,7 @@ excel_gen.generate(test_cases, output_path="workspace/20260716/formal/需求销�
 AuditAgent审核
     │
     ├── 文件命名：✓ 需求销售订单创建.xlsx
-    ├── 文件位置：✓ workspace/20260716/formal/
+    ├── 文件位置：✓ workspace/20260716/
     ├── 文件格式：✓ .xlsx
     ├── Excel表头：✓ 15字段正确
     ├── 质量评分字段：✓ quality_score列存在
@@ -818,7 +819,7 @@ lifecycle.fallback_cleanup()
 ```python
 from tools.report_generator import ReportGenerator
 report_gen = ReportGenerator()
-report_gen.generate(test_results, "workspace/20260716/formal/测试报告_销售订单创建.html")
+report_gen.generate(test_results, ".runtime/reports/测试报告_销售订单创建.html")
 ```
 
 ### 9.3 关键规则摘要

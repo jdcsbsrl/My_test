@@ -1,3 +1,11 @@
+---
+title: 知识库更新工作流程规范
+purpose: 知识库 lint、迁移、处理、扫描和验证
+version: 3.0.0
+updated: 2026-08-18
+authority: 专项规范
+---
+
 # 知识库更新工作流程规范
 
 > 本项目真实知识库默认保留在本地：`assets/knowledge_base/`。原始知识文件位于

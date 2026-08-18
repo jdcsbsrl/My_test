@@ -1,3 +1,11 @@
+---
+title: Test ERP Architecture
+purpose: 项目模块、运行时路径和 Agent 编排架构
+version: 3.0.0
+updated: 2026-08-18
+authority: 参考架构
+---
+
 # Test ERP Architecture
 
 ## Overview
@@ -30,7 +38,7 @@ Executes automated tests in approved UAT or internal test environments.
 
 ## Knowledge-base architecture
 
-Agents access knowledge through `KnowledgeRetriever`. The physical knowledge base is local and should not be committed with business-sensitive source data.
+Agents access knowledge through `KnowledgeRetriever`. The physical knowledge base is local and should not be committed with business-sensitive source data. Runtime artifacts use `modules/trae_test/utils/runtime_paths.py` and `runtime_dir()`.
 
 ```text
 assets/knowledge_base/

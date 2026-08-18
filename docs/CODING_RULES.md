@@ -1,6 +1,9 @@
 ---
-alwaysApply: false
-description: 编码规范
+title: 编码规范
+purpose: Python、测试、命名、质量和安全编码规则
+version: 2.1.0
+updated: 2026-08-18
+authority: 专项规范
 ---
 # 编码规范
 

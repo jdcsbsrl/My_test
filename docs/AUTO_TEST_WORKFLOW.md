@@ -1,3 +1,11 @@
+---
+title: auto_test 模块工作流程
+purpose: 自动化测试执行、数据生命周期和报告
+version: 3.0.0
+updated: 2026-08-18
+authority: 专项规范
+---
+
 # auto_test 模块工作流程
 
 ## 模块定位
@@ -149,7 +157,7 @@
 2. 生成 JSON 格式报告（便于集成）
 3. 发送测试结果通知
 
-**输出**: 测试报告（HTML/JSON）
+**输出**: 测试报告（HTML/JSON），统一写入 `.runtime/reports/`。
 
 ## 支持的测试环境
 

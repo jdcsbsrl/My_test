@@ -4,8 +4,8 @@ description: 项目规则
 ---
 # Test ERP 项目规则
 
-> 版本：v1.0  
-> 生效日期：2026-05-05  
+> 版本：v2.1
+> 生效日期：2026-08-18
 > 维护人：Test ERP Team
 
 ---
@@ -18,7 +18,7 @@ description: 项目规则
 
 ### auto_test 模块
 - 负责测试环境配置、测试脚本执行、测试结果收集与分析
-- 核心组件：`modules/auto_test/core/`、`drivers/`、`pages/`、`testcases/` 等
+- 核心组件：`modules/auto_test/core/`、`modules/auto_test/drivers/`、`modules/auto_test/pages/`、`modules/auto_test/tests/` 等
 
 ---
 
@@ -53,5 +53,7 @@ description: 项目规则
 ## 四、工作成果归档
 
 - 工作成果统一归档至 `workspace/{yyyymmdd}/` 目录
-- 正式成果存入 `formal/`，草稿存入 `draft/`
+- 日期目录下不创建 `formal/`、`draft/`、`test_cases/`、`exports/` 或模块子目录
+- 最终交付文件直接放在 `workspace/{yyyymmdd}/` 下；中间文件和草稿放入 `.runtime/`
+- `workspace/` 历史测试用例由用户自行管理，项目不提供自动清理工具
 - 日期格式严格使用 `yyyymmdd`（8 位数字，无横杠）

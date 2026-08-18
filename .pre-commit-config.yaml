@@ -1,4 +1,18 @@
 repos:
+  - repo: local
+    hooks:
+      - id: project-structure-audit
+        name: project structure audit
+        entry: python tools/project_structure_auditor.py --json
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: documentation-consistency-audit
+        name: documentation consistency audit
+        entry: python tools/doc_consistency_checker.py --json
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
