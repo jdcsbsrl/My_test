@@ -17,7 +17,7 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
 ORDER_RE = re.compile(r"SO\d{14,}")
-REPORT_DIR = Path("reports") / f"sales_order_export_field_validation_{time.strftime('%Y%m%d_%H%M%S')}"
+REPORT_DIR = Path(".runtime/reports") / f"sales_order_export_field_validation_{time.strftime('%Y%m%d_%H%M%S')}"
 BASELINE_PATH = Path(".runtime/reports/sales_order_export_baseline.local.json")
 
 

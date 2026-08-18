@@ -1,7 +1,11 @@
 """Quick test to verify export flow with system order number."""
 
 import os
+import sys
 import time
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
 
 from playwright.sync_api import Page
 import pytest

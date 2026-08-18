@@ -1,7 +1,11 @@
 """Precise test for export flow."""
 
 import os
+import sys
 import time
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
 
 import pytest
 from playwright.sync_api import Page
@@ -170,7 +174,6 @@ class TestExportFlowPrecise:
         print("Step 12: Download via export_page.download_to()")
         print("=" * 70)
 
-        os.makedirs("downloads", exist_ok=True)
         timestamp = int(time.time())
         save_path = f".runtime/downloads/sales_order_payment_time_asc_{timestamp}.xlsx"
 

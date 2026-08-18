@@ -1,6 +1,10 @@
 """Test export download functionality."""
 
 import time
+import sys
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
 
 import pytest
 from playwright.sync_api import Page

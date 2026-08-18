@@ -21,16 +21,22 @@ dist/
 build/
 
 # ========== 测试和报告（敏感数据）==========
-.runtime/
+.runtime/**
+!.runtime/.keep
+!.runtime/**/
+!.runtime/**/.keep
 test_*.xlsx
 htmlcov/
 .coverage
 .coverage.*
 .pytest/
-workspace/
+workspace/**
+!workspace/.gitkeep
 
 # ========== 知识库（业务敏感信息）==========
 assets/knowledge_base/
+data/private/*
+!data/private/.keep
 
 # ========== IDE和编辑器 ==========
 .vscode/
