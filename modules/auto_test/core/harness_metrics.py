@@ -14,7 +14,7 @@ def metrics_enabled() -> bool:
 
 
 def default_metrics_path(root: Path) -> Path:
-    return root / "reports" / "harness_metrics" / "events.jsonl"
+    return root / ".runtime" / "reports" / "harness_metrics" / "events.jsonl"
 
 
 class HarnessMetricsRecorder:

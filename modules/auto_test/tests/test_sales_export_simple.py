@@ -47,7 +47,6 @@ class TestSalesExportSimple:
 
         export_page.select_field("系统单号")
 
-        os.makedirs("downloads", exist_ok=True)
         save_path = f".runtime/downloads/sales_order_simple_{int(time.time())}.xlsx"
         download_result = export_page.download_to(save_path, timeout=120000)
 

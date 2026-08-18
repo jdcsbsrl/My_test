@@ -19,7 +19,7 @@ API_TIMEOUT = 30000
 LOG_LEVEL = "INFO"
 
 # 报告配置
-REPORT_DIR = "reports"
+REPORT_DIR = ".runtime/reports"
 REPORT_FORMAT = "json"
 
 # 测试环境配置

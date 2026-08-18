@@ -503,6 +503,9 @@ if __name__ == "__main__":
 
     # 生成报告
     report = agent.generate_markdown_report(solution)
-    with open("auto_solution_report.md", "w", encoding="utf-8") as f:
+    from modules.trae_test.utils.runtime_paths import runtime_dir
+
+    report_path = runtime_dir("reports") / "auto_solution_report.md"
+    with open(report_path, "w", encoding="utf-8") as f:
         f.write(report)
-    print("报告已保存至 auto_solution_report.md")
+    print(f"报告已保存至 {report_path}")
