@@ -201,7 +201,7 @@ class TestDataLifecycleManager:
             "created_at": datetime.now().isoformat(),
         }
         self._cleanup_failures.append(failure)
-        os.makedirs("reports", exist_ok=True)
+        os.makedirs(os.path.dirname(".runtime/reports/cleanup-failures.jsonl"), exist_ok=True)
         with open(".runtime/reports/cleanup-failures.jsonl", "a", encoding="utf-8") as stream:
             stream.write(json.dumps(failure, ensure_ascii=False) + "\n")
 

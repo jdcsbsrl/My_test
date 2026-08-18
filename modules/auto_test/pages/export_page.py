@@ -1,4 +1,5 @@
 import allure
+from pathlib import Path
 from playwright.sync_api import Page
 
 from modules.auto_test.core.logger import get_logger
@@ -46,6 +47,7 @@ class ExportPage(BasePage):
             download = download_info.value
             filename = download.suggested_filename
             download_path = f".runtime/downloads/{filename}"
+            Path(download_path).parent.mkdir(parents=True, exist_ok=True)
             download.save_as(download_path)
 
             import os
