@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
+import pytest
 
 load_dotenv()
 
@@ -22,7 +23,7 @@ _ENV_BASE_URLS = {
 
 _missing = [k for k, v in _ENV_BASE_URLS.items() if not v]
 if _missing:
-    raise RuntimeError(f"缺少必需的环境变量: {_missing}，请在 .env 中配置")
+    pytest.skip(f"缺少登录捕获环境变量: {_missing}", allow_module_level=True)
 
 ENVIRONMENTS = {
     "UAT": {"ui_base_url": _ENV_BASE_URLS["UAT"], "login_endpoint": "auth/login"},
@@ -111,7 +112,7 @@ def update_env_file(results: list[dict]) -> None:
         new_lines.append(f"{key}={value}")
 
     env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-    print(f"\n.env file updated with auth parameters")
+    print("\n.env file updated with auth parameters")
 
 
 def generate_report(results: list[dict], timestamp: str) -> Path:
