@@ -9,10 +9,11 @@ import json
 import os
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
+
+from modules.trae_test.utils.runtime_paths import runtime_dir
 
 
 class AuditLogger:
@@ -74,11 +75,11 @@ class AuditLogger:
 
     def _init_memory_db(self):
         """初始化 SQLite 内存数据库（降级方案）"""
-        workspace_root = Path(__file__).resolve().parent.parent.parent.parent / "workspace"
+        runtime_root = runtime_dir("logs") / "audit"
         worker_id = os.getenv("PYTEST_XDIST_WORKER")
         db_name = f"audit_history_{worker_id}.db" if worker_id else "audit_history.db"
-        self._memory_db_path = str(workspace_root / "audit_logs" / db_name)
-        os.makedirs(os.path.dirname(self._memory_db_path), exist_ok=True)
+        self._memory_db_path = str(runtime_root / db_name)
+        runtime_root.mkdir(parents=True, exist_ok=True)
 
         conn = sqlite3.connect(self._memory_db_path, timeout=10)
         self._enable_sqlite_wal(conn)
@@ -470,7 +471,12 @@ class AuditLogger:
         if row is None:
             return None
 
-        result = dict(row)
+        if isinstance(row, sqlite3.Row):
+            result = {key: row[key] for key in row.keys()}
+        elif hasattr(row, "_mapping"):
+            result = dict(row._mapping)
+        else:
+            result = dict(row)
 
         for json_field in ("issues_json", "suggestions_json", "context_json"):
             raw = result.get(json_field)

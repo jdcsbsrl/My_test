@@ -226,7 +226,7 @@ def test_metrics_event_is_written_to_jsonl(tmp_path):
         timeout=5,
     )
 
-    metrics_file = tmp_path / "reports" / "harness_metrics" / "events.jsonl"
+    metrics_file = tmp_path / ".runtime" / "reports" / "harness_metrics" / "events.jsonl"
     event = json.loads(metrics_file.read_text(encoding="utf-8").splitlines()[0])
     assert event["type"] == "self_healing"
     assert event["action"] == "try_click"

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from faker import Faker
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 
 from modules.auto_test.core.db_helper import DBHelper
 
@@ -672,7 +672,7 @@ class DataSchema(BaseModel):
     name: str
     fields: dict[str, dict[str, Any]]
 
-    @validator("fields")
+    @field_validator("fields")
     def validate_fields(cls, v):
         for field_name, spec in v.items():
             if "type" not in spec:

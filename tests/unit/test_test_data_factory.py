@@ -21,7 +21,7 @@ from modules.auto_test.core.test_data_factory import (
     DataVersionManager,
     DynamicDataGenerator,
     EnhancedTestDataFactory,
-    TestDataFactory,
+    TestDataFactory as FactoryUnderTest,
 )
 
 
@@ -287,8 +287,8 @@ class TestTestDataFactoryGenerators:
 
     def test_generators_are_instance_variables(self):
         """测试_generators是实例变量而非类变量"""
-        factory1 = TestDataFactory()
-        factory2 = TestDataFactory()
+        factory1 = FactoryUnderTest()
+        factory2 = FactoryUnderTest()
 
         # 修改factory1的generators不应影响factory2
         factory1._generators["custom"] = None
@@ -296,7 +296,7 @@ class TestTestDataFactoryGenerators:
 
     def test_enhanced_factory_independent_generators(self):
         """测试EnhancedTestDataFactory拥有独立的_generators"""
-        factory = TestDataFactory()
+        factory = FactoryUnderTest()
         enhanced = EnhancedTestDataFactory()
 
         # 增强工厂有database生成器，普通工厂没有
@@ -305,8 +305,8 @@ class TestTestDataFactoryGenerators:
 
     def test_register_generator_independence(self):
         """测试注册自定义生成器不会互相影响"""
-        factory1 = TestDataFactory()
-        factory2 = TestDataFactory()
+        factory1 = FactoryUnderTest()
+        factory2 = FactoryUnderTest()
 
         from modules.auto_test.core.test_data_factory import StringGenerator
 

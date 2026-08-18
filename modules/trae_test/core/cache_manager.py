@@ -91,7 +91,7 @@ def set_cached(key: str, value: Any, ttl: int = 3600) -> bool:
         return False
     if not isinstance(value, str):
         value = json.dumps(value, ensure_ascii=False, default=str)
-    client.setex(key, ttl, value)
+    client.set(key, value, ex=ttl)
     return True
 
 

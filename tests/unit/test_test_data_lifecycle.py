@@ -11,14 +11,14 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager
+from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager as LifecycleManagerUnderTest
 
 
 class TestTopologicalSort:
     """测试拓扑排序功能（Kahn算法）"""
 
     def setup_method(self):
-        self.manager = TestDataLifecycleManager(env="test")
+        self.manager = LifecycleManagerUnderTest(env="test")
 
     def test_simple_dependency(self):
         """测试简单依赖关系"""
@@ -104,7 +104,7 @@ class TestCleanupMechanism:
     """测试清理机制"""
 
     def setup_method(self):
-        self.manager = TestDataLifecycleManager(env="test")
+        self.manager = LifecycleManagerUnderTest(env="test")
 
     def test_successful_api_cleanup(self):
         """测试API清理成功"""
@@ -195,7 +195,7 @@ class TestRetryMechanism:
     """测试重试机制"""
 
     def setup_method(self):
-        self.manager = TestDataLifecycleManager(env="test")
+        self.manager = LifecycleManagerUnderTest(env="test")
 
     @patch("time.sleep", return_value=None)
     def test_retry_success_on_third_attempt(self, mock_sleep):
@@ -230,27 +230,27 @@ class TestEnvironmentConfig:
 
     def test_production_disables_db_fallback(self):
         """测试生产环境禁用DB兜底"""
-        manager = TestDataLifecycleManager(env="production")
+        manager = LifecycleManagerUnderTest(env="production")
         assert manager._enable_db_fallback is False
 
     def test_test_enables_db_fallback(self):
         """测试环境启用DB兜底"""
-        manager = TestDataLifecycleManager(env="test")
+        manager = LifecycleManagerUnderTest(env="test")
         assert manager._enable_db_fallback is True
 
     def test_staging_enables_db_fallback(self):
         """测试预生产环境启用DB兜底"""
-        manager = TestDataLifecycleManager(env="staging")
+        manager = LifecycleManagerUnderTest(env="staging")
         assert manager._enable_db_fallback is True
 
     def test_empty_setup_tasks(self):
         """测试无准备任务时不执行"""
-        manager = TestDataLifecycleManager(env="test")
+        manager = LifecycleManagerUnderTest(env="test")
         # 不应抛出异常
         manager.execute_setup()
 
     def test_empty_cleanup_tasks(self):
         """测试无清理任务时不执行"""
-        manager = TestDataLifecycleManager(env="test")
+        manager = LifecycleManagerUnderTest(env="test")
         # 不应抛出异常
         manager.execute_cleanup()

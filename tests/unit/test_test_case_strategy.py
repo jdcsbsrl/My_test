@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 from modules.trae_test.utils.test_case_strategy import (
-    TestCaseOptimizer,
-    TestCaseRegenerationLoop,
+    TestCaseOptimizer as OptimizerUnderTest,
+    TestCaseRegenerationLoop as RegenerationLoopUnderTest,
 )
 from modules.trae_test.utils.test_case_strategy import (
     TestCaseScoreEngine as TSEngine,
@@ -180,7 +180,7 @@ class TestCaseOptimizerTests:
 
     def setup_method(self):
         self.engine = TSEngine()
-        self.optimizer = TestCaseOptimizer(self.engine)
+        self.optimizer = OptimizerUnderTest(self.engine)
 
     def test_optimize_already_good(self):
         """测试已达标用例不优化"""
@@ -230,7 +230,7 @@ class TestRegenerationLoop:
         generator = Mock()
         generator.generate_cases.return_value = [{"用例名称": "test_case"}]
 
-        loop = TestCaseRegenerationLoop(generator=generator)
+        loop = RegenerationLoopUnderTest(generator=generator)
 
         # Mock评分始终返回低分
         loop.score_engine.score = Mock(return_value=55)
@@ -245,7 +245,7 @@ class TestRegenerationLoop:
         generator = Mock()
         generator.generate_cases.return_value = [{"用例名称": "test_case"}]
 
-        loop = TestCaseRegenerationLoop(generator=generator)
+        loop = RegenerationLoopUnderTest(generator=generator)
 
         # Mock评分始终返回高分
         loop.score_engine.score = Mock(return_value=85)
@@ -257,7 +257,7 @@ class TestRegenerationLoop:
 
     def test_cool_down_period(self):
         """测试冷却期机制"""
-        loop = TestCaseRegenerationLoop()
+        loop = RegenerationLoopUnderTest()
 
         case = {
             "用例名称": "test_case",
@@ -269,7 +269,7 @@ class TestRegenerationLoop:
 
     def test_no_cool_down_after_period(self):
         """测试冷却期过后不再熔断"""
-        loop = TestCaseRegenerationLoop()
+        loop = RegenerationLoopUnderTest()
 
         case = {
             "用例名称": "test_case",
@@ -281,7 +281,7 @@ class TestRegenerationLoop:
 
     def test_zero_regeneration_count(self):
         """测试初始状态不熔断"""
-        loop = TestCaseRegenerationLoop()
+        loop = RegenerationLoopUnderTest()
 
         case = {
             "用例名称": "test_case",
@@ -293,7 +293,7 @@ class TestRegenerationLoop:
     @patch("modules.trae_test.utils.test_case_strategy.logger")
     def test_human_review_alert(self, mock_logger):
         """测试人工审核告警"""
-        loop = TestCaseRegenerationLoop()
+        loop = RegenerationLoopUnderTest()
 
         loop._send_human_review_alert(
             {
@@ -307,7 +307,7 @@ class TestRegenerationLoop:
 
     def test_acquire_release_lock(self):
         """测试锁的获取和释放"""
-        loop = TestCaseRegenerationLoop()
+        loop = RegenerationLoopUnderTest()
 
         try:
             loop._acquire_lock("test_case")
