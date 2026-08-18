@@ -139,20 +139,20 @@ class TestInventoryExport:
         """Test search with YX-L pattern and verify results."""
         sku_page = InventorySKUPage(logged_in_page)
         sku_page.navigate_to_search_page()
-        logged_in_page.wait_for_timeout(2000)
+        sku_page.wait_for_search_results()
 
         print("\n=== 搜索前页面状态 ===")
         body_text = logged_in_page.text_content("body")[:500]
         print(f"页面文本片段: {body_text}")
 
         sku_page.click_reset()
-        logged_in_page.wait_for_timeout(2000)
+        sku_page.wait_for_search_results()
 
         sku_input = logged_in_page.locator('input[placeholder*="库存SKU编码"]')
         print(f"\n重置后输入框数量: {sku_input.count()}")
 
         sku_page.fill_sku_code("YX-L")
-        logged_in_page.wait_for_timeout(1000)
+        sku_page.wait_for_search_results()
 
         actual_value = sku_input.first.input_value() if sku_input.count() > 0 else ""
         print(f"输入框实际值: '{actual_value}'")
@@ -161,7 +161,7 @@ class TestInventoryExport:
         print(f"搜索按钮数量: {len(search_btns)}")
 
         response_time = sku_page.click_search()
-        logged_in_page.wait_for_timeout(5000)
+        sku_page.wait_for_search_results()
 
         count = sku_page.get_result_count()
         print(f"搜索结果数: {count}")
@@ -186,16 +186,16 @@ class TestInventoryExport:
         export_page = InventoryExportPage(logged_in_page)
 
         sku_page.navigate_to_search_page()
-        logged_in_page.wait_for_timeout(2000)
+        sku_page.wait_for_search_results()
 
         sku_page.click_reset()
-        logged_in_page.wait_for_timeout(1500)
+        sku_page.wait_for_search_results()
 
         sku_page.fill_sku_code("YX-L")
-        logged_in_page.wait_for_timeout(500)
+        sku_page.wait_for_search_results()
 
         sku_page.click_search()
-        logged_in_page.wait_for_timeout(5000)
+        sku_page.wait_for_search_results()
 
         count = sku_page.get_result_count()
         assert count > 0, f"搜索结果数应为正数，实际为: {count}"
@@ -214,7 +214,7 @@ class TestInventoryExport:
                 print(f"{i+1:2d}. {' | '.join(row_values)}")
 
         sku_page.select_export_current_search()
-        logged_in_page.wait_for_timeout(5000)
+        sku_page.wait_for_search_results()
 
         exported = export_page.wait_for_export_page(timeout=30000)
         assert exported, "未成功跳转到导出页面"
@@ -224,7 +224,7 @@ class TestInventoryExport:
         print("\n✅ 已选择所有导出字段")
 
         download_result = export_page.download_to(
-            f"downloads/inventory_query_export_{int(time.time())}.xlsx", timeout=120000
+            f".runtime/downloads/inventory_query_export_{int(time.time())}.xlsx", timeout=120000
         )
         assert download_result["success"], f"导出下载失败: {download_result.get('error')}"
         assert download_result["file_size"] > 0, "导出文件为空"
@@ -257,7 +257,7 @@ class TestInventoryExport:
 
         if count == 0:
             sku_page.click_export()
-            logged_in_page.wait_for_timeout(500)
+            sku_page.wait_for_search_results()
 
             export_menu_item = logged_in_page.locator('span:has-text("导出当前搜索结果")')
             if export_menu_item.count() > 0:

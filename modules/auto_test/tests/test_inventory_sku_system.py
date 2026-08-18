@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 
 import allure
 import pytest
@@ -82,7 +81,15 @@ def _is_ci_environment_issue(result: dict) -> bool:
     error = str(result.get("error", ""))
     messages = " ".join(str(message) for message in result.get("messages", []))
     text = f"{error} {messages}"
-    return any(marker in text for marker in ("500", "内部服务器错误", "Internal Server Error", 'waiting for event "download"'))
+    is_environment_issue = any(
+        marker in text for marker in ("500", "内部服务器错误", "Internal Server Error", 'waiting for event "download"')
+    )
+    if is_environment_issue:
+        print(
+            "[CI environment classification] preserving failure evidence: "
+            f"error={error!r}, messages={result.get('messages', [])!r}"
+        )
+    return is_environment_issue
 
 
 @pytest.fixture(scope="function")
@@ -103,6 +110,8 @@ def facade_logged_in(logged_in_page: Page) -> InventorySKUFacade:
     yield InventorySKUFacade(logged_in_page)
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUSearch:
     """1. 库存SKU查询功能测试"""
 
@@ -151,10 +160,10 @@ class TestInventorySKUSearch:
         """重置查询条件应清空输入"""
         facade.sku_page.fill_sku_code("YX-L")
         facade.sku_page.click_search()
-        time.sleep(2)
+        facade.sku_page.wait_for_search_results()
 
         facade.sku_page.click_reset()
-        time.sleep(2)
+        facade.sku_page.wait_for_search_results()
 
         sku_input = facade.sku_page.page.locator('input[placeholder*="库存SKU编码"]').first
         actual_value = sku_input.input_value() if sku_input.count() > 0 else ""
@@ -176,6 +185,8 @@ class TestInventorySKUSearch:
         )
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUSelectAll:
     """2. 全选功能测试"""
 
@@ -185,7 +196,7 @@ class TestInventorySKUSelectAll:
         """全选当前页所有记录"""
         facade.search_by_sku("YX-L")
         facade.sku_page.select_all_current_page()
-        time.sleep(1)
+        facade.sku_page.wait_for_search_results()
 
         selected_count = facade.sku_page.get_selected_count()
         page_rows = facade.sku_page.get_current_page_row_count()
@@ -198,11 +209,11 @@ class TestInventorySKUSelectAll:
         """取消全选应清空所有选择"""
         facade.search_by_sku("YX-L")
         facade.sku_page.select_all_current_page()
-        time.sleep(1)
+        facade.sku_page.wait_for_search_results()
         assert facade.sku_page.get_selected_count() > 0, "全选后应有选中行"
 
         facade.sku_page.deselect_all()
-        time.sleep(1)
+        facade.sku_page.wait_for_search_results()
         assert facade.sku_page.get_selected_count() == 0, "取消全选后应无选中行"
         assert not facade.sku_page.is_header_checkbox_checked(), "表头复选框应取消勾选"
 
@@ -212,10 +223,12 @@ class TestInventorySKUSelectAll:
         """选择单行"""
         facade.search_by_sku("YX-L")
         facade.sku_page.select_row(1)
-        time.sleep(1)
+        facade.sku_page.wait_for_search_results()
         assert facade.sku_page.get_selected_count() == 1, "应只选中1行"
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUPagination:
     """3. 分页功能测试"""
 
@@ -242,16 +255,18 @@ class TestInventorySKUPagination:
 
         if total_pages >= 2:
             facade.sku_page.goto_page(2)
-            time.sleep(2)
+            facade.sku_page.wait_for_search_results()
             current = facade.sku_page.get_current_page()
             assert current == 2, f"应跳转至第2页，实际: {current}"
 
             facade.sku_page.goto_page(1)
-            time.sleep(2)
+            facade.sku_page.wait_for_search_results()
             current = facade.sku_page.get_current_page()
             assert current == 1, f"应跳转回第1页，实际: {current}"
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUPageSize:
     """4. 分页数量调整测试"""
 
@@ -277,6 +292,8 @@ class TestInventorySKUPageSize:
         assert actual_rows <= page_size, f"实际行数{actual_rows}不应超过分页{page_size}"
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUExport:
     """5. 导出功能测试"""
 
@@ -292,7 +309,7 @@ class TestInventorySKUExport:
             facade.sku_page.set_page_size(20)
 
         with allure.step("导出当前搜索结果"):
-            result = facade.export_current_search(select_all_fields=True, download_dir="downloads/test_export")
+            result = facade.export_current_search(select_all_fields=True, download_dir=".runtime/downloads/test_export")
 
         allure.attach(
             json.dumps(result, ensure_ascii=False, indent=2, default=str),
@@ -324,7 +341,7 @@ class TestInventorySKUExport:
                 facade.sku_page.click_reset()
                 facade.search_by_sku("YX-L")
                 result = facade.export_with_page_size(
-                    page_size=page_size, select_all_fields=True, download_dir=f"downloads/page_size_{page_size}"
+                    page_size=page_size, select_all_fields=True, download_dir=f".runtime/downloads/page_size_{page_size}"
                 )
                 allure.attach(
                     json.dumps(result, ensure_ascii=False, indent=2, default=str),
@@ -335,6 +352,8 @@ class TestInventorySKUExport:
                     assert result["file_size"] > 1024
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUExportFields:
     """6. 导出字段选择测试"""
 
@@ -346,7 +365,7 @@ class TestInventorySKUExportFields:
         facade.sku_page.set_page_size(20)
 
         with allure.step("导出（全选字段）"):
-            result = facade.export_current_search(select_all_fields=True, download_dir="downloads/all_fields")
+            result = facade.export_current_search(select_all_fields=True, download_dir=".runtime/downloads/all_fields")
             assert result["success"], "全选字段导出失败"
 
         with allure.step("验证导出文件包含所有字段"):
@@ -362,7 +381,7 @@ class TestInventorySKUExportFields:
 
         with allure.step("导出（指定6个字段）"):
             result = facade.export_current_search(
-                select_all_fields=False, fields=DEFAULT_FIELDS, download_dir="downloads/specific_fields"
+                select_all_fields=False, fields=DEFAULT_FIELDS, download_dir=".runtime/downloads/specific_fields"
             )
             assert result["success"], "指定字段导出失败"
 
@@ -385,13 +404,15 @@ class TestInventorySKUExportFields:
         export_page_obj = InventoryExportPage(facade.page)
         assert export_page_obj.wait_for_export_page(), "导出页应加载完成"
         export_page_obj.deselect_all_fields()
-        time.sleep(1)
+        export_page_obj.wait_for_loading_complete(timeout=30000)
         assert export_page_obj.get_selected_field_count() <= 1, "清空后只允许保留必选字段"
 
         selected = export_page_obj.select_fields(["sku编码", "产品名称"])
         assert selected >= 1, "应至少选中1个字段"
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestInventorySKUIntegration:
     """集成测试：完整流程"""
 
@@ -407,7 +428,7 @@ class TestInventorySKUIntegration:
             facade.sku_page.set_page_size(20)
 
         with allure.step("3. 导出当前搜索"):
-            result = facade.export_current_search(select_all_fields=True, download_dir="downloads/full_workflow")
+            result = facade.export_current_search(select_all_fields=True, download_dir=".runtime/downloads/full_workflow")
             if not result["success"] and _is_ci_environment_issue(result):
                 allure.attach(
                     json.dumps(result, ensure_ascii=False, indent=2, default=str),
