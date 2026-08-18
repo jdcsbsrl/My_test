@@ -7,6 +7,7 @@
 import json
 import sys
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -129,8 +130,8 @@ class TestReportGenerator:
             {''.join([f'''
             <div class="test-row">
                 <div class="status-badge {r['status'].lower()}"></div>
-                <div class="test-name">{r['test_name']}</div>
-                <div class="test-message">{r['message']}</div>
+                <div class="test-name">{escape(str(r['test_name']))}</div>
+                <div class="test-message">{escape(str(r['message']))}</div>
                 <div class="test-duration">{r['duration']:.2f}s</div>
             </div>
             ''' for r in self.results])}
@@ -187,7 +188,7 @@ def run_regression_tests():
 
     from modules.auto_test.api import APIClient
     from modules.auto_test.core import get_environment
-    from modules.auto_test.facades import SalesOrderFacade
+    from modules.auto_test.facades.api import SalesOrderFacade
 
     try:
         env = get_environment("test")
