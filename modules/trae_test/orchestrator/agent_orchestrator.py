@@ -43,7 +43,7 @@ from .config import AuditType, OrchestratorConfig
 from .exception_handler import AgentException, ExceptionHandler
 from .monitor import WorkflowMonitor
 from .retry_manager import RetryManager
-from .workflow_manager import StepType, Workflow, WorkflowManager, WorkflowStep
+from .workflow_manager import StepType, Workflow, WorkflowManager, WorkflowStep, WorkflowStatus
 
 
 class AgentRegistry:
@@ -396,13 +396,6 @@ class AgentOrchestrator:
                     "audit_type": "SECURITY",
                     "depends_on": ["step_code_audit"],
                 },
-                {
-                    "step_id": "step_env_audit",
-                    "name": "环境审核",
-                    "type": "AUDIT",
-                    "audit_type": "ENVIRONMENT",
-                    "depends_on": ["step_security_audit"],
-                },
             ],
         }
 
@@ -410,9 +403,11 @@ class AgentOrchestrator:
         workflow = self.execute_workflow(workflow_def, code)
 
         # 获取审核结果
-        env_step = workflow.get_step("step_env_audit")
-        if env_step and env_step.audit_result:
-            return env_step.audit_result
+        if workflow.status == WorkflowStatus.FAILED:
+            failed = AuditResult()
+            failed.passed = False
+            failed.add_error("WORKFLOW_EXECUTION_FAILED", workflow.error_message or "代码审核工作流执行失败")
+            return failed
 
         # 返回最后一个审核结果
         for step in reversed(workflow.steps):

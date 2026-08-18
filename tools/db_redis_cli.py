@@ -9,7 +9,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ["DATABASE_URL"] = "postgresql://postgres:1y2x3l666@localhost:5432/test_erp_kb"
+# DATABASE_URL must be provided by the environment or a local .env file.
+# Never embed database credentials in this administrative CLI.
 
 GREEN = "\033[92m"
 BLUE = "\033[94m"
