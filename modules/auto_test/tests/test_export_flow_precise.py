@@ -9,7 +9,6 @@ from playwright.sync_api import Page
 from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
-EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
 
 
 def _skip_ci_environment_issue(reason: str) -> None:
@@ -173,7 +172,7 @@ class TestExportFlowPrecise:
 
         os.makedirs("downloads", exist_ok=True)
         timestamp = int(time.time())
-        save_path = f"downloads/sales_order_payment_time_asc_{timestamp}.xlsx"
+        save_path = f".runtime/downloads/sales_order_payment_time_asc_{timestamp}.xlsx"
 
         download_result = export_page.download_to(save_path, timeout=120000)
 

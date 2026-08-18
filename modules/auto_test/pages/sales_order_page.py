@@ -100,7 +100,6 @@ class SalesOrderPage(BasePage):
                     continue
 
             self.wait_for_load_state()
-            import time
 
             self.wait_for_page_settle(timeout=30000)
             self.take_screenshot("after_login")
@@ -400,7 +399,6 @@ class SalesOrderPage(BasePage):
                     clicked = True
                     print(f"成功点击排序下拉菜单: {selector}")
                     self.wait_for_load_state()
-                    import time
 
                     self.wait_for_loading_complete(timeout=10000)
                     break
@@ -434,7 +432,6 @@ class SalesOrderPage(BasePage):
                     clicked = True
                     print(f"成功选择排序列: {selector}")
                     self.wait_for_load_state()
-                    import time
 
                     self.wait_for_loading_complete(timeout=10000)
                     break
@@ -452,7 +449,6 @@ class SalesOrderPage(BasePage):
 
         try:
             self.wait_for_load_state()
-            import time
 
             self.wait_for_loading_complete(timeout=10000)
 
@@ -1272,6 +1268,33 @@ class SalesOrderPage(BasePage):
             return count or 0
         except Exception:
             return 0
+
+    @allure.step("选择前几个订单")
+    def select_first_orders(self, count: int = 3) -> int:
+        """Select up to count visible orders and wait for the selection state."""
+        result = self.page.evaluate(
+            """
+            (count) => {
+                const containers = document.querySelectorAll('.order-block, table tbody tr');
+                let selected = 0;
+                for (const container of Array.from(containers).slice(0, count)) {
+                    const checkbox = container.querySelector('input[type="checkbox"]');
+                    if (checkbox && !checkbox.checked) {
+                        checkbox.click();
+                        selected += 1;
+                    }
+                }
+                return selected;
+            }
+            """,
+            count,
+        )
+        self.page.wait_for_function(
+            """(expected) => document.querySelectorAll('table tbody input[type="checkbox"]:checked').length >= expected
+            || document.querySelectorAll('.order-block input[type="checkbox"]:checked').length >= expected""",
+            min(int(result or 0), count),
+        )
+        return self.get_selected_count()
 
     @allure.step("选择导出当前搜索结果")
     def select_export_current_search(self) -> None:

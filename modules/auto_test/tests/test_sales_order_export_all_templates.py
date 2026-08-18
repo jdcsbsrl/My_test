@@ -18,7 +18,7 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
 ORDER_RE = re.compile(r"SO\d{14,}")
-DEFAULT_BASELINE = Path("reports/sales_order_export_baseline.local.json")
+DEFAULT_BASELINE = Path(".runtime/reports/sales_order_export_baseline.local.json")
 
 
 def _load_baseline_order_numbers() -> list[str]:

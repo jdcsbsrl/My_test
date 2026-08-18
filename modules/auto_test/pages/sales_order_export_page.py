@@ -11,6 +11,10 @@ from modules.auto_test.pages.base_page import BasePage
 
 logger = get_logger()
 
+# Canonical product template name. The selector implementation remains tolerant
+# of legacy spelling variants, while callers use one stable value.
+EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
+
 
 class SalesOrderExportPage(BasePage):
     def __init__(self, page: Page) -> None:
@@ -244,6 +248,10 @@ class SalesOrderExportPage(BasePage):
             return count
         except Exception:
             return 0
+
+    @allure.step("确保导出字段已选择: {field_name}")
+    def ensure_field_selected(self, field_name: str) -> bool:
+        return self.select_field(field_name)
 
     @allure.step("获取总字段数量")
     def get_total_field_count(self) -> int:
