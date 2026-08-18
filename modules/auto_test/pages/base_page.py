@@ -149,7 +149,7 @@ class BasePage:
 
     @allure.step("Take screenshot: {name}")
     def take_screenshot(self, name: str) -> None:
-        path = f"reports/screenshots/{name}.png"
+        path = f".runtime/reports/screenshots/{name}.png"
         self.page.screenshot(path=path, full_page=True)
         allure.attach.file(path, name=name, attachment_type=allure.attachment_type.PNG)
         logger.info(f"Screenshot: {path}")

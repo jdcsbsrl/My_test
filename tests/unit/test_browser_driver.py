@@ -97,7 +97,7 @@ def test_new_context_and_page_uses_video_and_trace_options(monkeypatch):
     browser.new_context.assert_called_once_with(
         viewport={"width": 1280, "height": 720},
         accept_downloads=True,
-        record_video_dir="reports/videos",
+        record_video_dir=".runtime/reports/videos",
         record_video_size={"width": 1280, "height": 720},
     )
     context.tracing.start.assert_called_once_with(screenshots=True, snapshots=True, sources=True)
@@ -116,9 +116,9 @@ def test_close_context_stops_trace_when_path_is_given(monkeypatch):
     driver = BrowserDriver()
     context = Mock()
 
-    driver.close_context(context, trace_path="reports/traces/test.zip")
+    driver.close_context(context, trace_path=".runtime/reports/traces/test.zip")
 
-    context.tracing.stop.assert_called_once_with(path="reports/traces/test.zip")
+    context.tracing.stop.assert_called_once_with(path=".runtime/reports/traces/test.zip")
     context.close.assert_called_once_with()
 
 

@@ -140,7 +140,7 @@ class TestCaseStrategy:
         if kw.get("case_level_low"):
             self.LOW_LEVEL_KEYWORDS = kw["case_level_low"]
 
-        logger.debug(f"已从配置文件加载关键词")
+        logger.debug("已从配置文件加载关键词")
 
     @classmethod
     def reload_config(cls) -> None:

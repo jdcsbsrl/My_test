@@ -10,7 +10,6 @@
 
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from .audit_models import AuditIssue, AuditResult

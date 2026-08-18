@@ -2,7 +2,6 @@
 
 import os
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 
 from .config import AuditConfig

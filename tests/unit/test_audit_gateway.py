@@ -2,7 +2,6 @@
 
 from modules.trae_test.orchestrator.audit_gateway import AuditGateway
 from modules.trae_test.orchestrator.audit_models import AuditResult
-from modules.trae_test.orchestrator.config import AuditType
 
 
 class TestAuditGateway:

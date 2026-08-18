@@ -72,7 +72,7 @@ class KnowledgeBaseVerifier:
         if os.path.exists(target_dir):
             for filename in os.listdir(target_dir):
                 # 匹配 root chunks (filename_chunk_NNN.json) 和 sub-key chunks (filename_KEY_chunk_NNN.json)
-                if is_chunk_filename(filename):
+                if is_chunk_filename(filename) and filename.startswith(f"{file_name_without_ext}_"):
                     chunk_files.append(os.path.join(target_dir, filename))
 
         import re

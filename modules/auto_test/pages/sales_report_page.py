@@ -621,89 +621,6 @@ class SalesReportPage(BasePage):
             + ".vxe-table--expanded-row:visible, .p-6px .vxe-table:visible"
         ).count()
 
-    def _legacy_export_menu_options(self) -> list[str]:
-        dropdown = self.page.locator(".el-dropdown").filter(has_text="导出").first
-        dropdown.hover(timeout=10000)
-        dropdown.locator("button").first.click(force=True, timeout=10000)
-        self.page.locator(".el-dropdown-menu__item:visible").first.wait_for(state="visible", timeout=10000)
-        return self.page.evaluate(
-            """() => Array.from(document.querySelectorAll('.el-dropdown-menu__item'))
-                .filter((el) => {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 0 && rect.height > 0
-                        && style.display !== 'none'
-                        && style.visibility !== 'hidden';
-                })
-                .map((el) => (el.innerText || el.textContent || '').trim())
-                .filter(Boolean)"""
-        )
-
-    def _legacy_export_by_menu_text(self, menu_text: str, download_dir: str, timeout: int = 60000) -> dict[str, Any]:
-        Path(download_dir).mkdir(parents=True, exist_ok=True)
-        downloads = []
-        responses = []
-
-        def on_download(download: Any) -> None:
-            downloads.append(download)
-
-        def on_response(response: Any) -> None:
-            url = response.url.lower()
-            if "export" in url or "salesproductreport" in url or "salesreport" in url:
-                responses.append({"url": response.url, "status": response.status})
-
-        self.page.on("download", on_download)
-        self.page.on("response", on_response)
-        dropdown = self.page.locator(".el-dropdown").filter(has_text="导出").first
-        dropdown.hover(timeout=10000)
-        dropdown.locator("button").first.click(force=True, timeout=10000)
-        self.page.locator(".el-dropdown-menu__item:visible").first.wait_for(state="visible", timeout=10000)
-        try:
-            clicked = self.page.evaluate(
-                """(menuText) => {
-                    const items = Array.from(document.querySelectorAll('.el-dropdown-menu__item'))
-                        .filter((el) => {
-                            const rect = el.getBoundingClientRect();
-                            const style = window.getComputedStyle(el);
-                            return rect.width > 0 && rect.height > 0
-                                && style.display !== 'none'
-                                && style.visibility !== 'hidden';
-                        });
-                    const item = items.find((el) => (el.innerText || el.textContent || '').includes(menuText));
-                    if (!item) return false;
-                    item.click();
-                    return true;
-                }""",
-                menu_text,
-            )
-            if not clicked:
-                raise ValueError(f"Export menu item not found: {menu_text}")
-            deadline = time.time() + timeout / 1000
-            while time.time() < deadline:
-                if downloads:
-                    download = downloads[0]
-                    target = Path(download_dir) / download.suggested_filename
-                    download.save_as(str(target))
-                    return {
-                        "success": target.exists() and target.stat().st_size > 0,
-                        "mode": "download",
-                        "file_path": str(target),
-                        "file_size": target.stat().st_size if target.exists() else 0,
-                        "filename": download.suggested_filename,
-                    }
-                if any(item["status"] < 400 for item in responses):
-                    return {"success": True, "mode": "async_response", "responses": responses}
-                body_text = self.page.locator("body").inner_text(timeout=2000)
-                if any(keyword in body_text for keyword in ("导出成功", "导出任务", "通知", "下载中心")):
-                    return {"success": True, "mode": "notification", "responses": responses}
-                self.wait_for_poll_interval(1000)
-            return {"success": False, "mode": "timeout", "responses": responses}
-        finally:
-            self.page.remove_listener("download", on_download)
-            self.page.remove_listener("response", on_response)
-
-    # The current UI exports the active search result directly; keep these
-    # definitions after the legacy menu helpers so older callers stay compatible.
     def export_menu_options(self) -> list[str]:
         return self.page.evaluate(
             """() => Array.from(document.querySelectorAll('button'))
@@ -873,7 +790,7 @@ class SalesReportPage(BasePage):
         )
 
     def snapshot(self, name: str) -> str:
-        path = Path("reports/screenshots") / f"{name}_{int(time.time())}.png"
+        path = Path(".runtime/reports/screenshots") / f"{name}_{int(time.time())}.png"
         path.parent.mkdir(parents=True, exist_ok=True)
         self.page.screenshot(path=str(path), full_page=True)
         return str(path)

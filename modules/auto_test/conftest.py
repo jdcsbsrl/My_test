@@ -52,7 +52,7 @@ def pytest_configure(config: pytest.Config) -> None:
     }
     config._test_run_metadata = metadata
     os.makedirs("reports", exist_ok=True)
-    with open("reports/test-run.json", "w", encoding="utf-8") as stream:
+    with open(".runtime/reports/test-run.json", "w", encoding="utf-8") as stream:
         json.dump(metadata, stream, ensure_ascii=False, indent=2)
 
 
@@ -87,7 +87,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
             )
         except Exception:
             pass
-    with open("reports/test-attempts.jsonl", "a", encoding="utf-8") as stream:
+    with open(".runtime/reports/test-attempts.jsonl", "a", encoding="utf-8") as stream:
         stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
     _TEST_RESULTS.append(payload)
 
@@ -106,7 +106,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         if category:
             summary["categories"][category] = summary["categories"].get(category, 0) + 1
     summary.update({"exitstatus": exitstatus, "run_id": TEST_RUN_ID})
-    with open("reports/test-summary.json", "w", encoding="utf-8") as stream:
+    with open(".runtime/reports/test-summary.json", "w", encoding="utf-8") as stream:
         json.dump(summary, stream, ensure_ascii=False, indent=2)
 
 
@@ -184,7 +184,7 @@ def context(
 
     video_config = config_manager.get("playwright.video", "off")
     if video_config in ("on", "retain-on-failure"):
-        context_options["record_video_dir"] = "reports/videos"
+        context_options["record_video_dir"] = ".runtime/reports/videos"
         context_options["record_video_size"] = viewport
 
     context = browser.new_context(**context_options)
@@ -196,8 +196,8 @@ def context(
     yield context
 
     if trace_config != "off":
-        os.makedirs("reports/traces", exist_ok=True)
-        trace_path = f"reports/traces/test_trace_{uuid.uuid4().hex[:8]}.zip"
+        os.makedirs(".runtime/reports/traces", exist_ok=True)
+        trace_path = f".runtime/reports/traces/test_trace_{uuid.uuid4().hex[:8]}.zip"
         context.tracing.stop(path=trace_path)
     context.close()
 
@@ -405,9 +405,9 @@ def screenshot_helper(page: Page):
     """Provide a helper function for taking screenshots during tests."""
 
     def take_screenshot(name: str):
-        os.makedirs("reports/screenshots", exist_ok=True)
+        os.makedirs(".runtime/reports/screenshots", exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        path = f"reports/screenshots/{name}_{timestamp}_{uuid.uuid4().hex[:6]}.png"
+        path = f".runtime/reports/screenshots/{name}_{timestamp}_{uuid.uuid4().hex[:6]}.png"
         page.screenshot(path=path, full_page=True)
         return path
 

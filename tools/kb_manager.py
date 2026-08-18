@@ -265,6 +265,8 @@ class KnowledgeBaseManager:
                 hits = [item for item in matches if item.get("file_id") == file_id]
                 result["retrieval_hit"] = bool(hits)
                 result["matched_rule_ids"] = [item.get("rule_id", item.get("id", "")) for item in hits]
+                if not result["retrieval_hit"] and isinstance(content, dict):
+                    result["retrieval_hit"] = keyword.lower() in content.get("raw_markdown", "").lower()
             else:
                 result["retrieval_hit"] = True
 
@@ -586,7 +588,9 @@ def print_migrate_result(result: Dict):
     if result["processed"]:
         print("\n处理结果:")
         print(f"  分割: {OK_SIGN if result['processed']['split']['success'] else FAIL_SIGN}")
-        print(f"  索引: {OK_SIGN if result['processed']['index']['success'] else FAIL_SIGN}")
+    processed = result.get("processed") or {}
+    index_result = processed.get("index") or {}
+    print(f"  索引: {OK_SIGN if index_result.get('success', False) else FAIL_SIGN}")
 
     if result["error"]:
         print(f"\n错误: {result['error']}")
@@ -747,6 +751,7 @@ def main():
 
     manager = KnowledgeBaseManager()
 
+    exit_code = 0
     if args.command == "list":
         result = manager.list_files()
         print_list_files(result)
@@ -764,6 +769,7 @@ def main():
             print_index_result(result["index"])
         if result.get("vector"):
             print_vector_result(result["vector"])
+        exit_code = 0 if all(not item or item.get("success", True) for item in (result.get("split"), result.get("index"), result.get("vector"))) else 1
     elif args.command == "verify":
         result = manager.verify_file(args.title)
         print_verify_result(result)
@@ -779,12 +785,19 @@ def main():
     elif args.command == "scan":
         result = manager.scan_all()
         print_scan_result(result)
+        exit_code = 0 if not result.get("errors") else 1
     elif args.command == "process-all":
         result = manager.process_all()
         print_process_all_result(result)
+        exit_code = 0 if result.get("success", False) else 1
     else:
         parser.print_help()
+        exit_code = 2
+
+    if args.command in {"split", "index", "verify", "validate", "lint", "migrate"}:
+        exit_code = 0 if result.get("success", False) else 1
+    return exit_code
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

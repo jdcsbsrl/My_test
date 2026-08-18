@@ -24,8 +24,8 @@ from modules.trae_test.utils.rag_semantic import SemanticConfig
 
 
 DEFAULT_SAMPLES = Path("evaluation/phase0_rag_sales_samples.json")
-DEFAULT_JSON_OUT = Path("reports/harness_metrics/phase0_rag_eval.json")
-DEFAULT_MD_OUT = Path("reports/harness_metrics/phase0_rag_eval.md")
+DEFAULT_JSON_OUT = Path(".runtime/reports/harness_metrics/phase0_rag_eval.json")
+DEFAULT_MD_OUT = Path(".runtime/reports/harness_metrics/phase0_rag_eval.md")
 
 
 def parse_args() -> argparse.Namespace:

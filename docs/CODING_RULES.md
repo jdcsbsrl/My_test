@@ -30,7 +30,7 @@ import requests
 from loguru import logger
 
 # 本地库（按相对路径从近到远）
-from modules.auto_test.api.sales_order_api import SalesOrderAPI
+from modules.auto_test.facades.api.sales_order_facade import SalesOrderFacade
 from modules.auto_test.core.config_manager import Config
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 ```
@@ -38,7 +38,7 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 ### 函数设计原则
 ```python
 # ✅ 推荐：单一职责，参数清晰，有返回类型
-def filter_orders_by_status(api: SalesOrderAPI, status: str, limit: int = 100) -> dict:
+def filter_orders_by_status(api: SalesOrderFacade, status: str, limit: int = 100) -> dict:
     """过滤指定状态的订单"""
     response = api.filter(status=status, limit=limit)
     return response.json()

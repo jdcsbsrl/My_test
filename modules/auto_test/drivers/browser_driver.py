@@ -68,7 +68,7 @@ class BrowserDriver:
 
         video_config = self.config.get("playwright.video", "off")
         if video_config in ("on", "retain-on-failure"):
-            context_options["record_video_dir"] = "reports/videos"
+            context_options["record_video_dir"] = ".runtime/reports/videos"
             context_options["record_video_size"] = viewport
 
         context = self.browser.new_context(**context_options)

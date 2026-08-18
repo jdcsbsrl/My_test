@@ -97,8 +97,8 @@ class TestRuleManager:
         rm = RuleManager(cache_ttl=1)
         rm._cache["test_key"] = "test_value"
         rm._cache_timestamps["test_key"] = time.time() - 2
-        
+
         rm._is_cache_valid("test_key")
-        
+
         assert "test_key" not in rm._cache
         assert "test_key" not in rm._cache_timestamps

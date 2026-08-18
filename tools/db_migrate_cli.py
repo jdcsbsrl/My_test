@@ -106,8 +106,9 @@ def main() -> None:
     subparsers.add_parser("init-db", help="仅创建数据库表结构")
 
     migrate_parser = subparsers.add_parser("migrate", help="执行数据迁移")
-    migrate_parser.add_argument("--all", action="store_true", help="迁移所有文件")
-    migrate_parser.add_argument("--file", type=str, help="迁移指定文件")
+    migrate_group = migrate_parser.add_mutually_exclusive_group(required=True)
+    migrate_group.add_argument("--all", action="store_true", help="迁移所有文件")
+    migrate_group.add_argument("--file", type=str, help="迁移指定文件")
 
     subparsers.add_parser("verify", help="验证迁移数据完整性")
 

@@ -7,7 +7,7 @@ from modules.trae_test.utils import dir_validator
 from modules.trae_test.utils.business_rule_parser import BusinessRuleParser, parse_knowledge
 from modules.trae_test.utils.excel_generator import ExcelGenerator
 from modules.trae_test.utils.metadata_manager import MetadataManager
-from modules.trae_test.utils.template_builder import ALL_FIELDS, ensure_template
+from modules.trae_test.utils.template_builder import ensure_template
 from modules.trae_test.utils.workspace_manager import WorkspaceManager
 
 

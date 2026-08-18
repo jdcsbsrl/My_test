@@ -22,4 +22,4 @@ python tools/verify_test_env.py --env test_env
 
 - 单账户：复制 [customer_openapi.local.example.env](customer_openapi.local.example.env) 为 `customer_openapi.local.env`（已 gitignore），填写 `OPENAPI_APP_KEY` / `OPENAPI_APP_SECRET`。
 - 多账户：复制 [customer_openapi.accounts.example.json](customer_openapi.accounts.example.json) 为 `customer_openapi.accounts.local.json`（`configs/*.json` 默认忽略，勿提交）。
-- 执行：`python tools/customer_openapi_field_compare.py`，报告写入 `reports/`（已 gitignore）。
+- 执行：`python tools/customer_openapi_field_compare.py`，报告写入 `.runtime/reports/`（已 gitignore）。

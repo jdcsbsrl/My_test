@@ -8,10 +8,7 @@
 
 ```
 test_erp/
-├── .trae/                    # AI智能体配置
-│   ├── agents/              # 智能体定义
-│   ├── documents/           # 智能体协作文档
-│   ├── rules/               # 项目规则
+├── docs/                     # 架构、流程、编码与智能体通用规范
 │   └── specs/               # 规格文档
 ├── assets/                   # 资源文件
 │   ├── knowledge_base/       # 知识库（v3.0架构）

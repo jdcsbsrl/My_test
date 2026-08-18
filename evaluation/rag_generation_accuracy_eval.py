@@ -29,8 +29,8 @@ from modules.trae_test.utils.test_case_strategy import TestCaseScoreEngine
 
 
 DEFAULT_SAMPLES = Path("evaluation/phase0_rag_sales_samples.json")
-DEFAULT_JSON_OUT = Path("reports/harness_metrics/rag_generation_accuracy_eval.json")
-DEFAULT_MD_OUT = Path("reports/harness_metrics/rag_generation_accuracy_eval.md")
+DEFAULT_JSON_OUT = Path(".runtime/reports/harness_metrics/rag_generation_accuracy_eval.json")
+DEFAULT_MD_OUT = Path(".runtime/reports/harness_metrics/rag_generation_accuracy_eval.md")
 
 
 def parse_args() -> argparse.Namespace:

@@ -70,7 +70,7 @@ class TestAuditLogger:
                 confidence=0.85,
             )
         )
-        
+
         storage = result.to_storage_dict()
         assert "issues" in storage
         assert len(storage["issues"]) == 1

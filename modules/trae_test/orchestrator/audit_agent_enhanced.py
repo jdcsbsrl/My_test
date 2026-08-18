@@ -27,7 +27,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from .audit_models import AuditIssue, AuditResult
+from .audit_models import AuditResult
 from .audit_approver import AuditApprover
 from .audit_engine import AuditEngine
 from .audit_rules import RuleManager

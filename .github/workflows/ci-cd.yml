@@ -1,4 +1,4 @@
-﻿name: Test ERP CI/CD
+name: Test ERP CI/CD
 
 on:
   push:
@@ -96,10 +96,10 @@ jobs:
         run: pip install -e . "pytest>=8,<9"
       - name: Run unit tests
         run: >
-          pytest tests/unit/ -v --tb=short -n auto --alluredir reports/allure-results
+          pytest tests/unit/ -v --tb=short -n auto --alluredir .runtime/reports/allure-results
           --cov=modules/auto_test --cov=modules/trae_test
-          --cov-report=html:reports/coverage/html
-          --cov-report=xml:reports/coverage/coverage.xml
+          --cov-report=html:.runtime/reports/coverage/html
+          --cov-report=xml:.runtime/reports/coverage/coverage.xml
           --cov-report=term
           --cov-fail-under=60
       - name: Upload unit test results
@@ -107,7 +107,7 @@ jobs:
         if: always()
         with:
           name: allure-results-unit
-          path: reports/allure-results/
+          path: .runtime/reports/allure-results/
           if-no-files-found: error
 
   integration-tests:
@@ -134,13 +134,13 @@ jobs:
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run integration tests
-        run: pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir reports/allure-results
+        run: pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir .runtime/reports/allure-results
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: allure-results-integration
-          path: reports/allure-results/
+          path: .runtime/reports/allure-results/
           if-no-files-found: error
 
   ui-tests:
@@ -199,7 +199,7 @@ jobs:
           # UI tests use Playwright Sync API; pytest-rerunfailures can create
           # an asyncio loop around fixture setup, so UI retries are disabled.
           # The test itself and the framework retain bounded domain retries.
-          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir reports/allure-results
+          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
@@ -211,7 +211,7 @@ jobs:
         if: always()
         with:
           name: allure-results-ui-shard-${{ matrix.shard }}
-          path: reports/allure-results/
+          path: .runtime/reports/allure-results/
           if-no-files-found: error
       - name: Upload UI diagnostics
         uses: actions/upload-artifact@v4
@@ -219,9 +219,9 @@ jobs:
         with:
           name: ui-diagnostics-shard-${{ matrix.shard }}
           path: |
-            reports/screenshots/
-            reports/traces/
-            reports/videos/
+            .runtime/reports/screenshots/
+            .runtime/reports/traces/
+            .runtime/reports/videos/
           if-no-files-found: ignore
 
   report:
@@ -247,19 +247,19 @@ jobs:
         with:
           pattern: allure-results-*
           merge-multiple: true
-          path: reports/allure-results/
+          path: .runtime/reports/allure-results/
       - name: Validate Allure results
         run: |
-          RESULT_COUNT=$(find reports/allure-results -name '*-result.json' -type f | wc -l)
+          RESULT_COUNT=$(find .runtime/reports/allure-results -name '*-result.json' -type f | wc -l)
           echo "Allure result files: ${RESULT_COUNT}"
           test "${RESULT_COUNT}" -gt 0
       - name: Generate Allure report
-        run: allure generate reports/allure-results -o reports/allure-report
+        run: allure generate .runtime/reports/allure-results -o .runtime/reports/allure-report
       - name: Upload Allure report
         uses: actions/upload-artifact@v4
         with:
           name: allure-report
-          path: reports/allure-report/
+          path: .runtime/reports/allure-report/
 
   deploy-test-stub:
     name: 部署到测试环境

@@ -232,7 +232,6 @@ class WorkflowStateMachine:
         Returns:
             tuple[WorkflowState, list[str]]: (新状态, 转换消息列表)
         """
-        from .audit_models import AuditResult, AuditIssue  # 延迟导入避免循环依赖
 
         messages = []
 

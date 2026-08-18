@@ -21,9 +21,7 @@ dist/
 build/
 
 # ========== 测试和报告（敏感数据）==========
-.pytest_cache/
-reports/
-test-reports/
+.runtime/
 test_*.xlsx
 htmlcov/
 .coverage
@@ -109,15 +107,10 @@ browsers/
 node_modules
 
 # Local test and build outputs
-downloads/
-reports/
-sheet_build/
 build_*.mjs
 *.egg-info/
 auto_solution_report.md
 test_export.xlsx
-.pytest_cache/
-.ruff_cache/
 
 # Local business knowledge exports
 customer_billing_knowledge_*.json
