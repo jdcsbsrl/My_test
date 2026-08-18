@@ -19,7 +19,7 @@ from typing import Any
 import allure
 
 from modules.auto_test.core.logger import get_logger
-from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE, SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 logger = get_logger()
@@ -125,7 +125,7 @@ class SalesOrderFacade:
         select_all_fields: bool = False,
         fields: list[str] | None = None,
         download_dir: str = "downloads",
-        template_name: str = "Dayone标准模板 --计算账单",
+        template_name: str = EXPORT_TEMPLATE,
         ensure_fields: list[str] | None = None,
     ) -> dict[str, Any]:
         """导出勾选的订单
@@ -185,7 +185,7 @@ class SalesOrderFacade:
         select_all_fields: bool = True,
         fields: list[str] | None = None,
         download_dir: str = "downloads",
-        template_name: str = "Dayone标准模板 --计算账单",
+        template_name: str = EXPORT_TEMPLATE,
     ) -> dict[str, Any]:
         """完整导出流程：排序→设置分页→全选→导出
 

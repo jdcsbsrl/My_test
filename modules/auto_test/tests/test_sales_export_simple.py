@@ -6,10 +6,9 @@ import time
 import pytest
 from playwright.sync_api import Page
 
-from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE, SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
-EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
 
 
 @pytest.mark.regression
@@ -49,7 +48,7 @@ class TestSalesExportSimple:
         export_page.select_field("系统单号")
 
         os.makedirs("downloads", exist_ok=True)
-        save_path = f"downloads/sales_order_simple_{int(time.time())}.xlsx"
+        save_path = f".runtime/downloads/sales_order_simple_{int(time.time())}.xlsx"
         download_result = export_page.download_to(save_path, timeout=120000)
 
         assert download_result["success"], f"Download failed: {download_result.get('error')}"

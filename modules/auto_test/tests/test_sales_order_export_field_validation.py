@@ -6,7 +6,6 @@ import base64
 import json
 import re
 import time
-from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +18,7 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 ORDER_RE = re.compile(r"SO\d{14,}")
 REPORT_DIR = Path("reports") / f"sales_order_export_field_validation_{time.strftime('%Y%m%d_%H%M%S')}"
-BASELINE_PATH = Path("reports/sales_order_export_baseline.local.json")
+BASELINE_PATH = Path(".runtime/reports/sales_order_export_baseline.local.json")
 
 
 BASE_LIST_PAYLOAD: dict[str, Any] = {
@@ -347,7 +346,7 @@ def _validate_fields(
 class TestSalesOrderExportFieldValidation:
     def test_realtime_templates_export_and_field_validation(self, logged_in_page: Page) -> None:
         SalesOrderPage(logged_in_page).navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_timeout(3000)
+        SalesOrderPage(logged_in_page).wait_for_table_data()
 
         template_data = _assert_api_ok(
             _api(logged_in_page, "GET", "/oms-api/oms-admin/base/exportTemplate/list?type=3"),

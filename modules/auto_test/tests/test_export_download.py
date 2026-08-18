@@ -1,6 +1,5 @@
 """Test export download functionality."""
 
-import os
 import time
 
 import pytest
@@ -8,7 +7,6 @@ from playwright.sync_api import Page
 
 from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 
-EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
 
 
 @pytest.mark.regression
@@ -24,7 +22,7 @@ class TestExportDownload:
         print("\n=== Step 1: Navigate to export page ===")
         timestamp = str(int(time.time() * 1000))
         export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo=")
-        logged_in_page.wait_for_timeout(15000)
+        assert export_page.wait_for_export_page(timeout=30000), "导出页面未完成加载"
 
         print(f"URL: {export_page.current_url}")
 
@@ -92,16 +90,11 @@ class TestExportDownload:
         if realtime_btn_found:
             print("\n=== Step 5: Wait for download ===")
             try:
-                with logged_in_page.expect_download(timeout=120000) as download_info:
-                    print("Waiting for download...")
-
-                download = download_info.value
-                filename = download.suggested_filename
-                os.makedirs("downloads", exist_ok=True)
-                file_path = f"downloads/{filename}"
-                download.save_as(file_path)
-
-                file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+                result = export_page.wait_for_download(timeout=120000)
+                assert result["success"], result.get("error", "download failed")
+                filename = result["filename"]
+                file_path = result["file_path"]
+                file_size = result["file_size"]
 
                 print("\n✓ Download successful!")
                 print(f"  Filename: {filename}")

@@ -8,6 +8,7 @@ import pytest
 from playwright.sync_api import Page
 
 from modules.auto_test.facades.sales_order_facade import SalesOrderFacade
+from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE
 
 
 @pytest.mark.regression
@@ -59,7 +60,7 @@ class TestExportWithOrderData:
         print("Step 7: Export selected orders")
         print("=" * 70)
         export_result = facade.export_selected(
-            select_all_fields=False, template_name="Dayone标准模板 --计算账单", ensure_fields=["系统单号"]
+            select_all_fields=False, template_name=EXPORT_TEMPLATE, ensure_fields=["系统单号"]
         )
 
         if export_result["success"]:
@@ -141,7 +142,7 @@ class TestExportWithOrderData:
         print("Step 7: Export selected orders")
         print("=" * 70)
         export_result = facade.export_selected(
-            select_all_fields=False, template_name="Dayone标准模板 --计算账单", ensure_fields=["系统单号"]
+            select_all_fields=False, template_name=EXPORT_TEMPLATE, ensure_fields=["系统单号"]
         )
 
         if export_result["success"]:
@@ -200,7 +201,7 @@ class TestExportWithOrderData:
         print("Step 6: Export selected orders")
         print("=" * 70)
         export_result = facade.export_selected(
-            select_all_fields=False, template_name="Dayone标准模板 --计算账单", ensure_fields=["系统单号"]
+            select_all_fields=False, template_name=EXPORT_TEMPLATE, ensure_fields=["系统单号"]
         )
 
         if export_result["success"]:

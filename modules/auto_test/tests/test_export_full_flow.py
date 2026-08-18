@@ -6,12 +6,13 @@ from urllib.parse import quote
 import pytest
 from playwright.sync_api import Page
 
-from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE, SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
-EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 class TestExportFullFlow:
     def test_export_full_flow(self, logged_in_page: Page) -> None:
         """Test the full export flow."""
@@ -34,7 +35,7 @@ class TestExportFullFlow:
             if order_numbers:
                 break
             print(f"\n⚠️ 第 {attempt + 1}/3 次未获取到订单号，等待订单列表刷新")
-            logged_in_page.wait_for_timeout(5000)
+            sales_order_page.wait_for_table_data()
 
         if not order_numbers:
             pytest.skip("当前销售订单页没有可用于实时导出的订单，跳过依赖 UAT 数据的导出全流程")

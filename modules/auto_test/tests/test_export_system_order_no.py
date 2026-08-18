@@ -4,11 +4,14 @@ import os
 import time
 
 from playwright.sync_api import Page
+import pytest
 
 from modules.auto_test.facades.sales_order_facade import SalesOrderFacade
-from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE, SalesOrderExportPage
 
 
+@pytest.mark.regression
+@pytest.mark.ui
 def test_export_with_system_order_no(logged_in_page: Page) -> None:
     """Test export with system order number verification."""
     page = logged_in_page
@@ -31,7 +34,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
         if len(order_numbers) >= 1:
             break
         print(f"第 {attempt + 1} 次尝试获取订单数据，等待重试...")
-        time.sleep(3)
+        facade.order_page.wait_for_table_data()
 
     print(f"Page system order numbers (first 5): {order_numbers}")
 
@@ -41,23 +44,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     print("Step 3: Select first 3 orders")
     print("=" * 80)
 
-    selected_count = page.evaluate(
-        """
-        () => {
-            const orderBlocks = document.querySelectorAll('.order-block');
-            let checked = 0;
-            for (let i = 0; i < Math.min(3, orderBlocks.length); i++) {
-                const cb = orderBlocks[i].querySelector('input[type="checkbox"]');
-                if (cb && !cb.checked) {
-                    cb.click();
-                    checked++;
-                }
-            }
-            return checked;
-        }
-    """
-    )
-    time.sleep(2)
+    selected_count = facade.order_page.select_first_orders(3)
     print(f"Selected {selected_count} orders")
 
     print("\n" + "=" * 80)
@@ -73,19 +60,17 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     )
     print(f"Export URL: {export_url}")
 
+    export_page = SalesOrderExportPage(page)
     page.goto(export_url)
     page.wait_for_load_state("networkidle")
-    time.sleep(12)
-
-    export_page = SalesOrderExportPage(page)
+    assert export_page.wait_for_export_page(timeout=30000), "Export page failed to load"
 
     print("\n" + "=" * 80)
     print("Step 5: Select template")
     print("=" * 80)
-    template_name = "Dayone标准模板 --计算账单"
-    result = export_page.select_export_template(template_name)
+    result = export_page.select_export_template(EXPORT_TEMPLATE)
     print(f"Template selection result: {result}")
-    time.sleep(2)
+    export_page.wait_for_page_settle(timeout=10000)
 
     print("\n" + "=" * 80)
     print("Step 6: Check current field selection and ensure 系统单号 is checked")
@@ -129,21 +114,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
         print(f"\nFound '系统单号' field: index={sys_field['index']}, checked={sys_field['checked']}")
         if not sys_field["checked"]:
             print("Clicking to select '系统单号'...")
-            page.evaluate(
-                """
-                () => {
-                    const labels = document.querySelectorAll('.el-checkbox__label');
-                    for (const label of labels) {
-                        if (label.innerText.includes('系统单号')) {
-                            label.click();
-                            return 'clicked';
-                        }
-                    }
-                    return 'not found';
-                }
-            """
-            )
-            time.sleep(1)
+            export_page.ensure_field_selected("系统单号")
     else:
         print("\nWARNING: '系统单号' field not found in first 40 fields")
 
@@ -151,9 +122,9 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     print("Step 7: Click realtime export and download")
     print("=" * 80)
 
-    os.makedirs("downloads/regression", exist_ok=True)
+    os.makedirs(".runtime/downloads/regression", exist_ok=True)
     timestamp = int(time.time())
-    save_path = f"downloads/regression/sales_order_sysno_{timestamp}.xlsx"
+    save_path = f".runtime/downloads/regression/sales_order_sysno_{timestamp}.xlsx"
 
     download_result = export_page.download_to(save_path, timeout=120000)
     print(f"Download result: {download_result}")
