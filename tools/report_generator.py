@@ -6,12 +6,16 @@
 
 import json
 import sys
+import argparse
 from datetime import datetime
 from html import escape
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
 
 
 class TestReportGenerator:
@@ -238,8 +242,9 @@ def run_regression_tests():
     print("生成测试报告")
     print("=" * 60)
 
-    reports_dir = PROJECT_ROOT / "reports"
-    reports_dir.mkdir(exist_ok=True)
+    from modules.trae_test.utils.runtime_paths import runtime_dir
+
+    reports_dir = runtime_dir("reports")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     html_path = str(reports_dir / f"regression_report_{timestamp}.html")
@@ -268,5 +273,16 @@ def run_regression_tests():
     return report
 
 
+def main() -> int:
+    parser = argparse.ArgumentParser(description="生成 test_erp 回归测试 HTML/JSON 报告")
+    parser.add_argument("--run-regression", action="store_true", help="执行回归测试并生成报告")
+    args = parser.parse_args()
+    if not args.run_regression:
+        parser.print_help()
+        return 0
+    report = run_regression_tests()
+    return 1 if any(item["status"] == "FAIL" for item in report.results) else 0
+
+
 if __name__ == "__main__":
-    run_regression_tests()
+    raise SystemExit(main())

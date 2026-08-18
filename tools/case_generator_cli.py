@@ -5,7 +5,6 @@
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -100,14 +99,12 @@ def generate_case(module_name: str, func_name: str, priority: str, requirement_i
 
         # 生成并保存报告
         from datetime import datetime
+        from modules.trae_test.utils.runtime_paths import runtime_dir
 
-        report_path = os.path.join(
-            str(PROJECT_ROOT),
-            "workspace",
-            "test_erp",
-            f"测试用例生成报告_{requirement_id or 'DEFAULT'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        report_path = str(
+            runtime_dir("reports")
+            / f"测试用例生成报告_{requirement_id or 'DEFAULT'}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         )
-        os.makedirs(os.path.dirname(report_path), exist_ok=True)
 
         # 获取最后执行的工作流
         workflows = list(orchestrator.workflow_manager.workflows.values())
