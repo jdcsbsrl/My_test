@@ -1,264 +1,110 @@
-# 项目结构规范
+# 项目结构说明
 
-> 版本 2.0.0 · 2026/7/16 · 基于 HarnessEngineer 架构
+> 版本：v2.1 · 2026-08-18
+>
+> 目录归属、文件生命周期、Git、清理和审核规则以
+> [PROJECT_ARTIFACT_PLACEMENT.md](PROJECT_ARTIFACT_PLACEMENT.md) 为准；本文只描述当前代码结构，不与行为规范重复定义规则。
 
----
+## 一、顶层结构
 
-## 一、目录结构概览
-
-```
+```text
 test_erp/
-├── docs/                     # 架构、流程、编码与智能体通用规范
-│   └── specs/               # 规格文档
-├── assets/                   # 资源文件
-│   ├── knowledge_base/       # 知识库（v3.0架构）
-│   │   ├── data/            # 数据存储
-│   │   │   ├── original/    # 原始JSON文件
-│   │   │   └── chunks/      # 分割块
-│   │   ├── index/           # 索引文件
-│   │   └── metadata/        # 元数据管理
-│   └── templates/           # 测试用例模板
-├── configs/                  # 配置文件（统一）
-├── data/                     # 测试数据
-├── docs/                     # 项目文档
-├── fixtures/                 # Pytest插件
-├── modules/                  # 核心模块
-├── testcases/                # 测试用例
-├── tools/                    # 工具脚本
-├── utils/                    # 公共工具
-└── [配置文件]               # 项目根目录配置文件
+├── .github/                         # CI/CD 工作流
+├── assets/                          # 本地知识库和固定资源
+│   └── knowledge_base/              # 本地业务知识库，不提交真实内容
+├── configs/                         # 项目配置和脱敏配置模板
+├── data/                            # 测试数据；data/private 为本地真实数据
+├── docs/                            # 项目文档和专项规范
+├── evaluation/                      # RAG 和质量评估代码/样例
+├── fixtures/                        # 固定测试资源
+│   ├── harness_plugin.py            # pytest 公共插件
+│   └── templates/                   # 测试用例模板
+├── modules/                         # 核心源码模块
+│   ├── trae_test/                   # 测试用例生成和知识检索
+│   └── auto_test/                   # 自动化测试执行
+├── tests/                           # 通用、跨模块和单元测试
+├── tools/                           # CLI、审核和维护工具
+├── workspace/                       # 最终交付文件，按 YYYYMMDD 分目录
+├── .runtime/                        # 缓存、日志、报告和临时产物
+├── .venv/                           # 本地 Python 虚拟环境
+└── browsers/                        # 浏览器运行环境
 ```
 
----
+## 二、trae_test 模块
 
-## 二、核心模块 (modules/)
-
-### 2.1 trae_test/ - 测试用例生成模块
-
-**职责**: 负责测试用例的生成、管理、导出等功能
-
-```
+```text
 modules/trae_test/
-├── core/                     # 核心组件（新增）
-│   ├── migration/              # 数据库迁移
-│   │   ├── init_db.py            # 初始化数据库
-│   │   ├── migrator.py           # 迁移管理器
-│   │   └── schema.py             # 数据库schema
-│   ├── cache_manager.py         # 缓存管理
-│   └── db_pool.py               # 数据库连接池
-├── orchestrator/             # 多Agent协同编排
-│   ├── agent_orchestrator.py    # Agent编排器
-│   ├── agent_manager.py         # Agent管理器（新增）
-│   ├── auto_agent.py            # 自动Agent（新增）
-│   ├── audit_agent_enhanced.py  # 全能审核Agent
-│   ├── config.py                # 配置类
-│   ├── exception_handler.py      # 异常处理
-│   ├── monitor.py               # 监控报告
-│   ├── retry_manager.py          # 重试管理
-│   ├── workflow_manager.py       # 工作流管理
-│   └── workflow_state_machine.py # 工作流状态机（新增）
-└── utils/                    # 工具函数
-    ├── excel_generator.py        # Excel生成器
-    ├── knowledge_retriever.py    # 知识检索（v3.0）
-    ├── test_case_generator.py     # 用例生成
-    ├── test_case_strategy.py      # 用例策略引擎（新增）
-    ├── test_case_style_formatter.py # 用例格式化（新增）
-    ├── workspace_manager.py       # 工作区管理
-    ├── business_rule_extractor.py # 业务规则抽取（新增）
-    ├── business_rule_parser.py   # 业务规则解析（新增）
-    ├── dir_validator.py          # 目录验证（新增）
-    ├── file_management_service.py # 文件管理服务（新增）
-    ├── file_repository.py        # 文件仓库（新增）
-    ├── file_splitter.py          # 文件分割器（新增）
-    ├── hash_utils.py             # 哈希工具（新增）
-    ├── index_builder_v3.py       # 索引构建器（新增）
-    ├── kb_monitor.py             # 知识库监控（新增）
-    ├── metadata_manager.py       # 元数据管理（新增）
-    ├── metadata_repository.py    # 元数据仓库（新增）
-    ├── path_utils.py             # 路径工具（新增）
-    └── template_builder.py       # 模板构建器（新增）
+├── core/                            # 迁移和核心能力
+├── orchestrator/                    # Agent 编排、审核和工作流
+└── utils/
+    ├── excel_generator.py           # 统一 Excel 生成器
+    ├── file_splitter.py             # 知识文件分块
+    ├── index_builder_v3.py          # 知识库索引构建
+    ├── knowledge_retriever.py       # KnowledgeRetriever API
+    ├── path_utils.py                # 项目和知识库路径工具
+    ├── rag_generation.py            # RAG 生成能力
+    ├── rag_semantic.py              # RAG 语义能力
+    ├── runtime_paths.py             # runtime_dir() 统一运行时路径 API
+    ├── template_builder.py          # 测试用例模板维护
+    ├── test_case_generator.py       # 15 字段测试用例生成
+    ├── test_case_strategy.py        # 评分、优化和重生策略
+    └── workspace_manager.py         # workspace/YYYYMMDD/路径管理
 ```
 
-### 2.2 auto_test/ - 自动化测试执行模块
+## 三、auto_test 模块
 
-**职责**: 负责测试脚本的执行、环境配置、结果收集
-
-```
+```text
 modules/auto_test/
-├── api/                     # API封装
-│   ├── auth_api.py              # 认证API
-│   ├── base_api.py              # 基础API
-│   ├── customer_api_client.py   # 客户API客户端
-│   ├── customer_api_resource.py # 客户API资源
-│   └── openapi_client.py        # OpenAPI客户端
-├── configs/                 # 环境配置
-│   └── test_constants.py        # 测试常量
-├── core/                    # 核心组件
-│   ├── environment.py           # 环境配置管理
-│   ├── logger.py                # 日志管理
-│   ├── test_data_factory.py     # 测试数据工厂（新增）
-│   ├── test_data_lifecycle.py   # 测试数据生命周期（新增）
-│   ├── api_client.py            # API客户端
-│   ├── auth_engine.py           # 认证引擎
-│   ├── config_manager.py        # 配置管理
-│   ├── db_helper.py             # 数据库助手
-│   ├── driver.py                # 驱动管理
-│   ├── exception_handler.py     # 异常处理
-│   ├── execution_auth.py        # 执行认证
-│   ├── login_service.py         # 登录服务
-│   ├── playwright_manager.py    # Playwright管理
-│   ├── secret_manager.py        # 密钥管理
-│   ├── session_probe.py         # 会话探测
-│   ├── token_manager.py         # Token管理
-│   └── ...                     # 其他核心组件
-├── drivers/                 # 驱动
-│   ├── browser_driver.py        # 浏览器驱动
-│   └── http_driver.py           # HTTP驱动
-├── facades/                 # 业务逻辑封装
-│   ├── auth_facade.py           # 认证门面
-│   ├── inventory_sku_facade.py  # 库存SKU门面
-│   └── sales_order_facade.py    # 销售订单门面
-├── pages/                   # 页面对象
-│   ├── login_page.py            # 登录页
-│   ├── sales_order_page.py      # 销售订单页
-│   ├── sales_order_export_page.py # 销售订单导出页
-│   ├── inventory_sku_page.py    # 库存SKU页
-│   ├── inventory_export_page.py # 库存导出页
-│   ├── export_page.py           # 导出页
-│   ├── sku_search_page.py       # SKU搜索页
-│   └── base_page.py             # 基础页
-├── reporting/               # 测试报告
-│   └── allure_http.py           # Allure HTTP报告
-└── tests/                   # 测试脚本（新增）
-    ├── test_login_regression.py     # 登录回归测试
-    ├── test_sales_order_export_sort.py # 销售订单导出排序
-    ├── test_inventory_sku_system.py   # 库存SKU系统测试
-    └── ...                         # 其他测试脚本
+├── api/                             # API 封装
+├── configs/                         # 模块测试常量和本地配置
+├── core/                            # 环境、数据、认证和运行时能力
+├── drivers/                         # HTTP 和浏览器驱动
+├── facades/                         # 业务操作封装
+├── pages/                           # UI 页面对象
+└── tests/                           # 模块专属回归测试
 ```
 
----
+模块专属测试允许放在 `modules/auto_test/tests/`；通用或跨模块测试放在根目录 `tests/`。
 
-## 三、工具目录 (tools/)
+## 四、工具目录
 
-### 3.1 目录规范
+`tools/` 保持扁平，主要工具包括：
 
-- 所有工具脚本直接放在 `tools/` 根目录
-- 禁止创建子目录（保持扁平结构）
-- 使用 snake_case 命名法
+| 工具 | 用途 |
+|---|---|
+| `case_generator_cli.py` | 测试用例生成 CLI |
+| `project_structure_auditor.py` | 项目结构和产物审核 |
+| `clean_runtime.py` | 清理过期 `.runtime` 产物 |
+| `kb_manager.py` | 知识库管理 |
+| `report_generator.py` | 测试报告生成 |
+| `verify_knowledge_base.py` | 知识库完整性验证 |
 
-### 3.2 工具分类
+项目不提供自动清理 `workspace/` 历史测试用例的工具。
 
-| 类型 | 文件命名模式 | 示例 |
-|------|-------------|------|
-| 用例生成 | `generate_*.py` | `generate_cases.py` |
-| 执行运行 | `run_*.py` | `run_regression.py` |
-| 辅助工具 | `*_helper.py` | - |
-| CLI工具 | `*_cli.py` | `case_generator_cli.py` |
-| 审核工具 | `*_auditor.py` | `project_structure_auditor.py` |
+## 五、配置文件
 
----
+正式配置位于 `configs/`，当前常用文件包括：
 
-## 四、配置目录 (configs/)
+```text
+configs/
+├── audit_rules.yaml
+├── database.yaml
+├── redis.yaml
+├── self_healing.yaml
+├── strategy_config.yaml
+├── test.yaml
+├── uat.yaml
+├── env_config.example.json
+└── env_config.example.yaml
+```
 
-### 4.1 目录规范
+含真实凭据的本地配置不提交；脱敏模板使用 `.example` 命名。
 
-- 所有配置文件统一放在 `configs/`
-- 不使用 `config/` 或其他名称的目录
+## 六、命名和清理说明
 
-### 4.2 配置文件
-
-| 文件 | 用途 |
-|------|------|
-| env_config.example.json | 环境配置模板 |
-| env_config.example.yaml | YAML格式环境配置 |
-| test.yaml | 测试环境配置 |
-| uat.yaml | UAT环境配置 |
-| test_env.yaml | 专用测试栈配置 |
-
----
-
-## 五、命名规范
-
-### 5.1 Python文件
-
-- 使用 snake_case：`test_case_generator.py`
-- 模块级常量使用 UPPER_CASE
-- 类名使用 PascalCase
-- 函数名使用 snake_case
-
-### 5.2 目录名
-
-- 使用 snake_case
-- 使用英文
-- 避免中英混用
-
-### 5.3 避免的命名
-
-- ❌ `测试用例模板.xlsx` → ✅ `test_case_template.xlsx`
-- ❌ `工具脚本/` → ✅ `tools/`
-- ❌ `caseGenerators/` → ✅ `case_generators/`
-
----
-
-## 六、禁止的目录
-
-以下目录结构被禁止：
-
-| 禁止目录 | 原因 | 替代方案 |
-|---------|------|---------|
-| `config/` | 与 configs/ 重复 | 使用 configs/ |
-| `tools/case_generators/` | 与 tools/ 重复 | 使用 tools/ |
-| `tools/runners/` | 与 tools/ 重复 | 使用 tools/ |
-| `modules/assets/` | 与 assets/ 重复 | 使用 assets/ |
-| `tools/test_helpers/` | 非标准测试位置 | 删除或移至 tests/ |
-
----
-
-## 七、文件清理规则
-
-### 7.1 临时脚本
-
-以下类型的文件应删除或移动到临时目录：
-
-- 一次性使用的脚本
-- 包含 "temp"、"demo"、"test" 的脚本（除非是正式测试）
-- 根目录下的临时 Python 文件
-
-### 7.2 冗余文件
-
-以下类型的文件应删除：
-
-- 重复的配置文件
-- 未使用的模板
-- 过时的文档
-
----
-
-## 八、文档要求
-
-### 8.1 必须的文档
-
-- `README.md` - 项目说明
-- `docs/ARCHITECTURE.md` - 架构设计
-- `docs/PROJECT_STRUCTURE.md` - 项目结构（本文件）
-- `docs/WORKFLOW.md` - 工作流程
-
-### 8.2 文档命名
-
-- 使用英文或中文
-- 使用 PascalCase 或 snake_case
-- 避免中英混用
-
----
-
-## 九、架构原则
-
-1. **模块化**: 每个模块有明确的职责边界
-2. **扁平化**: 避免过深的目录嵌套
-3. **一致性**: 统一的命名和结构规范
-4. **最小化**: 删除冗余，保持简洁
-5. **可追溯**: 清晰的文档和注释
-
----
-
-*最后更新: 2026/7/27*
+- Python 文件使用 snake_case。
+- 最终测试用例使用 `workspace/YYYYMMDD/`，文件名应包含需求或业务用途。
+- 固定测试模板使用 `fixtures/templates/`，模板文件名由测试用例生成规范统一定义。
+- 一次性脚本放 `.runtime/scripts/`，不因包含 `temp`、`demo` 或 `test` 就自动删除正式测试代码。
+- `.runtime/` 中的报告、缓存、日志、截图和下载文件由 `clean_runtime.py` 管理。
+- `workspace/` 历史测试用例是重要知识资产，由用户自行管理，禁止自动清理。

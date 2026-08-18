@@ -1,257 +1,147 @@
 # Test ERP Agent Workspace Index
 
-## 2026-07-24 本地知识库索引增补（Agent 必读）
+> 本文件是项目 Agent 的控制面和启动入口，不是项目手册。
+> 它只定义任务路由、入口索引和不可绕过的红线；具体实践必须阅读对应专项规范。
 
-> 真实知识库默认保留在本地 `assets/knowledge_base/`，不上传 GitHub。提交仓库时只提交工具代码、流程文档和脱敏样例，避免泄露业务规则、测试数据、订单号、SKU、账号、环境信息等敏感内容。
+## 1. 强制启动协议
 
-### 本地知识库入口
+每次开始项目操作前，必须确认项目根目录并读取本文件。未读取前，不得执行项目文件修改、删除、移动、测试、提交或推送操作。
+
+执行顺序固定为：
+
+```text
+读取 AGENTS.md → 识别任务类型 → 读取专项规范 → 执行任务 → 测试与审核 → 检查 Git 变更 → 汇报影响
+```
+
+涉及新增、生成、移动、删除或整理项目文件和运行产物时，必须先读取 [项目文件与产物管理行为规范](docs/PROJECT_ARTIFACT_PLACEMENT.md)。
+
+## 2. 规则优先级
+
+```text
+系统规则 / 平台安全规则
+    > 用户当前明确要求
+    > AGENTS.md
+    > 专项规范
+    > 代码与测试实现
+    > 默认 Agent 行为
+```
+
+系统安全规则不可被项目文档覆盖。发生冲突时必须停止受影响的操作，向用户说明冲突和影响；用户明确要求与项目规范冲突时，按用户要求执行前必须说明风险和影响。
+
+## 3. 核心红线
+
+1. **环境红线**：自动化测试仅允许在 UAT/内网测试环境执行（项目配置标识：`test`、`uat`）。
+2. **授权红线**：测试执行需用户明确批准；未经用户明确授权，不得擅自提交、推送、删除或覆盖用户已有改动。
+3. **数据红线**：必须通过 `KnowledgeRetriever` API 访问知识库，禁止直接按文件路径读取原始JSON。
+4. **目录红线**：临时缓存、日志、报告、下载文件和脚本进入 `.runtime/`；最终测试用例和交付文件进入 `workspace/YYYYMMDD/`。
+5. **历史红线**：workspace 下的历史测试用例和交付记录永久保留，任何自动清理工具不得触碰。
+6. **审核红线**：所有任务交付前必须经过适用的测试、结构审核和 AuditAgent 审核。
+7. **保护红线**：执行前后必须核对 Git 状态，不得覆盖、回滚或删除用户未提交的改动。
+
+## 4. 任务路由
+
+| 任务类型 | 必读专项规范 | 代码/工具入口 | 验证入口 |
+|---|---|---|---|
+| 测试用例生成 | [TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | `test_case_generator.py`、`case_generator_cli.py` | 测试用例测试与人工审核 |
+| 自动化测试执行 | [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) | `run_regression.py`、`auto_test/` | 目标测试与报告 |
+| 知识库检索 | [KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | `KnowledgeRetriever` | 检索 API 测试 |
+| 知识库更新 | [KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | `tools/kb_manager.py` | lint / scan / validate |
+| 文件与产物管理 | [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) | `runtime_paths.py`、`clean_runtime.py` | 结构审计与产物测试 |
+| 代码审核 | [AGENT_RULES.md](docs/AGENT_RULES.md)、[CODING_RULES.md](docs/CODING_RULES.md) | `AuditAgent` | `AuditResult` 与审核测试 |
+| 文档维护 | 本文件、[PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) | `doc_consistency_checker.py` | 契约测试与文档一致性检查 |
+| 环境配置 | [VIRTUAL_ENV.md](docs/VIRTUAL_ENV.md) | `configs/`、环境管理代码 | 配置检查与目标测试 |
+
+## 5. 知识库访问索引
 
 | 索引项 | 位置 | 用途 |
-|-------|------|------|
-| 本地知识库使用指南 | [docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md](docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md) | 本地知识库目录、隐私边界、推荐知识格式、lint/migrate/validate 流程 |
-| 知识库更新工作流 | [docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | 标准化更新流程 |
-| 知识库管理器 | [tools/kb_manager.py](tools/kb_manager.py) | `lint` / `migrate` / `process` / `scan` / `validate` |
-| 检索 API | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | Agent 访问知识库的统一入口 |
+|---|---|---|
+| 本地知识库使用指南 | [LOCAL_KNOWLEDGE_BASE_GUIDE.md](docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md) | 目录、隐私边界和格式 |
+| 检索使用指南 | [KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | API、上下文窗口和检索边界 |
+| 更新工作流 | [KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | lint、迁移、处理和验证 |
+| 管理工具 | [kb_manager.py](tools/kb_manager.py) | 知识库生命周期操作 |
+| 检索 API | [knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | Agent 唯一访问入口 |
+| 索引构建器 | [index_builder_v3.py](modules/trae_test/utils/index_builder_v3.py) | 维护 v3 索引 |
 
-### Agent 更新知识库时必须使用的流程
-
-```bash
-python tools/kb_manager.py lint --file path/to/source.json
-python tools/kb_manager.py migrate --source path/to/source.json
-python tools/kb_manager.py scan
-python tools/kb_manager.py validate --title file_title --keyword keyword
-```
-
-更新已有知识文件时：
-
-```bash
-python tools/kb_manager.py lint --file assets/knowledge_base/data/original/file_title.json
-python tools/kb_manager.py process --file assets/knowledge_base/data/original/file_title.json
-python tools/kb_manager.py scan
-python tools/kb_manager.py validate --title file_title --keyword keyword
-```
-
-### Agent 检索知识库时必须遵守
-
-- 使用 `KnowledgeRetriever` API，不直接读取 `assets/knowledge_base/data/original/*.json`。
-- 检索前如 registry 缺失或疑似过期，调用 `r.refresh_registry()`；当前实现会在 registry 缺失时自动重建。
-- 优先使用 `retrieve()` / `search_business_rules()` 获取精准片段。
-- 只有用户明确要求全量分析时，才使用 `get_all_chunks()`，并设置 `max_chunks`。
-
-**文档版本**: 3.2.0  
 **知识库 API 版本**: 3.0.0  
 **架构**: HarnessEngineer  
-**最近审查时间**: 2026-07-27
+**最近审查时间**: 2026-08-18
 
----
+知识库文件数量以 registry/API 为准，关键词数量以索引元数据为准。业务文件列表必须动态获取，例如 `r.get_index()` 或 `r.list_available_files()`；不得在 Agent 指令中硬编码具体文件清单。
 
-## 🎯 查询指引
-
-> **重要**: 请根据任务类型精准定位所需索引，避免全量查询。
-
-| 任务类型 | 索引位置 | 入口方式 |
-|---------|---------|---------|
-| 测试用例生成 | [任务类型索引 → 测试用例生成](#测试用例生成) | TRAE_TEST_WORKFLOW.md |
-| 自动化测试执行 | [任务类型索引 → 自动化测试](#自动化测试) | AUTO_TEST_WORKFLOW.md |
-| 代码审核 | [任务类型索引 → 代码审核](#代码审核) | agent_rules.md |
-| 知识检索 | [任务类型索引 → 知识检索](#知识检索) | **KnowledgeRetriever API（见下文）** |
-| **知识库更新** | **[任务类型索引 → 知识库更新](#知识库更新)** | **KNOWLEDGE_BASE_UPDATE_WORKFLOW.md** |
-| 环境配置 | [任务类型索引 → 环境配置](#环境配置) | VIRTUAL_ENV.md |
-
----
-
-## 🔴 核心规则
-
-1. **环境红线**: 自动化测试仅允许在 UAT/内网测试环境执行
-2. **模块分工**: trae_test(用例生成) / auto_test(测试执行)
-3. **测试执行**: 需用户明确批准
-4. **知识访问**: **必须通过 `KnowledgeRetriever` API 访问知识库，禁止直接按文件路径读取原始JSON**
-5. **全能审核**: 所有任务必须经 AuditAgent 审核
-6. **索引刷新**: 每次执行知识检索任务前，若距离上次检索超过1小时，或遇到 FileNotFoundError，需调用 `r.refresh_registry()` 刷新注册表，确保索引与物理文件一致
-
----
-
-## 📦 知识库 v3.0 速查（Agent 必读）
-
-> **Agent 应始终通过 Python API 访问知识库，不要依赖直接文件路径读取。**
-
-```python
-from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
-r = KnowledgeRetriever()
-r.retrieve("销售")              # 自动路由检索（推荐）
-r.search_business_rules("订单")  # 业务规则关键词检索
-r.search_requirements("日志")    # 需求清单关键词检索
-r.get_all_chunks("销售模块")     # 按chunk分批加载大文件
-```
-
-**异常处理与 Fallback 机制**：
-
-```python
-from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
-
-r = KnowledgeRetriever()
-
-try:
-    result = r.retrieve("销售订单")
-    if not result:
-        # Fallback: 检索为空时尝试其他检索方式
-        result = r.search_business_rules("销售订单")
-    if not result:
-        # 最终 Fallback: 返回空结果或提示用户
-        print("未检索到相关知识，请尝试其他关键词")
-except Exception as e:
-    # API 报错处理：记录日志并刷新注册表重试
-    print(f"检索失败: {e}")
-    r.refresh_registry()
-    result = r.retrieve("销售订单")
-```
-
-**上下文窗口管理规则**：
-
-| 规则 | 说明 |
-|------|------|
-| 优先精准检索 | 优先使用 `retrieve()` 或 `search_business_rules()` 获取精准片段 |
-| 限制全量加载 | 仅在用户明确要求全量分析时，才使用 `get_all_chunks()`，且必须配合 `max_chunks` 参数（建议 `max_chunks=5`） |
-| 按需加载 | 使用 `get_chunk_by_id()` 按需加载单个 chunk，避免一次性注入大量内容 |
-
-**v3.0 存储架构**：
-```
-assets/knowledge_base/
-├── data/original/    ← 原始JSON+MD（数量以 registry/API 为准） → 直接文件路径可能变化，勿硬编码
-├── data/chunks/      ← 分块文件（>80KB自动切）                 → 通过 get_all_chunks() 读取
-├── index/global/     ← v3.0 全局索引               → 通过 get_index() 读取
-├── index/inverted/   ← 倒排索引（关键词数量以索引元数据为准） → 通过 search_by_inverted_index() 读取
-└── metadata/         ← 文件注册表（Tag映射）        → 通过 refresh_registry() / list_available_files() / get_retrieval_stats() 间接访问状态
-```
-
----
-
-## 📋 任务类型索引
+## 6. 任务与代码入口
 
 ### 测试用例生成
 
-| 索引项 | 文档位置 | 用途 |
-|-------|---------|------|
-| 工作流程 | [docs/TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | 测试用例生成完整流程（含质量评分/优化/重生闭环） |
-| 用例生成器 | [modules/trae_test/utils/test_case_generator.py](modules/trae_test/utils/test_case_generator.py) | 15字段标准格式生成；字段顺序以 `docs/TRAE_TEST_WORKFLOW.md` 的 Excel 表头规范为准 |
-| 知识检索 | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | 知识库检索工具 |
-| Excel生成 | [modules/trae_test/utils/excel_generator.py](modules/trae_test/utils/excel_generator.py) | 统一Excel文件生成 |
-| CLI工具 | [tools/case_generator_cli.py](tools/case_generator_cli.py) | 命令行用例生成 |
-| **质量评分引擎** | [modules/trae_test/utils/test_case_strategy.py](modules/trae_test/utils/test_case_strategy.py) | **TestCaseScoreEngine: 五维度评分 + 冷启动保护** |
-| **用例优化器** | [modules/trae_test/utils/test_case_strategy.py](modules/trae_test/utils/test_case_strategy.py) | **TestCaseOptimizer: 自动优化步骤/预期/名称** |
-| **自动重生闭环** | [modules/trae_test/utils/test_case_strategy.py](modules/trae_test/utils/test_case_strategy.py) | **TestCaseRegenerationLoop: 重生闭环 + 熔断机制** |
+- [test_case_generator.py](modules/trae_test/utils/test_case_generator.py)：标准字段生成。
+- [test_case_strategy.py](modules/trae_test/utils/test_case_strategy.py)：评分、优化和 `TestCaseRegenerationLoop`。
+- [excel_generator.py](modules/trae_test/utils/excel_generator.py)：统一 Excel 生成。
+- [case_generator_cli.py](tools/case_generator_cli.py)：命令行入口。
 
-### 自动化测试
+### 自动化测试与报告
 
-| 索引项 | 文档位置 | 用途 |
-|-------|---------|------|
-| 工作流程 | [docs/AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) | 自动化测试执行流程（含数据生命周期管理） |
-| 环境配置 | [modules/auto_test/core/environment.py](modules/auto_test/core/environment.py) | 环境配置管理 |
-| 页面对象 | [modules/auto_test/pages/](modules/auto_test/pages/) | UI页面对象模型 |
-| API封装 | [modules/auto_test/api/](modules/auto_test/api/) | API接口封装 |
-| 驱动层 | [modules/auto_test/drivers/](modules/auto_test/drivers/) | 浏览器/HTTP驱动 |
-| **数据工厂** | [modules/auto_test/core/test_data_factory.py](modules/auto_test/core/test_data_factory.py) | **TestDataFactory: 统一数据工厂入口** |
-| **数据加载器** | [modules/auto_test/core/test_data_factory.py](modules/auto_test/core/test_data_factory.py) | **DataLoader: 多格式文件加载（JSON/YAML/CSV/Excel）+ 懒加载** |
-| **动态数据生成** | [modules/auto_test/core/test_data_factory.py](modules/auto_test/core/test_data_factory.py) | **DynamicDataGenerator: 带缓存的动态数据生成** |
-| **数据版本管理** | [modules/auto_test/core/test_data_factory.py](modules/auto_test/core/test_data_factory.py) | **DataVersionManager: 测试数据文件版本控制** |
-| **生命周期管理** | [modules/auto_test/core/test_data_lifecycle.py](modules/auto_test/core/test_data_lifecycle.py) | **TestDataLifecycleManager: 拓扑排序setUp + 级联cleanup + DB兜底** |
+- [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)：执行流程和数据生命周期。
+- [run_regression.py](tools/run_regression.py)：回归测试入口。
+- [report_generator.py](tools/report_generator.py)：`TestReportGenerator`，使用 `--help` 查看参数。
+- [runtime_paths.py](modules/trae_test/utils/runtime_paths.py)：统一运行时路径 API。
 
-### 代码审核
+### 审核与编排
 
-| 索引项 | 文档位置 | 用途 |
-|-------|---------|------|
-| Agent规则 | [docs/AGENT_RULES.md](docs/AGENT_RULES.md) | 智能体配置与交互规则 |
-| 审核Agent | [modules/trae_test/orchestrator/audit_agent_enhanced.py](modules/trae_test/orchestrator/audit_agent_enhanced.py) | 全能实时审核系统 |
-| 编码规范 | [docs/CODING_RULES.md](docs/CODING_RULES.md) | 代码编写规范 |
-| 项目规则 | [docs/PROJECT_RULES.md](docs/PROJECT_RULES.md) | 项目执行规则 |
+- [audit_agent_enhanced.py](modules/trae_test/orchestrator/audit_agent_enhanced.py)：`AuditAgent` 阻塞式审核入口。
+- [audit_models.py](modules/trae_test/orchestrator/audit_models.py)：`AuditResult` / `AuditIssue` 结果契约。
+- [multi_agent_runner.py](tools/multi_agent_runner.py)：多 Agent 协同编排入口。
 
-### 知识检索
+## 7. 文件、产物与 workspace 索引
 
-> **Agent 访问知识库的唯一入口是 `KnowledgeRetriever`，禁止直接按文件路径读取。**
+详细规则唯一来源为 [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md)。
 
-| 索引项 | 文档位置 | 用途 |
-|-------|---------|------|
-| **检索 API（入口）** | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | **Agent 唯一访问入口** |
-| 知识库全局索引 | [assets/knowledge_base/index/global/global_index.json](assets/knowledge_base/index/global/global_index.json) | v3.0 全局索引；仅供维护工具/状态核查使用 |
-| 文件注册表 | [assets/knowledge_base/metadata/file_registry.json](assets/knowledge_base/metadata/file_registry.json) | Tag→File 映射；Agent 检索必须走 API |
-| 倒排索引 | [assets/knowledge_base/index/inverted/inverted_index.json](assets/knowledge_base/index/inverted/inverted_index.json) | 关键词检索底层索引；Agent 检索必须走 API |
-| 更新工作流程 | [docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | 知识库更新标准化流程 |
-| 检索使用指南 | [docs/KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | 智能检索系统使用说明 |
+- `.runtime/`：缓存、下载、日志、报告、脚本、上传和构建临时产物。
+- `workspace/YYYYMMDD/`：最终测试用例和交付文件；历史内容不自动清理。
+- `data/private/`：本地真实敏感数据；只保留脱敏样例或骨架文件。
+- `assets/knowledge_base/`：本地业务知识库，默认不进入 Git。
+- `fixtures/`：代码引用的不可变脱敏样本和模板。
+- `data/`：可变、按场景切换的脱敏输入数据；真实数据放 `data/private/`。
 
-> **注意**: 业务数据文件列表应通过 `r.get_index()` 或 `r.list_available_files()` 动态获取，禁止在系统提示词中硬编码具体文件清单。
+运行时目录由 `runtime_dir()` 管理，允许的 kind 由 `RUNTIME_KINDS` 固定。`tools/clean_runtime.py` 只清理 `.runtime/`；项目不提供 workspace 自动清理工具。
 
-### 知识库更新
+## 8. 测试、审核与 CI
 
-| 索引项 | 文档位置 | 用途 |
-|-------|---------|------|
-| 更新工作流程 | [docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | 标准化更新流程（四阶段） |
-| 知识库管理器 | [tools/kb_manager.py](tools/kb_manager.py) | CLI管理工具（scan / process / migrate） |
-| 文件分割器 | [modules/trae_test/utils/file_splitter.py](modules/trae_test/utils/file_splitter.py) | >80KB自动语义分割（SHA256验证） |
-| 索引构建器 | [modules/trae_test/utils/index_builder_v3.py](modules/trae_test/utils/index_builder_v3.py) | TF-IDF关键词 + 三层索引 |
-| 变更监控器 | [modules/trae_test/utils/kb_monitor.py](modules/trae_test/utils/kb_monitor.py) | 文件大小检测 + 自动触发处理 |
-| 完整性验证 | [tools/verify_knowledge_base.py](tools/verify_knowledge_base.py) | SHA256哈希 + 分块重建校验 |
-| 检索系统 | [modules/trae_test/utils/knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) | 智能检索API（Agent入口） |
+完成任务后按范围执行：
 
-### 环境配置
+1. 目标功能测试；
+2. `pytest tests/unit/test_agents_md_contract.py`；
+3. `python tools/project_structure_auditor.py --json`；
+4. `python tools/doc_consistency_checker.py --json`；
+5. 必要时执行全量单元测试；
+6. `git diff --check` 和 Git 状态对照。
 
-| 索引项 | 文档位置 | 用途 |
-|-------|---------|------|
-| 虚拟环境 | [docs/VIRTUAL_ENV.md](docs/VIRTUAL_ENV.md) | 虚拟环境详细说明 |
-| 环境配置 | [configs/](configs/) | 配置文件目录 |
-| 测试配置 | [modules/auto_test/configs/](modules/auto_test/configs/) | 自动化测试常量/模块内配置代码 |
+审核结果复用 `AuditResult.to_dict()`，不创建平行结果格式。审核退出码统一为：`0` 通过、`1` 警告、`2` 阻断。独立 CI 结构审核 job 不依赖允许失败的代码质量 job。
 
----
+本地 pre-commit 对任何非零退出码均阻断提交，这是预期行为；CI 对退出码 `1` 记录警告，对退出码 `2` 阻断合并。
 
-## 🧠 智能体索引
+## 9. Git 与交付
 
-| 智能体 | 职责 | 触发条件 | 核心入口 |
-|-------|------|----------|----------|
-| TestCaseGenerator | 测试用例生成 | 用户提交测试需求 | [test_case_generator.py](modules/trae_test/utils/test_case_generator.py) |
-| AutoTestExecutor | 自动化测试执行 | 测试用例生成完成 | [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) / [run_regression.py](tools/run_regression.py) |
-| KnowledgeRetriever | 知识检索 | 其他智能体请求检索 | [knowledge_retriever.py](modules/trae_test/utils/knowledge_retriever.py) |
-| TestReportGenerator | 报告生成 | 测试执行完成 | [report_generator.py](tools/report_generator.py) |
-| **AuditAgent** | **全能审核（阻塞式网关）** | 任何任务输出交付给用户前（拦截器/网关） | [audit_agent_enhanced.py](modules/trae_test/orchestrator/audit_agent_enhanced.py) |
+- 修改前保存 Git 状态快照，完成后与快照逐项对照。
+- 只处理用户当前授权范围，不擅自扩大文件范围。
+- AGENTS.md 与 `test_agents_md_contract.py` 的契约变更必须在同一修改批次完成，不允许产生不匹配的中间状态。
+- 提交和推送必须获得用户明确授权。
+- 最终汇报必须说明修改内容、功能影响、Agent 行为影响、目录/产物影响、测试结果、审核结果和未解决风险。
 
-> **协同编排入口**: [multi_agent_runner.py](tools/multi_agent_runner.py) - 多Agent协同编排统一入口
+## 10. 项目索引
 
----
+| 类别 | 入口 |
+|---|---|
+| 项目说明 | [README.md](README.md) |
+| 架构设计 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| 项目结构 | [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) |
+| 整体工作流 | [WORKFLOW.md](docs/WORKFLOW.md) |
+| 审核规则 | [AGENT_RULES.md](docs/AGENT_RULES.md) |
+| 文件与产物规则 | [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) |
+| 结构审核 | [project_structure_auditor.py](tools/project_structure_auditor.py) |
+| 文档一致性审核 | [doc_consistency_checker.py](tools/doc_consistency_checker.py) |
 
-## 📚 文档索引
+## 11. 完整索引
 
-| 文档 | 位置 | 用途 |
-|------|------|------|
-| 项目说明 | [README.md](README.md) | 项目介绍 |
-| 架构设计 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构说明 |
-| 项目结构 | [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) | 目录结构 |
-| 工作流程 | [docs/WORKFLOW.md](docs/WORKFLOW.md) | 整体流程 |
-| 虚拟环境 | [docs/VIRTUAL_ENV.md](docs/VIRTUAL_ENV.md) | 环境配置 |
-| 使用示例 | [docs/USAGE_EXAMPLES.md](docs/USAGE_EXAMPLES.md) | 命令示例 |
-
----
-
-## 🛠️ 工具索引
-
-| 工具 | 位置 | 用途 |
-|------|------|------|
-| 多Agent运行器 | [tools/multi_agent_runner.py](tools/multi_agent_runner.py) | 统一入口 |
-| 项目结构审核 | [tools/project_structure_auditor.py](tools/project_structure_auditor.py) | 架构验证 |
-| 用例生成CLI | [tools/case_generator_cli.py](tools/case_generator_cli.py) | 命令行工具 |
-| 报告生成 | [tools/report_generator.py](tools/report_generator.py) | 测试报告 |
-
----
-
-## 📊 模块索引
-
-| 模块 | 位置 | 职责 |
-|------|------|------|
-| trae_test | [modules/trae_test/](modules/trae_test/) | 测试用例生成 |
-| auto_test | [modules/auto_test/](modules/auto_test/) | 自动化测试执行 |
-| orchestrator | [modules/trae_test/orchestrator/](modules/trae_test/orchestrator/) | 多Agent协同编排 |
-
----
-
-## 🔗 完整索引
-
-- **Agent配置索引**: 已移除 Trae 专属索引；通用规则见 `docs/AGENT_RULES.md`
-- **知识库全局索引**: [assets/knowledge_base/index/global/global_index.json](assets/knowledge_base/index/global/global_index.json)
-- **文件注册表**: [assets/knowledge_base/metadata/file_registry.json](assets/knowledge_base/metadata/file_registry.json)
+- Agent 配置索引：Trae 专属配置已移除，通用规则见 [AGENT_RULES.md](docs/AGENT_RULES.md)。
+- 知识库全局索引：`assets/knowledge_base/index/global/`。
+- 逐文件索引：`assets/knowledge_base/index/files/`。
+- 向量索引：`assets/knowledge_base/index/vector/`。

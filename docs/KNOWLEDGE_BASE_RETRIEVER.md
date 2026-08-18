@@ -1,3 +1,11 @@
+---
+title: 知识库智能检索系统使用指南
+purpose: 知识库检索 API、上下文窗口和访问边界
+version: 3.0.0
+updated: 2026-08-18
+authority: 专项规范
+---
+
 # 知识库智能检索系统使用指南
 
 ## 📚 概述
@@ -31,6 +39,40 @@ result = retriever.retrieve("日志", mode="requirements")  # 检索需求清单
 | 销售模块.json | 218 KB | 3个块 | ≤80KB |
 | 需求清单.json | 517 KB | 2个块 | ≤80KB |
 | 已学习测试用例详情.json | 236 KB | 2个块 | ≤80KB |
+
+### 2.1 上下文窗口管理
+
+Agent 访问知识库时必须按需加载，避免把完整知识库内容一次性注入上下文：
+
+- 优先使用 `retrieve()` 或 `search_business_rules()` 获取精准片段。
+- 只有用户明确要求全量分析时，才使用 `get_all_chunks()`。
+- 使用 `get_all_chunks()` 时必须设置 `max_chunks`，默认建议为 `max_chunks=5`。
+- 需要单个分块时使用 `get_chunk_by_id()`，不要读取原始文件或分块文件路径。
+- registry 缺失、疑似过期或检索出现 `FileNotFoundError` 时，先调用 `refresh_registry()`，再重试检索。
+- 业务数据文件列表通过 `get_index()` 或 `list_available_files()` 动态获取，禁止硬编码具体文件清单。
+
+### 2.2 标准 Fallback 示例
+
+检索任务应优先使用精准 API；无结果时切换到业务规则检索；发生注册表或文件异常时刷新注册表并重试一次：
+
+```python
+from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
+
+
+retriever = KnowledgeRetriever()
+
+try:
+    result = retriever.retrieve("销售订单")
+    if not result:
+        result = retriever.search_business_rules("销售订单")
+    if not result:
+        print("未检索到相关知识，请尝试更具体的关键词")
+except (FileNotFoundError, OSError):
+    retriever.refresh_registry()
+    result = retriever.retrieve("销售订单")
+```
+
+Fallback 只用于恢复索引或缩小检索范围，不能绕过 `KnowledgeRetriever` 直接读取原始 JSON、分块文件或底层索引文件。
 
 ### 3. 索引系统
 构建多层次索引，支持快速定位：
