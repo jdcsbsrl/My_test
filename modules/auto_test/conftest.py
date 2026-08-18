@@ -5,6 +5,7 @@ import json
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import pytest
 import requests
@@ -30,6 +31,7 @@ PASSWORD = os.getenv("TEST_PASSWORD")
 TEST_RUN_ID = os.getenv("TEST_RUN_ID", uuid.uuid4().hex)
 _TEST_ATTEMPTS: dict[str, int] = {}
 _TEST_RESULTS: list[dict] = []
+RUNTIME_REPORTS_DIR = Path(".runtime/reports")
 
 if not USERNAME or not PASSWORD:
     raise RuntimeError(
@@ -51,8 +53,8 @@ def pytest_configure(config: pytest.Config) -> None:
         "commit_sha": os.getenv("GITHUB_SHA", "local"),
     }
     config._test_run_metadata = metadata
-    os.makedirs("reports", exist_ok=True)
-    with open(".runtime/reports/test-run.json", "w", encoding="utf-8") as stream:
+    _ensure_runtime_directories()
+    with (RUNTIME_REPORTS_DIR / "test-run.json").open("w", encoding="utf-8") as stream:
         json.dump(metadata, stream, ensure_ascii=False, indent=2)
 
 
@@ -87,7 +89,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
             )
         except Exception:
             pass
-    with open(".runtime/reports/test-attempts.jsonl", "a", encoding="utf-8") as stream:
+    _ensure_runtime_directories()
+    with (RUNTIME_REPORTS_DIR / "test-attempts.jsonl").open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(payload, ensure_ascii=False) + "\n")
     _TEST_RESULTS.append(payload)
 
@@ -106,7 +109,8 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         if category:
             summary["categories"][category] = summary["categories"].get(category, 0) + 1
     summary.update({"exitstatus": exitstatus, "run_id": TEST_RUN_ID})
-    with open(".runtime/reports/test-summary.json", "w", encoding="utf-8") as stream:
+    _ensure_runtime_directories()
+    with (RUNTIME_REPORTS_DIR / "test-summary.json").open("w", encoding="utf-8") as stream:
         json.dump(summary, stream, ensure_ascii=False, indent=2)
 
 
@@ -121,6 +125,19 @@ def _classify_failure(report: pytest.TestReport) -> str:
     if any(token in text for token in ("assertionerror", "assert ")):
         return "product_or_test_assertion"
     return "unknown"
+
+
+def _ensure_runtime_directories() -> None:
+    """Create runtime output directories for clean checkouts and CI workers."""
+    for directory in (
+        Path(".runtime/cache/pytest"),
+        Path(".runtime/cache/ruff"),
+        Path(".runtime/downloads"),
+        Path(".runtime/uploads"),
+        RUNTIME_REPORTS_DIR,
+        Path(".runtime/sheet_build"),
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
 
 
 @pytest.fixture(scope="session")
