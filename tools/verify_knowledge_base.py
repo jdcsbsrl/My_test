@@ -8,6 +8,9 @@ import sys
 import tempfile
 from typing import Any
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from modules.trae_test.utils.path_utils import is_chunk_filename

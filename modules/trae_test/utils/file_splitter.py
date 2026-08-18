@@ -4,7 +4,11 @@ import json
 import os
 import re
 import shutil
+import sys
 from typing import Any
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
 
 from .hash_utils import compute_file_hash
 from .path_utils import PathManager, is_chunk_filename
