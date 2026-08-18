@@ -1,19 +1,23 @@
 from unittest.mock import Mock, patch
 
-from modules.trae_test.utils.test_case_generator import DEFAULT_CREATOR, TestCaseGenerator, generate_cases
+from modules.trae_test.utils.test_case_generator import (
+    DEFAULT_CREATOR,
+    TestCaseGenerator as GeneratorUnderTest,
+    generate_cases,
+)
 
 
 class TestTestCaseGenerator:
 
     def test_initialization(self):
-        generator = TestCaseGenerator()
+        generator = GeneratorUnderTest()
         assert generator is not None
         assert generator.retriever is not None
         assert generator.excel_generator is not None
 
     def test_initialization_with_custom_retriever(self):
         mock_retriever = Mock()
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         assert generator.retriever == mock_retriever
 
     def test_generate_cases_with_dict_response(self):
@@ -24,7 +28,7 @@ class TestTestCaseGenerator:
             "rule3": "业务规则3内容",
         }
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         cases = generator.generate_cases("销售", limit=2)
 
         assert len(cases) == 2
@@ -48,7 +52,7 @@ class TestTestCaseGenerator:
             {"id": "req002", "content": "需求2"},
         ]
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         cases = generator.generate_cases("采购")
 
         assert len(cases) == 2
@@ -58,7 +62,7 @@ class TestTestCaseGenerator:
         mock_retriever = Mock()
         mock_retriever.retrieve.return_value = {}
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         cases = generator.generate_cases("测试")
 
         assert len(cases) == 0
@@ -67,7 +71,7 @@ class TestTestCaseGenerator:
         mock_retriever = Mock()
         mock_retriever.retrieve.return_value = {f"rule{i}": f"规则{i}" for i in range(20)}
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         cases = generator.generate_cases("测试", limit=5)
 
         assert len(cases) == 5
@@ -76,7 +80,7 @@ class TestTestCaseGenerator:
         mock_retriever = Mock()
         mock_retriever.retrieve.return_value = {f"rule{i}": f"规则{i}" for i in range(15)}
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         cases = generator.generate_cases("测试")
 
         assert len(cases) == 10
@@ -84,7 +88,7 @@ class TestTestCaseGenerator:
     def test_build_case_from_knowledge(self):
         with patch("modules.trae_test.utils.test_case_generator._load_module_hierarchy") as mock_load:
             mock_load.return_value = {"销售": {"订单处理": ["销售订单"]}}
-            generator = TestCaseGenerator()
+            generator = GeneratorUnderTest()
             case = generator._build_case_from_knowledge("销售", "case001", {"rule": "内容"})
 
             assert case["用例目录"] == "销售 - 订单处理 - 销售订单"
@@ -105,7 +109,7 @@ class TestTestCaseGenerator:
         mock_excel_generator = Mock()
         mock_excel_generator.generate.return_value = str(tmp_path / "output.xlsx")
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         generator.excel_generator = mock_excel_generator
 
         cases = generator.generate_cases("测试")
@@ -121,7 +125,7 @@ class TestTestCaseGenerator:
         mock_excel_generator = Mock()
         mock_excel_generator.generate.return_value = str(tmp_path / "output.xlsx")
 
-        generator = TestCaseGenerator(retriever=mock_retriever)
+        generator = GeneratorUnderTest(retriever=mock_retriever)
         generator.excel_generator = mock_excel_generator
 
         generator.generate_and_export("测试")
@@ -135,4 +139,4 @@ class TestTestCaseGenerator:
 
     def test_default_creator(self):
         assert DEFAULT_CREATOR is not None
-        assert isinstance(DEFAULT_CREATOR, TestCaseGenerator)
+        assert isinstance(DEFAULT_CREATOR, GeneratorUnderTest)
