@@ -6,6 +6,7 @@
 import datetime
 import json
 import os
+import tempfile
 from typing import Any
 
 from .hash_utils import compute_file_hash
@@ -133,12 +134,19 @@ class MetadataManager:
                 count += 1
         return count
 
-    def scan_and_register_all(self, original_dir: str | None = None) -> dict[str, Any]:
+    def scan_and_register_all(self, original_dir: str | None = None, allow_shrink: bool = False) -> dict[str, Any]:
         """扫描并注册所有原始文件"""
         if original_dir is None:
             original_dir = os.path.join(self.kb_base_dir, "data", "original")
 
-        result = {"success": True, "registered_files": 0, "files": []}
+        result = {"success": True, "registered_files": 0, "files": [], "error": ""}
+
+        if not os.path.isdir(original_dir):
+            result.update(success=False, error=f"知识库原始目录不存在: {original_dir}")
+            return result
+
+        previous = self.load_registry() or {}
+        previous_count = len(previous.get("files", {}))
 
         registry = {
             "version": self.VERSION,
@@ -147,8 +155,7 @@ class MetadataManager:
             "tags": {},
         }
 
-        if os.path.exists(original_dir):
-            for filename in os.listdir(original_dir):
+        for filename in os.listdir(original_dir):
                 if filename.endswith(".json") or filename.endswith(".md"):
                     file_path = os.path.join(original_dir, filename)
 
@@ -180,10 +187,29 @@ class MetadataManager:
                     result["files"].append(title)
                     result["registered_files"] += 1
 
+        if previous_count and result["registered_files"] < previous_count and not allow_shrink:
+            result.update(
+                success=False,
+                error=(
+                    f"拒绝覆盖注册表：文件数量从 {previous_count} 降至 "
+                    f"{result['registered_files']}；如确认删除，请显式传入 allow_shrink=True"
+                ),
+            )
+            return result
+
         self._sync_reverse_tags(registry)
 
-        with open(self.registry_path, "w", encoding="utf-8") as f:
-            json.dump(registry, f, ensure_ascii=False, indent=2)
+        fd, temp_path = tempfile.mkstemp(prefix="file_registry_", suffix=".tmp", dir=self.metadata_dir)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(registry, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.registry_path)
+        except Exception:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
 
         return result
 

@@ -367,7 +367,11 @@ class KnowledgeBaseManager:
             result["processed"] = process_result
             result["success"] = process_result["success"]
             if result["success"]:
-                MetadataManager().scan_and_register_all()
+                registry_result = MetadataManager().scan_and_register_all()
+                if not registry_result.get("success"):
+                    result["success"] = False
+                    result["error"] = registry_result.get("error", "注册表更新失败")
+                    result["registry"] = registry_result
 
             # 接入审核：迁移完成后执行审核
             audit_input = {
