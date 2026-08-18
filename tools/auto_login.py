@@ -49,10 +49,7 @@ def login_to_env(env: str, force: bool = False) -> dict:
             # 获取登录响应
             response = login_service.get_login_response()
             if response:
-                print("\n登录响应详情:")
-                import json
-
-                print(json.dumps(response, ensure_ascii=False, indent=2))
+                print("\n登录响应已收到（敏感字段已隐藏）")
 
             return {"success": True, "env": env, "token": result["token"], "response": response}
         else:
@@ -131,6 +128,10 @@ def main():
     print("完成")
     print(f"{'='*60}")
 
+    if not all(result["success"] for result in results):
+        return 1
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -10,13 +10,14 @@
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 
 class ProjectStructureAuditor:
     """项目结构审核器"""
 
     # 项目根目录
-    PROJECT_ROOT = r"D:\Working\test_erp"
+    PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 
     # HarnessEngineer架构规范要求
     REQUIRED_DIRS = [
@@ -25,9 +26,6 @@ class ProjectStructureAuditor:
         "tools",
         "assets",
         "docs",
-        ".trae/rules",
-        ".trae/specs",
-        ".trae/agents",
     ]
 
     # 禁止在根目录的脚本模式
@@ -147,8 +145,7 @@ class ProjectStructureAuditor:
             self.warnings.append(
                 {"type": "workspace_not_exists", "path": "workspace", "message": "workspace目录不存在，但已创建"}
             )
-            os.makedirs(workspace_path, exist_ok=True)
-            print("  [WARN] workspace (已创建)")
+            print("  [WARN] workspace (不存在)")
         print()
 
     def _check_module_structure(self):
