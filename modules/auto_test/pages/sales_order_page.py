@@ -1292,7 +1292,7 @@ class SalesOrderPage(BasePage):
         self.page.wait_for_function(
             """(expected) => document.querySelectorAll('table tbody input[type="checkbox"]:checked').length >= expected
             || document.querySelectorAll('.order-block input[type="checkbox"]:checked').length >= expected""",
-            min(int(result or 0), count),
+            arg=min(int(result or 0), count),
         )
         return self.get_selected_count()
 
