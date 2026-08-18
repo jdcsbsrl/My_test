@@ -54,6 +54,27 @@ class InventoryExportPage(BasePage):
             timeout=timeout,
         )
 
+    @allure.step("等待导出字段列表渲染")
+    def wait_for_field_options(self, timeout: int = 30000) -> bool:
+        """Wait until visible export field options are rendered."""
+        try:
+            self.page.wait_for_function(
+                """() => Array.from(document.querySelectorAll(
+                    '.el-checkbox, .el-checkbox__label, .tag_item, [role="checkbox"]'
+                )).some(element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                        && style.visibility !== 'hidden'
+                        && style.display !== 'none';
+                })""",
+                timeout=timeout,
+            )
+            return True
+        except Exception as exc:
+            logger.warning("导出字段列表未在超时时间内渲染: {}", exc)
+            return False
+
     def is_on_export_page(self) -> bool:
         return "exportPage" in self.page.url
 
@@ -166,6 +187,8 @@ class InventoryExportPage(BasePage):
 
     @allure.step("清空已选导出字段")
     def deselect_all_fields(self) -> None:
+        if not self.wait_for_field_options():
+            raise AssertionError("导出字段列表未加载，无法清空导出字段")
         self.wait_for_loading_complete(timeout=10000)
         clear_selectors = ['button:has-text("清空")', 'button:has-text("全选/清空")']
         for selector in clear_selectors:
@@ -209,6 +232,9 @@ class InventoryExportPage(BasePage):
     @allure.step("选择指定字段: {field_name}")
     def select_field(self, field_name: str) -> bool:
         try:
+            if not self.wait_for_field_options():
+                logger.warning("选择字段前导出字段列表未加载: {}", field_name)
+                return False
             result = self.page.evaluate(
                 """
                 (fieldName) => {
@@ -259,7 +285,11 @@ class InventoryExportPage(BasePage):
                 logger.info(f"已选择字段: {field_name}")
                 return True
             else:
-                logger.warning(f"未找到字段: {field_name}")
+                logger.warning(
+                    "未找到字段: {}，当前可见字段: {}",
+                    field_name,
+                    result.get("visibleTexts", []),
+                )
                 return False
         except Exception as e:
             logger.warning(f"选择字段{field_name}失败: {e}")
