@@ -13,7 +13,7 @@ from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.pages.sales_report_page import SalesReportPage
 
 
-REPORT_DIR = Path("reports/sales_report_regression")
+REPORT_DIR = Path(".runtime/reports/sales_report_regression")
 QUERY_DETAIL_JSONL = REPORT_DIR / "query_detail.jsonl"
 QUERY_DETAIL_MD = REPORT_DIR / "query_detail_report.md"
 
@@ -596,30 +596,7 @@ class TestSalesReportRegression:
             )
         assert expanded_count >= 0
 
-    def _legacy_test_export_menu_and_downloads(self, sales_report: SalesReportPage) -> None:
-        options = sales_report.export_menu_options()
-
-        assert any("当前页" in option for option in options), f"Export current-page option missing: {options}"
-        assert any("搜索条件" in option for option in options), f"Export by-search option missing: {options}"
-
-        download_dir = REPORT_DIR / "downloads"
-        current_page = sales_report.export_by_menu_text("当前页", str(download_dir))
-        assert current_page["success"] or any(
-            item["status"] == 500 for item in current_page.get("responses", [])
-        ), current_page
-
-        by_search = sales_report.export_by_menu_text("搜索条件", str(download_dir))
-        assert by_search["success"], by_search
-        _record_query_detail(
-            "导出",
-            {"操作": "打开导出菜单 -> 导出当前页 -> 按搜索条件导出"},
-            sales_report,
-            "当前页导出允许 500 已知缺陷；按搜索条件导出成功",
-            True,
-            f"菜单项={options}；当前页导出={current_page}；按条件导出={by_search}",
-        )
-
-    @pytest.mark.parametrize("scenario", ["SKU编码", "品类", "SKU创建日期完整范围"])
+    @pytest.mark.parametrize("scenario", ["SKU缂栫爜", "鍝佺被", "SKU鍒涘缓鏃ユ湡瀹屾暣鑼冨洿"])
     def test_search_export_matches_expanded_details(self, sales_report: SalesReportPage, scenario: str) -> None:
         first_row = sales_report.first_row()
         conditions: dict[str, str] = {}
