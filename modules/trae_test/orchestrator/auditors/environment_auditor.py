@@ -1,7 +1,6 @@
 """环境配置审核器"""
 
 import re
-from typing import Any
 
 from ..audit_models import AuditResult
 from ..config import AuditType

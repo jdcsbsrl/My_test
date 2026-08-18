@@ -27,4 +27,4 @@ pytest tests/unit tests/integration -p no:asyncio
 pytest modules/auto_test/tests -p no:asyncio -p no:rerunfailures
 ```
 
-每次执行应保留 `reports/test-summary.json`、`reports/test-attempts.jsonl`、Allure 结果以及失败截图/Trace（若启用）。质量检查和诊断信息为 warning，不直接阻断流水线；业务数据写操作不属于本阶段范围。
+每次执行应保留 `.runtime/reports/test-summary.json`、`.runtime/reports/test-attempts.jsonl`、Allure 结果以及失败截图/Trace（若启用）。质量检查和诊断信息为 warning，不直接阻断流水线；业务数据写操作不属于本阶段范围。

@@ -160,10 +160,10 @@ assets/knowledge_base/
 
 | 索引项 | 文档位置 | 用途 |
 |-------|---------|------|
-| Agent规则 | [.trae/rules/agent_rules.md](.trae/rules/agent_rules.md) | 智能体配置与交互规则 |
+| Agent规则 | [docs/AGENT_RULES.md](docs/AGENT_RULES.md) | 智能体配置与交互规则 |
 | 审核Agent | [modules/trae_test/orchestrator/audit_agent_enhanced.py](modules/trae_test/orchestrator/audit_agent_enhanced.py) | 全能实时审核系统 |
-| 编码规范 | [.trae/rules/coding_rules.md](.trae/rules/coding_rules.md) | 代码编写规范 |
-| 项目规则 | [.trae/rules/project_rules.md](.trae/rules/project_rules.md) | 项目执行规则 |
+| 编码规范 | [docs/CODING_RULES.md](docs/CODING_RULES.md) | 代码编写规范 |
+| 项目规则 | [docs/PROJECT_RULES.md](docs/PROJECT_RULES.md) | 项目执行规则 |
 
 ### 知识检索
 
@@ -252,6 +252,6 @@ assets/knowledge_base/
 
 ## 🔗 完整索引
 
-- **Agent配置索引**: [.trae/agents/index.json](.trae/agents/index.json)
+- **Agent配置索引**: 已移除 Trae 专属索引；通用规则见 `docs/AGENT_RULES.md`
 - **知识库全局索引**: [assets/knowledge_base/index/global/global_index.json](assets/knowledge_base/index/global/global_index.json)
 - **文件注册表**: [assets/knowledge_base/metadata/file_registry.json](assets/knowledge_base/metadata/file_registry.json)

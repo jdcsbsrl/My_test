@@ -24,7 +24,11 @@ def list_templates():
     print("=" * 60)
 
     kb = KnowledgeRetriever()
-    templates = kb.list_templates()
+    templates = [
+        name
+        for name in kb.list_available_files()
+        if "模板" in name or "test_case" in name.lower() or "测试用例" in name
+    ]
 
     if templates:
         print(f"\n找到 {len(templates)} 个模板:\n")

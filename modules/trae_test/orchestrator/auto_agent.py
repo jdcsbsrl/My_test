@@ -211,7 +211,7 @@ class AutoAgent:
 │   ├── unit/                           # 单元测试
 │   ├── fixtures/                       # 测试数据
 │   │   └── test_data.json
-│   └── reports/                        # 测试报告
+│   └── .runtime/reports/                        # 测试报告
 ├── config/                             # 配置文件
 │   ├── playwright.config.js
 │   └── jest.config.js

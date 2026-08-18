@@ -15,8 +15,7 @@ test_erp/
 ├── assets/knowledge_base/  local knowledge base; business data stays out of Git
 ├── configs/                environment and test configuration examples
 ├── tools/                  project utilities and CLIs
-├── docs/                   architecture and workflow documentation
-└── .trae/                  agent rules and configuration
+└── docs/                   architecture, workflow, and project rules
 ```
 
 ## Quick start

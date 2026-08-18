@@ -7,7 +7,7 @@ import shutil
 from typing import Any
 
 from .hash_utils import compute_file_hash
-from .path_utils import PathManager
+from .path_utils import PathManager, is_chunk_filename
 
 
 class JSONFileSplitter:
@@ -446,8 +446,25 @@ class JSONFileSplitter:
                 result["error"] = f"文件不存在: {file_path}"
                 return result
 
+            file_name = os.path.splitext(os.path.basename(file_path))[0]
+            # Remove stale chunks before rebuilding. Otherwise old chunks remain
+            # when a source file shrinks or changes structure.
+            if os.path.exists(self.CONTENT_DIR):
+                for filename in os.listdir(self.CONTENT_DIR):
+                    if filename.startswith(f"{file_name}_") and is_chunk_filename(filename):
+                        os.remove(os.path.join(self.CONTENT_DIR, filename))
+
             file_size = self._get_file_size(file_path)
             result["file_size"] = file_size
+
+            # Markdown knowledge sources are indexed as documents and do not
+            # need JSON structural splitting. Keep the source intact.
+            if os.path.splitext(file_path)[1].lower() == ".md":
+                result["success"] = True
+                result["chunk_count"] = 0
+                result["chunk_files"] = []
+                result["original_path"] = file_path
+                return result
 
             if file_size <= self.size_threshold:
                 result["success"] = True
@@ -465,8 +482,6 @@ class JSONFileSplitter:
 
             backup_path = self._backup_original_file(file_path)
             result["original_path"] = backup_path
-
-            file_name = os.path.splitext(os.path.basename(file_path))[0]
 
             if isinstance(data, list):
                 chunk_files = self._split_json_list_intelligently(data, file_name)
@@ -573,6 +588,16 @@ class JSONFileSplitter:
             for key in sub_chunk_groups:
                 sub_chunk_groups[key].sort(key=get_index)
 
+            # Interface-document module items are split into a metadata chunk
+            # and a sibling ``interfaces`` chunk. Treat both as one modules
+            # group so they can be merged back into the matching module.
+            if "modules" in sub_chunk_groups and "item" in sub_chunk_groups:
+                item_paths = sub_chunk_groups["item"]
+                if any("_modules_item_chunk_" in os.path.basename(path) for path in item_paths):
+                    sub_chunk_groups["modules"].extend(item_paths)
+                    sub_chunk_groups["modules"].sort(key=get_index)
+                    del sub_chunk_groups["item"]
+
             # 有效数据键
             valid_data_keys = {
                 "data",
@@ -627,6 +652,31 @@ class JSONFileSplitter:
 
             # 再处理 sub chunks（按组聚合）
             for sub_key, paths in sub_chunk_groups.items():
+                if sub_key == "modules" and any("_modules_item_chunk_" in os.path.basename(path) for path in paths):
+                    module_chunks = []
+                    item_parts = []
+                    for chunk_path in paths:
+                        with open(chunk_path, encoding="utf-8") as f:
+                            chunk_data = json.load(f)
+                        data = extract_data(chunk_data)
+                        if isinstance(data, list):
+                            module_chunks.extend(data)
+                        elif isinstance(data, dict):
+                            item_parts.append(data)
+
+                    for part in item_parts:
+                        name = part.get("name")
+                        if name:
+                            target = next((item for item in module_chunks if item.get("name") == name), None)
+                            if target is None:
+                                target = {"name": name}
+                                module_chunks.append(target)
+                            target.update(part)
+                        elif module_chunks:
+                            module_chunks[-1].update(part)
+                    merged_lists[sub_key] = module_chunks
+                    continue
+
                 merged = None
                 for chunk_path in paths:
                     with open(chunk_path, encoding="utf-8") as f:

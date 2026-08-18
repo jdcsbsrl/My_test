@@ -38,7 +38,7 @@ class SelfHealingConfig:
     cooldown_seconds: int = 300
     metrics_root: str | None = None
     history_enabled: bool = True
-    history_path: str = "reports/self_healing/history.jsonl"
+    history_path: str = ".runtime/reports/self_healing/history.jsonl"
     prefer_history: bool = True
     min_history_successes: int = 1
 
@@ -457,7 +457,7 @@ class SelfHealingLocator:
                 allure.attachment_type.JSON,
             )
             if self.config.screenshot_on_success:
-                path = Path("reports/screenshots") / f"self_healing_{int(time.time() * 1000)}.png"
+                path = Path(".runtime/reports/screenshots") / f"self_healing_{int(time.time() * 1000)}.png"
                 path.parent.mkdir(parents=True, exist_ok=True)
                 self.page.screenshot(path=str(path), full_page=True)
                 allure.attach.file(
@@ -542,7 +542,7 @@ def load_self_healing_config(path: str | Path = "configs/self_healing.yaml") -> 
         cooldown_seconds=int(breaker.get("cooldown_seconds", 300)),
         metrics_root=raw.get("metrics_root"),
         history_enabled=bool(raw.get("history_enabled", True)),
-        history_path=str(raw.get("history_path", "reports/self_healing/history.jsonl")),
+        history_path=str(raw.get("history_path", ".runtime/reports/self_healing/history.jsonl")),
         prefer_history=bool(raw.get("prefer_history", True)),
         min_history_successes=int(raw.get("min_history_successes", 1)),
     )

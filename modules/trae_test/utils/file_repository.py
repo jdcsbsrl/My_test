@@ -150,6 +150,14 @@ class FileRepository:
             except Exception as e:
                 print(f"[FileRepository] 加载原始文件失败 {original_path}: {e}")
 
+        markdown_path = os.path.join(self.original_dir, f"{file_title}.md")
+        if os.path.exists(markdown_path):
+            try:
+                with open(markdown_path, encoding="utf-8") as f:
+                    return {"title": file_title, "raw_markdown": f.read()}
+            except Exception as e:
+                print(f"[FileRepository] 加载 Markdown 文件失败 {markdown_path}: {e}")
+
         return None
 
     def get_existing_chunks(self, file_title: str) -> list[str]:

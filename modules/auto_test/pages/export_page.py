@@ -45,7 +45,7 @@ class ExportPage(BasePage):
 
             download = download_info.value
             filename = download.suggested_filename
-            download_path = f"downloads/{filename}"
+            download_path = f".runtime/downloads/{filename}"
             download.save_as(download_path)
 
             import os

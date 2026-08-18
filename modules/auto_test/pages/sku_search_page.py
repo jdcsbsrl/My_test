@@ -311,38 +311,6 @@ class SKUSearchPage(BasePage):
             self.page.keyboard.press("Escape")
 
     def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
-        """获取指定下拉框中第一个非排除项的真实可用选项。"""
-        excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
-        options = self.get_dropdown_options(placeholder)
-        for option in options:
-            normalized_option = self._normalize_dropdown_option(option)
-            if normalized_option and normalized_option not in excluded:
-                logger.info("动态获取下拉选项: {} -> {}", placeholder, option)
-                return option
-        raise ValueError(f"下拉选择器“{placeholder}”中未找到非 {excluded_options} 的可用选项，可见选项: {options}")
-
-    def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
-        """Get the first usable dropdown option with retries for dynamic dropdowns."""
-        excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
-        options = []
-        for attempt in range(3):
-            options = self.get_dropdown_options(placeholder)
-            for option in options:
-                normalized_option = self._normalize_dropdown_option(option)
-                if normalized_option and normalized_option not in excluded:
-                    logger.info("鍔ㄦ€佽幏鍙栦笅鎷夐€夐」: {} -> {}", placeholder, option)
-                    return option
-            logger.warning(
-                "Dropdown {} attempt {} has no usable option. Visible options: {}",
-                placeholder,
-                attempt + 1,
-                options,
-            )
-            self.page.keyboard.press("Escape")
-            self.wait_for_poll_interval(1000)
-        raise ValueError(f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}")
-
-    def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
         """Get the first usable option from the dropdown opened for this placeholder."""
         excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
         options = []

@@ -107,56 +107,6 @@ class InventorySKUPage(BasePage):
         export_btn.first.click()
         logger.info("点击导出按钮")
 
-    @allure.step("选择导出当前搜索的库存SKU")
-    def select_export_current_search(self) -> None:
-        self.click_export()
-        self.wait_for_page_settle(timeout=30000)
-
-        try:
-            clicked = self.page.evaluate(
-                """() => {
-                const items = document.querySelectorAll('.el-dropdown-menu__item');
-                for (const item of items) {
-                    const text = item.textContent || "";
-                    if (text.includes("\\u5f53\\u524d\\u641c\\u7d22") && text.toUpperCase().includes("SKU")) {
-                        item.click();
-                        return true;
-                    }
-                }
-                return false;
-            }"""
-            )
-            if not clicked:
-                raise ValueError("未找到导出当前搜索的库存SKU菜单项")
-            self.wait_for_page_settle(timeout=30000)
-            logger.info("选择导出当前搜索的库存SKU")
-            return
-        except Exception as e:
-            logger.warning(f"JS点击导出菜单失败: {e}")
-
-        menu_items = self.page.locator(".el-dropdown-menu__item").all()
-        found = False
-        for item in menu_items:
-            try:
-                text = item.text_content() or ""
-                if "导出当前搜索的库存SKU" in text:
-                    item.click(force=True)
-                    self.wait_for_page_settle(timeout=30000)
-                    logger.info("选择导出当前搜索的库存SKU")
-                    found = True
-                    break
-            except Exception:
-                pass
-
-        if not found:
-            export_menu_item = self.page.locator('span:has-text("导出当前搜索的库存SKU")')
-            if export_menu_item.count() > 0:
-                export_menu_item.first.click(force=True)
-                self.wait_for_page_settle(timeout=30000)
-                logger.info("选择导出当前搜索的库存SKU")
-            else:
-                logger.warning("未找到导出当前搜索的库存SKU菜单")
-
     @allure.step("选择导出勾选的库存SKU")
     def select_export_current_search(self) -> None:
         """Select current-search inventory SKU export and wait for export page."""

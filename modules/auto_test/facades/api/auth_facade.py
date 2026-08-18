@@ -10,7 +10,7 @@ from modules.auto_test.core.api_client import APIClient
 from modules.auto_test.core.config_manager import get_config
 from modules.auto_test.core.secret_manager import get_secret_manager
 from modules.auto_test.facades.auth_facade import AuthFacade as _CanonicalAuthFacade
-from modules.auto_test.reporting.allure_http import attach_request_info, step
+from modules.auto_test.reporting.allure_http import attach_request_info
 
 
 class AuthFacade(_CanonicalAuthFacade):

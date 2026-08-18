@@ -7,7 +7,6 @@
 """
 
 import logging
-from typing import Any
 
 from modules.trae_test.orchestrator.audit_gateway import AuditGateway
 from modules.trae_test.orchestrator.audit_models import AuditResult
@@ -38,45 +37,49 @@ class PreAudit:
 
     def check_test_readiness(self, test_plan: dict) -> AuditResult:
         """审核测试就绪状态
-        
+
         检查：
         - 测试用例是否已准备
         - 测试数据是否已准备
         - 测试账号是否可用
         """
         from modules.trae_test.orchestrator.audit_models import AuditIssue
-        
+
         context = {
             "source": "auto_test_pre_audit",
             "block_on_fail": False,
         }
-        
+
         if isinstance(test_plan, dict):
             result = AuditResult()
-            
+
             required_keys = ["test_cases", "test_data", "test_account"]
             missing_keys = [k for k in required_keys if k not in test_plan]
-            
+
             if missing_keys:
                 for key in missing_keys:
-                    result.issues.append(AuditIssue(
-                        severity="warning",
-                        rule_id=f"READINESS_MISSING_{key.upper()}",
-                        category="readiness",
-                        message=f"测试计划缺少必需字段: {key}",
-                    ))
-            
+                    result.issues.append(
+                        AuditIssue(
+                            severity="warning",
+                            rule_id=f"READINESS_MISSING_{key.upper()}",
+                            category="readiness",
+                            message=f"测试计划缺少必需字段: {key}",
+                        )
+                    )
+
             test_cases = test_plan.get("test_cases", [])
             if not isinstance(test_cases, list) or len(test_cases) == 0:
-                result.issues.append(AuditIssue(
-                    severity="warning",
-                    rule_id="READINESS_NO_TEST_CASES",
-                    category="readiness",
-                    message="测试计划中没有测试用例",
-                ))
-            
+                result.issues.append(
+                    AuditIssue(
+                        severity="warning",
+                        rule_id="READINESS_NO_TEST_CASES",
+                        category="readiness",
+                        message="测试计划中没有测试用例",
+                    )
+                )
+
             return result
-        
+
         return self.gateway.audit(test_plan, "test_case", context)
 
     def pre_audit(self, env_config: dict, test_plan: dict | None = None) -> bool:

@@ -23,8 +23,8 @@ from modules.trae_test.utils.rag_generation import RAGGenerationEvaluator, build
 
 
 DEFAULT_SAMPLES = Path("evaluation/phase1_rag_generation_samples.json")
-DEFAULT_JSON_OUT = Path("reports/harness_metrics/phase1_rag_generation_eval.json")
-DEFAULT_MD_OUT = Path("reports/harness_metrics/phase1_rag_generation_eval.md")
+DEFAULT_JSON_OUT = Path(".runtime/reports/harness_metrics/phase1_rag_generation_eval.json")
+DEFAULT_MD_OUT = Path(".runtime/reports/harness_metrics/phase1_rag_generation_eval.md")
 
 
 def parse_args() -> argparse.Namespace:

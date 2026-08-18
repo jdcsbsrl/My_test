@@ -394,7 +394,7 @@ class InventoryExportPage(BasePage):
             download = download_info.value
             filename = download.suggested_filename
             os.makedirs("downloads", exist_ok=True)
-            file_path = f"downloads/{filename}"
+            file_path = f".runtime/downloads/{filename}"
             download.save_as(file_path)
 
             file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0

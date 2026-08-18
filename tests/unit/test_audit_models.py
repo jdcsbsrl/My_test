@@ -83,10 +83,10 @@ class TestAuditResult:
         """测试 passed 随 issues 动态变化"""
         result = AuditResult()
         assert result.passed is True
-        
+
         result.issues.append(AuditIssue(severity="error", rule_id="ERR1", category="test", message="error"))
         assert result.passed is False
-        
+
         result.issues.clear()
         assert result.passed is True
 
@@ -94,10 +94,10 @@ class TestAuditResult:
         """测试 passed setter 强制设置生效"""
         result = AuditResult()
         assert result.passed is True
-        
+
         result.passed = False
         assert result.passed is False
-        
+
         result.issues.clear()
         assert result.passed is False  # 仍然保持强制设置的值
 

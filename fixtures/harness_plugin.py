@@ -190,7 +190,7 @@ def browser_page(request: pytest.FixtureRequest, browser_driver_session: Browser
 
     trace_path = None
     if request.node.rep_call.failed if hasattr(request.node, "rep_call") else False:
-        trace_path = f"reports/traces/trace-{request.node.name}.zip"
+        trace_path = f".runtime/reports/traces/trace-{request.node.name}.zip"
 
     browser_driver_session.close_context(context, trace_path=trace_path)
 

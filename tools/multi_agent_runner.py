@@ -455,7 +455,7 @@ def main():
     # 交互模式
     if args.interactive or not args.task:
         interactive_mode()
-        return
+        return 0
 
     # 创建编排器
     orchestrator = create_orchestrator()
@@ -464,13 +464,13 @@ def main():
     if args.task == "test_case":
         if not args.requirement_id or not args.requirement_name:
             print("❌ 请提供 --requirement-id 和 --requirement-name")
-            return
+            return 2
         run_test_case_generation(orchestrator, args.requirement_id, args.requirement_name)
 
     elif args.task == "code_review":
         if not args.file:
             print("❌ 请提供 --file 参数")
-            return
+            return 2
         run_code_review(orchestrator, args.file)
 
     elif args.task == "environment_check":
@@ -481,4 +481,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
