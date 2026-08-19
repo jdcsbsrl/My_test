@@ -110,15 +110,12 @@ class InventoryExportPage(BasePage):
                     const target = candidates.find(element =>
                         element.matches('button, [role="tab"], [role="treeitem"], .el-collapse-item__header')
                         || element.querySelector(
-                            'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, '
-                            + '.el-checkbox__label'
+                            'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, .el-checkbox__label'
                         )
                     ) || candidates[0];
                     if (!target) return false;
                     const clickable = target.querySelector(
-                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, '
-                        + '[aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down, '
-                        + '.el-tree-node__expand-icon'
+                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, [aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down, .el-tree-node__expand-icon'
                     ) || target;
                     clickable.click();
                     return true;
