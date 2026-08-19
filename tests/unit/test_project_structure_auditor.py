@@ -76,6 +76,30 @@ def test_empty_workspace_skeleton_does_not_warn(tmp_path):
     assert not auditor.warnings
 
 
+def test_required_dirs_reports_missing_assets(tmp_path):
+    for required_dir in ProjectStructureAuditor.REQUIRED_DIRS:
+        if required_dir != "assets":
+            (tmp_path / required_dir).mkdir(parents=True)
+
+    auditor = auditor_for(tmp_path)
+    auditor._check_required_dirs()
+
+    assert any(
+        issue["type"] == "missing_required_dir" and issue["path"] == "assets"
+        for issue in auditor.issues
+    )
+
+
+def test_required_dirs_passes_when_git_skeleton_is_present(tmp_path):
+    for required_dir in ProjectStructureAuditor.REQUIRED_DIRS:
+        (tmp_path / required_dir).mkdir(parents=True)
+
+    auditor = auditor_for(tmp_path)
+    auditor._check_required_dirs()
+
+    assert not auditor.issues
+
+
 def test_nonempty_workspace_without_date_dir_warns(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

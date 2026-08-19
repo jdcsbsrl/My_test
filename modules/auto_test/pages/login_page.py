@@ -60,6 +60,11 @@ class LoginPage(BasePage):
     def navigate_to_login(self) -> None:
         """导航到登录页面（通过SPA入口，让前端自动跳转登录页）"""
         self.navigate_to("")
+        try:
+            self.page.wait_for_load_state("domcontentloaded", timeout=30000)
+        except Exception:
+            # SPA 可能在导航期间持续加载，表单可见性检查会继续负责等待。
+            pass
         logger.info("导航到登录页面")
 
     @allure.step("Enter username: {username}")
@@ -249,15 +254,9 @@ class LoginPage(BasePage):
 
         found = any(re.search(pattern, current_url) for pattern in login_indicators)
         if not found:
-            username_inputs = [
-                'input[placeholder="账号"]',
-                'input[placeholder="用户名"]',
-                'input[placeholder="手机号"]',
-            ]
-            for selector in username_inputs:
-                if self.page.locator(selector).count() > 0:
-                    found = True
-                    break
+            # 登录页是 SPA，URL 仍可能停留在入口页；必须等待可见表单，
+            # 不能用即时 count() 在页面尚未渲染时误判失败。
+            found = self.has_username_input(timeout=5000)
 
         assert found, f"URL不包含登录页面路径，且未找到登录输入框: {current_url}"
         logger.info(f"验证登录页面显示: {current_url}")

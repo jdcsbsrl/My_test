@@ -9,6 +9,7 @@ from modules.auto_test.pages import base_page as base_page_module
 from modules.auto_test.pages.base_page import BasePage
 from modules.auto_test.pages.export_page import ExportPage
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
+from modules.auto_test.pages.login_page import LoginPage
 from modules.trae_test.orchestrator.agent_manager import AgentContext, AgentManager, DomainMetadata
 
 
@@ -262,6 +263,15 @@ class TestBaseAndExportPage:
 
         with pytest.raises(ValueError):
             BasePage(FakePage()).navigate_to("/orders")
+
+    def test_login_page_verification_waits_for_spa_form(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        page.url = "https://example.test/"
+        login_page = LoginPage(page)
+        monkeypatch.setattr(login_page, "has_username_input", lambda timeout=5000: True)
+
+        login_page.verify_login_page()
 
     def test_export_page_success_and_fallback_paths(self, monkeypatch, tmp_path):
         monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
