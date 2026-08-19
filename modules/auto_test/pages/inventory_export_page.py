@@ -168,6 +168,36 @@ class InventoryExportPage(BasePage):
             )
         )
 
+    def _activate_field_group_with_locators(self, field_name: str) -> bool:
+        """Fallback to Playwright locators when the page's custom DOM hides JS targets."""
+        group_name = self.FIELD_GROUPS.get(field_name)
+        if not group_name:
+            return False
+        selectors = [
+            '[aria-expanded="false"]',
+            '.el-collapse-item__header',
+            '.el-tree-node__content',
+            '[role="tab"]',
+            '[role="treeitem"]',
+            'button',
+        ]
+        for selector in selectors:
+            try:
+                candidates = self.page.locator(selector).filter(has_text=group_name)
+                for index in range(min(candidates.count(), 3)):
+                    candidate = candidates.nth(index)
+                    if not candidate.is_visible():
+                        continue
+                    expanded = candidate.get_attribute("aria-expanded")
+                    if expanded == "true":
+                        return True
+                    candidate.click()
+                    if self.wait_for_field_visible(field_name, timeout=3000):
+                        return True
+            except Exception:
+                continue
+        return False
+
     def is_on_export_page(self) -> bool:
         return "exportPage" in self.page.url
 
@@ -371,11 +401,14 @@ class InventoryExportPage(BasePage):
                 self.wait_for_loading_complete(timeout=10000)
                 logger.info("宸查€夋嫨瀛楁: {} -> {}", field_name, result)
                 return True
-            if _allow_group_activation and self._activate_field_group(field_name):
-                if not self.wait_for_field_visible(field_name, timeout=10000):
-                    logger.warning("字段分组已激活但目标字段未渲染: {}", field_name)
-                    return False
-                return self.select_field(field_name, _allow_group_activation=False)
+            if _allow_group_activation:
+                activated = self._activate_field_group(field_name)
+                if activated and self.wait_for_field_visible(field_name, timeout=5000):
+                    return self.select_field(field_name, _allow_group_activation=False)
+                if self._activate_field_group_with_locators(field_name):
+                    return self.select_field(field_name, _allow_group_activation=False)
+                logger.warning("字段分组展开后目标字段仍未渲染: {}", field_name)
+                return False
             field_label = self.page.locator(f'.el-checkbox__label:has-text("{field_name}")').first
             if field_label.count() > 0:
                 field_label.click(force=True)

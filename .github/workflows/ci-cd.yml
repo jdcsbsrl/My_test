@@ -126,12 +126,14 @@ jobs:
         run: |
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
-          pytest tests/unit/ -v --tb=short -n auto --alluredir .runtime/reports/allure-results
-          --cov=modules/auto_test --cov=modules/trae_test
-          --cov-report=html:.runtime/reports/coverage/html
-          --cov-report=xml:.runtime/reports/coverage/coverage.xml
-          --cov-report=term
-          --cov-fail-under=60
+          pytest tests/unit/ -v --tb=short -n auto \
+            --alluredir .runtime/reports/allure-results \
+            --cov=modules/auto_test \
+            --cov=modules/trae_test \
+            --cov-report=html:.runtime/reports/coverage/html \
+            --cov-report=xml:.runtime/reports/coverage/coverage.xml \
+            --cov-report=term \
+            --cov-fail-under=60
       - name: Upload unit test results
         uses: actions/upload-artifact@v4
         if: always()

@@ -310,6 +310,13 @@ class TestBaseAndExportPage:
         assert export_page.select_field("产品名称") is False
         assert any("fieldName" in script for script, _ in page.evaluated_scripts)
 
+    def test_inventory_field_group_locator_fallback_uses_expansion_candidates(self, monkeypatch):
+        page = FakePage()
+        export_page = InventoryExportPage(page)
+        monkeypatch.setattr(export_page, "wait_for_field_visible", lambda field_name, timeout=3000: True)
+
+        assert export_page._activate_field_group_with_locators("产品名称") is False
+
     def test_export_page_success_and_fallback_paths(self, monkeypatch, tmp_path):
         monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
         page = FakePage()
