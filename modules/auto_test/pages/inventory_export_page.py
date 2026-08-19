@@ -86,6 +86,33 @@ class InventoryExportPage(BasePage):
             logger.warning("导出字段列表未在超时时间内渲染: {}", exc)
             return False
 
+    def wait_for_field_visible(self, field_name: str, timeout: int = 10000) -> bool:
+        """Wait for a specific leaf field to become visible after group expansion."""
+        try:
+            return bool(
+                self.page.wait_for_function(
+                    """
+                    (fieldName) => {
+                        const normalize = value => (value || '').replace(/\\s+/g, '').toLowerCase();
+                        const target = normalize(fieldName);
+                        return Array.from(document.querySelectorAll('.el-checkbox, label, .tag_item'))
+                            .some(element => {
+                                const rect = element.getBoundingClientRect();
+                                const style = window.getComputedStyle(element);
+                                const text = normalize(element.textContent);
+                                return rect.width > 0 && rect.height > 0
+                                    && style.visibility !== 'hidden' && style.display !== 'none'
+                                    && text.includes(target);
+                            });
+                    }
+                    """,
+                    field_name,
+                    timeout=timeout,
+                )
+            )
+        except Exception:
+            return False
+
     def _activate_field_group(self, field_name: str) -> bool:
         """展开或激活字段分组，使分组内的叶子字段进入可见 DOM。"""
         group_name = self.FIELD_GROUPS.get(field_name)
@@ -328,7 +355,9 @@ class InventoryExportPage(BasePage):
                 logger.info("宸查€夋嫨瀛楁: {} -> {}", field_name, result)
                 return True
             if _allow_group_activation and self._activate_field_group(field_name):
-                self.wait_for_loading_complete(timeout=10000)
+                if not self.wait_for_field_visible(field_name, timeout=10000):
+                    logger.warning("字段分组已激活但目标字段未渲染: {}", field_name)
+                    return False
                 return self.select_field(field_name, _allow_group_activation=False)
             field_label = self.page.locator(f'.el-checkbox__label:has-text("{field_name}")').first
             if field_label.count() > 0:

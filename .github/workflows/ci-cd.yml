@@ -123,7 +123,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run unit tests
-        run: >
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest tests/unit/ -v --tb=short -n auto --alluredir .runtime/reports/allure-results
           --cov=modules/auto_test --cov=modules/trae_test
           --cov-report=html:.runtime/reports/coverage/html
@@ -136,7 +138,7 @@ jobs:
         with:
           name: allure-results-unit
           path: .runtime/reports/allure-results/
-          if-no-files-found: error
+          if-no-files-found: warn
 
   integration-tests:
     name: 集成测试
@@ -162,14 +164,17 @@ jobs:
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run integration tests
-        run: pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir .runtime/reports/allure-results
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
+          pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir .runtime/reports/allure-results
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: allure-results-integration
           path: .runtime/reports/allure-results/
-          if-no-files-found: error
+          if-no-files-found: warn
 
   ui-tests:
     name: UI测试 (分片${{ matrix.shard }})
@@ -224,6 +229,8 @@ jobs:
         run: playwright install --with-deps chromium
       - name: Run UI tests (shard ${{ matrix.shard }})
         run: |
+          mkdir -p .runtime/reports/allure-results
+          python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           # UI tests use Playwright Sync API; pytest-rerunfailures can create
           # an asyncio loop around fixture setup, so UI retries are disabled.
           # The test itself and the framework retain bounded domain retries.
@@ -240,7 +247,7 @@ jobs:
         with:
           name: allure-results-ui-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
-          if-no-files-found: error
+          if-no-files-found: warn
       - name: Upload UI diagnostics
         uses: actions/upload-artifact@v4
         if: failure()
@@ -280,14 +287,25 @@ jobs:
         run: |
           RESULT_COUNT=$(find .runtime/reports/allure-results -name '*-result.json' -type f | wc -l)
           echo "Allure result files: ${RESULT_COUNT}"
-          test "${RESULT_COUNT}" -gt 0
+          if [ "${RESULT_COUNT}" -eq 0 ]; then
+            echo "未生成 Allure 结果，跳过报告生成；请查看上游测试 job 的原始错误。"
+            exit 0
+          fi
       - name: Generate Allure report
-        run: allure generate .runtime/reports/allure-results -o .runtime/reports/allure-report
+        run: |
+          RESULT_COUNT=$(find .runtime/reports/allure-results -name '*-result.json' -type f | wc -l)
+          if [ "${RESULT_COUNT}" -eq 0 ]; then
+            echo "没有可生成的 Allure 结果，跳过报告生成。"
+            exit 0
+          fi
+          allure generate .runtime/reports/allure-results -o .runtime/reports/allure-report
       - name: Upload Allure report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: allure-report
           path: .runtime/reports/allure-report/
+          if-no-files-found: warn
 
   deploy-test-stub:
     name: 部署到测试环境

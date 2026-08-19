@@ -228,6 +228,10 @@ class FakeEvaluatePage(FakePage):
         self.evaluated_scripts.append((script, args))
         return True
 
+    def wait_for_function(self, script, *args, **kwargs):
+        self.evaluated_scripts.append((script, args))
+        return True
+
 
 class TestBaseAndExportPage:
     def test_base_page_wrappers_and_navigation(self, monkeypatch):
@@ -293,6 +297,17 @@ class TestBaseAndExportPage:
         assert args == ("商品信息",)
         assert "el-collapse-item__header, .el-checkbox, label, .tag_item" in script
         assert "[aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down" in script
+
+    def test_inventory_field_selection_waits_for_leaf_after_group_activation(self, monkeypatch):
+        page = FakeEvaluatePage()
+        export_page = InventoryExportPage(page)
+        monkeypatch.setattr(export_page, "wait_for_field_options", lambda timeout=30000: True)
+        monkeypatch.setattr(export_page, "wait_for_loading_complete", lambda timeout=10000: None)
+        monkeypatch.setattr(export_page, "_activate_field_group", lambda field_name: True)
+        monkeypatch.setattr(export_page, "wait_for_field_visible", lambda field_name, timeout=10000: True)
+
+        assert export_page.select_field("产品名称") is False
+        assert any("fieldName" in script for script, _ in page.evaluated_scripts)
 
     def test_export_page_success_and_fallback_paths(self, monkeypatch, tmp_path):
         monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))

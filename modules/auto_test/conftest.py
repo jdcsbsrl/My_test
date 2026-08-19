@@ -32,6 +32,7 @@ TEST_RUN_ID = os.getenv("TEST_RUN_ID", uuid.uuid4().hex)
 _TEST_ATTEMPTS: dict[str, int] = {}
 _TEST_RESULTS: list[dict] = []
 RUNTIME_REPORTS_DIR = Path(".runtime/reports")
+RUNTIME_SCREENSHOTS_DIR = RUNTIME_REPORTS_DIR / "screenshots"
 
 if not USERNAME or not PASSWORD:
     raise RuntimeError(
@@ -226,17 +227,26 @@ def authenticated_storage_state(
     """Login once per shard and reuse the resulting isolated authentication state."""
     auth_dir = tmp_path_factory.mktemp("playwright-auth")
     auth_file = auth_dir / "state.json"
-    auth_context = browser.new_context(
-        viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
-    )
-    auth_page = auth_context.new_page()
-    try:
-        if not LoginPage(auth_page).login(USERNAME, PASSWORD):
-            pytest.fail("Unable to create authenticated browser state")
-        auth_context.storage_state(path=str(auth_file))
-    finally:
-        auth_context.close()
-    return str(auth_file)
+    base_url = config_manager.base_url
+    for attempt in range(2):
+        auth_context = browser.new_context(
+            viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
+        )
+        auth_page = auth_context.new_page()
+        try:
+            if not LoginPage(auth_page).login(USERNAME, PASSWORD):
+                raise RuntimeError("登录流程未成功返回")
+            _assert_authenticated_page(auth_page, base_url, timeout=30000)
+            auth_context.storage_state(path=str(auth_file))
+            return str(auth_file)
+        except Exception as exc:
+            _capture_authentication_diagnostic(auth_page, f"storage-state-{attempt + 1}")
+            if attempt == 1:
+                pytest.fail(f"Unable to create authenticated browser state: {exc}")
+        finally:
+            auth_context.close()
+
+    raise AssertionError("unreachable")
 
 
 @pytest.fixture(scope="function")
@@ -253,17 +263,40 @@ def logged_in_page(page: Page) -> Page:
 
     This fixture is useful for tests that require authentication.
     """
+    base_url = get_config().base_url
     try:
-        page.goto(get_config().base_url, wait_until="domcontentloaded", timeout=60000)
+        _assert_authenticated_page(page, base_url, timeout=60000)
+    except Exception as exc:
+        _capture_authentication_diagnostic(page, "logged-in-page")
+        pytest.fail(f"认证状态无效，未进入业务页面: {exc}")
+    yield page
+
+
+def _assert_authenticated_page(page: Page, base_url: str, timeout: int) -> None:
+    """Navigate to the application and fail if the server redirects to login."""
+    try:
+        page.goto(base_url, wait_until="domcontentloaded", timeout=timeout)
     except PlaywrightTimeoutError:
         # The ERP shell may keep loading analytics/polling resources after the
-        # application DOM is ready. Continue only when the page has reached
-        # the expected application URL; otherwise preserve a real failure.
-        if "/login" in page.url or not page.url.startswith(get_config().base_url.rstrip("/")):
-            raise
-    if "/login" in page.url:
-        pytest.fail("Cached authentication state is invalid")
-    yield page
+        # application DOM is ready; URL validation below remains authoritative.
+        pass
+    page.wait_for_timeout(1000)
+    if "/login" in page.url.lower():
+        raise RuntimeError(f"页面被重定向到登录页: {page.url}")
+    if base_url and not page.url.startswith(base_url.rstrip("/")):
+        raise RuntimeError(f"页面未停留在目标应用: {page.url}")
+
+
+def _capture_authentication_diagnostic(page: Page, label: str) -> None:
+    """Capture non-sensitive authentication failure evidence under runtime reports."""
+    try:
+        RUNTIME_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = RUNTIME_SCREENSHOTS_DIR / f"authentication-{label}-{uuid.uuid4().hex[:8]}.png"
+        page.screenshot(path=str(path), full_page=True)
+        with (RUNTIME_REPORTS_DIR / "authentication-failure.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps({"label": label, "url": page.url}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 @pytest.fixture(scope="function")
