@@ -25,6 +25,7 @@ build/
 !.runtime/.keep
 !.runtime/**/
 !.runtime/**/.keep
+.runtime/tmp/**
 test_*.xlsx
 htmlcov/
 .coverage

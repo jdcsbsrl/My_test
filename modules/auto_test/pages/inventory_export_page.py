@@ -13,6 +13,17 @@ logger = get_logger()
 
 
 class InventoryExportPage(BasePage):
+    FIELD_GROUPS = {
+        "sku编码": "商品信息",
+        "产品名称": "商品信息",
+        "产品图片": "商品信息",
+        "主SKU编码": "商品信息",
+        "英文名称": "商品信息",
+        "品牌": "商品信息",
+        "等级": "商品信息",
+        "产品描述": "商品信息",
+    }
+
     def __init__(self, page: Page) -> None:
         super().__init__(page)
 
@@ -74,6 +85,48 @@ class InventoryExportPage(BasePage):
         except Exception as exc:
             logger.warning("导出字段列表未在超时时间内渲染: {}", exc)
             return False
+
+    def _activate_field_group(self, field_name: str) -> bool:
+        """展开或激活字段分组，使分组内的叶子字段进入可见 DOM。"""
+        group_name = self.FIELD_GROUPS.get(field_name)
+        if not group_name:
+            return False
+        return bool(
+            self.page.evaluate(
+                """
+                (groupName) => {
+                    const normalize = value => (value || '').replace(/\\s+/g, '');
+                    const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0
+                            && style.visibility !== 'hidden' && style.display !== 'none';
+                    };
+                    const exact = element => normalize(element.textContent) === normalize(groupName);
+                    const candidates = Array.from(document.querySelectorAll(
+                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, '
+                        '.el-checkbox, label, .tag_item'
+                    )).filter(element => visible(element) && exact(element));
+                    const target = candidates.find(element =>
+                        element.matches('button, [role="tab"], [role="treeitem"], .el-collapse-item__header')
+                        || element.querySelector(
+                            'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, '
+                            + '.el-checkbox__label'
+                        )
+                    ) || candidates[0];
+                    if (!target) return false;
+                    const clickable = target.querySelector(
+                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, '
+                        + '[aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down, '
+                        + '.el-tree-node__expand-icon'
+                    ) || target;
+                    clickable.click();
+                    return true;
+                }
+                """,
+                group_name,
+            )
+        )
 
     def is_on_export_page(self) -> bool:
         return "exportPage" in self.page.url
@@ -230,7 +283,7 @@ class InventoryExportPage(BasePage):
             logger.warning(f"清空字段失败: {e}")
 
     @allure.step("选择指定字段: {field_name}")
-    def select_field(self, field_name: str) -> bool:
+    def select_field(self, field_name: str, _allow_group_activation: bool = True) -> bool:
         try:
             if not self.wait_for_field_options():
                 logger.warning("选择字段前导出字段列表未加载: {}", field_name)
@@ -278,6 +331,9 @@ class InventoryExportPage(BasePage):
                 self.wait_for_loading_complete(timeout=10000)
                 logger.info("宸查€夋嫨瀛楁: {} -> {}", field_name, result)
                 return True
+            if _allow_group_activation and self._activate_field_group(field_name):
+                self.wait_for_loading_complete(timeout=10000)
+                return self.select_field(field_name, _allow_group_activation=False)
             field_label = self.page.locator(f'.el-checkbox__label:has-text("{field_name}")').first
             if field_label.count() > 0:
                 field_label.click(force=True)

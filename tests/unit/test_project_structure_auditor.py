@@ -65,6 +65,28 @@ def test_bare_relative_write_path_is_warning(tmp_path):
     assert auditor.warnings[0]["type"] == "bare_relative_write_path"
 
 
+def test_empty_workspace_skeleton_does_not_warn(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".gitkeep").write_text("", encoding="utf-8")
+    auditor = auditor_for(tmp_path)
+
+    auditor._check_workspace_structure()
+
+    assert not auditor.warnings
+
+
+def test_nonempty_workspace_without_date_dir_warns(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "unexpected.txt").write_text("artifact", encoding="utf-8")
+    auditor = auditor_for(tmp_path)
+
+    auditor._check_workspace_structure()
+
+    assert any(warning["type"] == "no_date_dirs" for warning in auditor.warnings)
+
+
 def test_exit_codes_distinguish_pass_warning_and_blocking(tmp_path):
     auditor = auditor_for(tmp_path)
     assert auditor.exit_code() == 0

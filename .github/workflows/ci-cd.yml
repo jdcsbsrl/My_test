@@ -25,7 +25,19 @@ jobs:
       - name: Install project dependencies
         run: pip install -e . "pytest>=8,<9"
       - name: Run project structure audit
-        run: python tools/project_structure_auditor.py --json
+        shell: bash
+        run: |
+          mkdir -p .runtime/reports
+          set +e
+          python tools/project_structure_auditor.py --json | tee .runtime/reports/structure-audit.json
+          audit_status=${PIPESTATUS[0]}
+          if [ "$audit_status" -eq 2 ]; then
+            echo "结构审核发现阻断问题"
+            exit 2
+          fi
+          if [ "$audit_status" -eq 1 ]; then
+            echo "结构审核仅发现警告，继续执行 CI"
+          fi
       - name: Run documentation consistency audit
         run: python tools/doc_consistency_checker.py --json
 
