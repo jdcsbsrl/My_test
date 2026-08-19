@@ -219,6 +219,16 @@ class FakePage:
         return "Page Title"
 
 
+class FakeEvaluatePage(FakePage):
+    def __init__(self):
+        super().__init__()
+        self.evaluated_scripts = []
+
+    def evaluate(self, script, *args):
+        self.evaluated_scripts.append((script, args))
+        return True
+
+
 class TestBaseAndExportPage:
     def test_base_page_wrappers_and_navigation(self, monkeypatch):
         monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test/index"))
@@ -272,6 +282,17 @@ class TestBaseAndExportPage:
         monkeypatch.setattr(login_page, "has_username_input", lambda timeout=5000: True)
 
         login_page.verify_login_page()
+
+    def test_inventory_field_group_script_has_valid_selector_literals(self):
+        page = FakeEvaluatePage()
+        export_page = InventoryExportPage(page)
+
+        assert export_page._activate_field_group("产品名称")
+        script, args = page.evaluated_scripts[-1]
+
+        assert args == ("商品信息",)
+        assert "el-collapse-item__header, .el-checkbox, label, .tag_item" in script
+        assert "[aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down" in script
 
     def test_export_page_success_and_fallback_paths(self, monkeypatch, tmp_path):
         monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
