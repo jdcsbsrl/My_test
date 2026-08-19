@@ -1,3 +1,11 @@
+---
+title: trae_test 模块工作流程
+purpose: 测试用例生成、优化、审核和交付
+version: 3.0.0
+updated: 2026-08-18
+authority: 专项规范
+---
+
 # trae_test 模块工作流程
 
 ## 模块定位
@@ -206,7 +214,7 @@ generator.export_to_excel(cases, output_path)
 - 有需求ID：`需求1001236销售订单SKU图片显示.xlsx`
 - 无需求ID：`需求销售订单导出时间优化.xlsx`
 
-**输出路径**：`workspace/YYYYMMDD/`
+**输出路径**：`workspace/YYYYMMDD/`，日期目录下不再创建 `formal/`、`draft/` 等子目录。
 
 示例：
 - `workspace/20260513/需求1001236销售订单SKU图片显示.xlsx`

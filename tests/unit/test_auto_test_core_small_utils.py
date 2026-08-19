@@ -69,7 +69,7 @@ class TestHarnessMetrics:
         assert not metrics_enabled()
 
     def test_default_metrics_path(self, tmp_path):
-        assert default_metrics_path(tmp_path) == tmp_path / "reports" / "harness_metrics" / "events.jsonl"
+        assert default_metrics_path(tmp_path) == tmp_path / ".runtime" / "reports" / "harness_metrics" / "events.jsonl"
 
     def test_recorder_writes_to_stream_and_file(self, tmp_path):
         recorder = HarnessMetricsRecorder(tmp_path / "events.jsonl")

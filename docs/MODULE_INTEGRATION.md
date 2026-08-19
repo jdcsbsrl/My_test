@@ -104,7 +104,7 @@
       "status": "FAIL",
       "actual_result": "订单创建失败：商品库存不足",
       "execution_time": 892,
-      "screenshot": "screenshots/fail_TC-SALES-002.png"
+      "screenshot": ".runtime/reports/screenshots/fail_TC-SALES-002.png"
     }
   ],
   "summary": {

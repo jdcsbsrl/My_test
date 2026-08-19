@@ -879,7 +879,7 @@ class KnowledgeRetriever:
         return results[:top_k]
 
     def _search_workspace_excel(self, keyword: str, top_k: int) -> list[dict[str, Any]]:
-        """从 workspace/ 目录下最近30天的 Excel 中检索，兼容旧 formal/draft 子目录"""
+        """从 workspace/YYYYMMDD/ 目录下最近30天的 Excel 中检索。"""
         from datetime import datetime, timedelta
 
         project_root = find_project_root(__file__)
@@ -892,14 +892,10 @@ class KnowledgeRetriever:
         cutoff = datetime.now() - timedelta(days=30)
         keyword_lower = keyword.lower()
 
-        # 扫描 workspace/YYYYMMDD/*.xlsx，并兼容历史 workspace/YYYYMMDD/formal|draft/*.xlsx
+        # 只扫描 workspace/YYYYMMDD/*.xlsx，日期目录下不再使用子目录。
         from .excel_generator import ExcelGenerator
 
-        patterns = [
-            os.path.join(workspace_dir, "[0-9]" * 8, "*.xlsx"),
-            os.path.join(workspace_dir, "[0-9]" * 8, "formal", "*.xlsx"),
-            os.path.join(workspace_dir, "[0-9]" * 8, "draft", "*.xlsx"),
-        ]
+        patterns = [os.path.join(workspace_dir, "[0-9]" * 8, "*.xlsx")]
         excel_paths = sorted(
             {path for pattern in patterns for path in glob_mod.iglob(pattern, recursive=True)},
             reverse=True,

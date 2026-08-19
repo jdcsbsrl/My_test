@@ -70,7 +70,7 @@ class ExcelGenerator:
 
     # 模板文件路径（通过项目标记文件推断）
     TEMPLATE_PATH = str(
-        Path(WorkspaceManager._find_project_root(__file__)) / "assets" / "templates" / "测试用例模板.xlsx"
+        Path(WorkspaceManager._find_project_root(__file__)) / "fixtures" / "templates" / "测试用例模板.xlsx"
     )
 
     # 文件大小限制（10MB）

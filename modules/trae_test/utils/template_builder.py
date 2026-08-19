@@ -1,6 +1,6 @@
 """测试用例Excel模板构建器
 
-历史上模板文件`assets/templates/测试用例模板.xlsx`被当作手工维护的二进制资产，
+历史上模板文件`fixtures/templates/测试用例模板.xlsx`被当作手工维护的二进制资产，
 新机器 clone 后常常缺失，导致 test_case_generator / test_artifact_generator 直接抛错。
 
 本模块严格对齐知识库《测试用例模板与优先级规则》（assets/knowledge_base/测试规范/测试用例模板与优先级规则.json）规定的 15 字段（11 导入 + 4 扩展），
@@ -54,9 +54,9 @@ COLUMN_WIDTHS = {
 
 
 def get_default_template_path() -> str:
-    """返回项目内约定的模板路径（assets/templates/测试用例模板.xlsx）"""
+    """返回项目内约定的模板路径（fixtures/templates/测试用例模板.xlsx）"""
     here = os.path.dirname(__file__)
-    template_path = os.path.join(here, "..", "..", "assets", "templates", "测试用例模板.xlsx")
+    template_path = os.path.join(here, "..", "..", "fixtures", "templates", "测试用例模板.xlsx")
     return os.path.normpath(template_path)
 
 
