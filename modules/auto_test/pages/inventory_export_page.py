@@ -133,18 +133,35 @@ class InventoryExportPage(BasePage):
                     const candidates = Array.from(document.querySelectorAll(
                         'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, .el-checkbox, label, .tag_item'
                     )).filter(element => visible(element) && exact(element));
-                    const target = candidates.find(element =>
-                        element.matches('button, [role="tab"], [role="treeitem"], .el-collapse-item__header')
-                        || element.querySelector(
-                            'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, .el-checkbox__label'
-                        )
-                    ) || candidates[0];
-                    if (!target) return false;
-                    const clickable = target.querySelector(
-                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, [aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down, .el-tree-node__expand-icon'
-                    ) || target;
-                    clickable.click();
-                    return true;
+                    if (!candidates.length) return false;
+                    const expandableSelector = [
+                        '[aria-expanded]',
+                        'button',
+                        '[role="tab"]',
+                        '[role="treeitem"]',
+                        '.el-collapse-item__header',
+                        '.el-tree-node__content',
+                        '.el-icon-arrow-right',
+                        '.el-icon-arrow-down',
+                        '.el-tree-node__expand-icon'
+                    ].join(', ');
+                    for (const candidate of candidates) {
+                        const controls = [
+                            candidate.querySelector(expandableSelector),
+                            candidate.closest(expandableSelector),
+                            candidate.parentElement && candidate.parentElement.querySelector(expandableSelector),
+                            candidate
+                        ].filter(Boolean);
+                        const control = controls.find(element => {
+                            const expanded = element.getAttribute('aria-expanded');
+                            return expanded === 'false' || expanded === null;
+                        });
+                        if (control) {
+                            control.click();
+                            return true;
+                        }
+                    }
+                    return false;
                 }
                 """,
                 group_name,

@@ -296,7 +296,8 @@ class TestBaseAndExportPage:
 
         assert args == ("商品信息",)
         assert "el-collapse-item__header, .el-checkbox, label, .tag_item" in script
-        assert "[aria-expanded], .el-icon-arrow-right, .el-icon-arrow-down" in script
+        assert "'[aria-expanded]'" in script
+        assert "'.el-icon-arrow-right'" in script
 
     def test_inventory_field_selection_waits_for_leaf_after_group_activation(self, monkeypatch):
         page = FakeEvaluatePage()

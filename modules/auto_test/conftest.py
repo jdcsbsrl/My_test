@@ -267,8 +267,17 @@ def logged_in_page(page: Page) -> Page:
     try:
         _assert_authenticated_page(page, base_url, timeout=60000)
     except Exception as exc:
-        _capture_authentication_diagnostic(page, "logged-in-page")
-        pytest.fail(f"认证状态无效，未进入业务页面: {exc}")
+        # 服务端可能在分片运行期间使 storage state 失效；仅在当前
+        # 隔离 context 内重登录一次，避免把瞬时会话失效扩大为整组级联失败。
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning("认证状态失效，尝试在当前 context 重新登录: %s", exc)
+        try:
+            if not LoginPage(page).login(USERNAME, PASSWORD):
+                raise RuntimeError("重新登录未成功返回")
+            _assert_authenticated_page(page, base_url, timeout=30000)
+        except Exception as retry_exc:
+            _capture_authentication_diagnostic(page, "logged-in-page")
+            pytest.fail(f"认证状态无效，重新登录失败: {retry_exc}")
     yield page
 
 
