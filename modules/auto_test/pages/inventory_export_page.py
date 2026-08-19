@@ -104,8 +104,7 @@ class InventoryExportPage(BasePage):
                     };
                     const exact = element => normalize(element.textContent) === normalize(groupName);
                     const candidates = Array.from(document.querySelectorAll(
-                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, '
-                        '.el-checkbox, label, .tag_item'
+                        'button, [role="tab"], [role="treeitem"], .el-collapse-item__header, .el-checkbox, label, .tag_item'
                     )).filter(element => visible(element) && exact(element));
                     const target = candidates.find(element =>
                         element.matches('button, [role="tab"], [role="treeitem"], .el-collapse-item__header')
