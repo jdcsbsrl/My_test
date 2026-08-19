@@ -358,7 +358,7 @@ def test_search_workspace_excel_reads_recent_date_workbooks(tmp_path, monkeypatc
     assert retriever._search_workspace_excel("order", top_k=1)[0]["source"] == "workspace:cases.xlsx"
 
 
-def test_search_workspace_excel_keeps_legacy_formal_compatibility(tmp_path, monkeypatch):
+def test_search_workspace_excel_ignores_legacy_formal_directory(tmp_path, monkeypatch):
     from modules.trae_test.utils.excel_generator import ExcelGenerator
 
     retriever, _ = _retriever(tmp_path)
@@ -373,7 +373,7 @@ def test_search_workspace_excel_keeps_legacy_formal_compatibility(tmp_path, monk
         lambda path: [{"case_name": "order legacy", "steps": "open order", "expected_result": "done"}],
     )
 
-    assert retriever._search_workspace_excel("order", top_k=1)[0]["source"] == "workspace:legacy.xlsx"
+    assert retriever._search_workspace_excel("order", top_k=1) == []
 
 
 def test_search_db_disabled_and_enabled_session_paths(tmp_path, monkeypatch):

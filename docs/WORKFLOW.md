@@ -54,6 +54,8 @@ Test ERP 是一个集成了测试用例生成和自动化测试执行的完整�
 
 ## 知识访问控制
 
+所有模块统一通过 `modules/trae_test/utils/knowledge_retriever.py` 的 `KnowledgeRetriever` API 访问知识库。下表是检索任务的逻辑范围和优先级，不代表模块可以绕过 API 直接读取物理文件。
+
 ### 模块访问权限
 
 | 模块 | 可访问知识库 |

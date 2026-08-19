@@ -96,7 +96,7 @@ class TestCaseStrategy:
         """获取策略配置文件路径"""
         from pathlib import Path
 
-        return str(Path(__file__).resolve().parent.parent.parent.parent / "assets" / "configs" / "strategy_config.yaml")
+        return str(Path(__file__).resolve().parents[3] / "configs" / "strategy_config.yaml")
 
     def _load_keywords_from_config(self):
         """从 YAML 配置文件加载关键词列表，加载失败时使用内置关键词

@@ -435,7 +435,7 @@ class TestKnowledgeRetrieverRegression:
 
         # 保存报告到文件
         report_path = os.path.join(
-            os.path.dirname(__file__), "..", "reports", "knowledge_retriever_regression_test_report.txt"
+            os.path.dirname(__file__), "..", ".runtime", "reports", "knowledge_retriever_regression_test_report.txt"
         )
         os.makedirs(os.path.dirname(report_path), exist_ok=True)
 
