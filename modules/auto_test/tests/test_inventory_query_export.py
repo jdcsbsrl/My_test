@@ -214,7 +214,6 @@ class TestInventoryExport:
                 print(f"{i+1:2d}. {' | '.join(row_values)}")
 
         sku_page.select_export_current_search()
-        sku_page.wait_for_search_results()
 
         exported = export_page.wait_for_export_page(timeout=30000)
         assert exported, "未成功跳转到导出页面"

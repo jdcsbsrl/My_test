@@ -309,7 +309,8 @@ class ProjectStructureAuditor:
             )
             return
 
-        # 检查日期子目录
+        # 检查日期子目录。CI 的全新 checkout 可能只有 .gitkeep，
+        # 这种空骨架是合法状态，不应因为尚未产生交付物而报警。
         date_dirs = []
         for item in os.listdir(workspace_path):
             item_path = os.path.join(workspace_path, item)
@@ -331,6 +332,13 @@ class ProjectStructureAuditor:
                             "message": f"workspace日期目录下禁止创建 {child}/ 子目录",
                         })
         else:
+            meaningful_entries = [
+                item for item in os.listdir(workspace_path) if item not in {".gitkeep", ".keep"}
+            ]
+            if not meaningful_entries:
+                print("  [OK] workspace为空骨架，等待首个日期目录")
+                print()
+                return
             self.warnings.append(
                 {"type": "no_date_dirs", "path": "workspace", "message": "workspace目录没有日期子目录"}
             )
