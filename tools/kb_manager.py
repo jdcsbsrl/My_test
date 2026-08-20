@@ -341,8 +341,11 @@ class KnowledgeBaseManager:
             迁移结果
         """
         import shutil
+        import tempfile
 
         result = {"success": False, "source_path": source_path, "target_path": "", "processed": None, "error": ""}
+        previous_target = None
+        previous_backup = None
 
         try:
             if not os.path.exists(source_path):
@@ -360,6 +363,11 @@ class KnowledgeBaseManager:
             target_path = os.path.join(self.monitor.ORIGINAL_DIR, target_filename)
 
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            if os.path.exists(target_path):
+                previous_target = target_path
+                fd, previous_backup = tempfile.mkstemp(prefix="kb-migrate-", suffix=source_ext)
+                os.close(fd)
+                shutil.copy2(target_path, previous_backup)
             shutil.copy2(source_path, target_path)
             result["target_path"] = target_path
 
@@ -372,6 +380,11 @@ class KnowledgeBaseManager:
                     result["success"] = False
                     result["error"] = registry_result.get("error", "注册表更新失败")
                     result["registry"] = registry_result
+            if not result["success"]:
+                if previous_backup:
+                    shutil.copy2(previous_backup, previous_target)
+                elif os.path.exists(target_path):
+                    os.unlink(target_path)
 
             # 接入审核：迁移完成后执行审核
             audit_input = {
@@ -394,8 +407,15 @@ class KnowledgeBaseManager:
             return result
 
         except Exception as e:
+            if previous_backup and previous_target:
+                shutil.copy2(previous_backup, previous_target)
+            elif result.get("target_path") and os.path.exists(result["target_path"]):
+                os.unlink(result["target_path"])
             result["error"] = str(e)
             return result
+        finally:
+            if previous_backup and os.path.exists(previous_backup):
+                os.unlink(previous_backup)
 
     def _audit_verification_result(self, verification_result: dict) -> bool:
         """将完整性验证结果包装为统一 AuditResult 并执行审核

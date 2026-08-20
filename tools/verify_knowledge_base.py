@@ -136,7 +136,20 @@ class KnowledgeBaseVerifier:
             if len(chunk_files) == 0:
                 result["details"]["status"] = "no_chunks"
                 result["details"]["message"] = "文件未分割，直接验证原始文件"
-                result["passed"] = True
+                if original_file_path.lower().endswith(".md"):
+                    with open(original_file_path, encoding="utf-8") as f:
+                        text = f.read()
+                    result["details"]["content_size"] = len(text)
+                    result["details"]["content_hash"] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+                    result["passed"] = bool(text.strip())
+                    if not result["passed"]:
+                        result["error"] = "Markdown 文件为空"
+                else:
+                    try:
+                        self._load_and_normalize(original_file_path)
+                        result["passed"] = True
+                    except Exception as exc:
+                        result["error"] = f"原始 JSON 无法解析: {exc}"
                 return result
 
             temp_dir = tempfile.mkdtemp()
@@ -196,7 +209,7 @@ class KnowledgeBaseVerifier:
 
         if os.path.exists(self.ORIGINAL_DIR):
             for filename in os.listdir(self.ORIGINAL_DIR):
-                if filename.endswith(".json"):
+                if filename.lower().endswith((".json", ".md")):
                     file_path = os.path.join(self.ORIGINAL_DIR, filename)
                     file_result = self.verify_file(file_path)
                     result["file_results"].append(file_result)
