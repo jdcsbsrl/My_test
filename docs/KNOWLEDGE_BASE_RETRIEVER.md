@@ -95,7 +95,7 @@ python tools/kb_manager.py migrate --source path/to/source.json
 # 处理已存在的知识文件（分割+索引）
 python tools/kb_manager.py process --file assets/knowledge_base/data/original/file_title.json
 
-# 扫描知识库并刷新注册表/索引
+# 扫描知识库状态（不隐式重建索引）
 python tools/kb_manager.py scan
 
 # 验证迁移后是否可通过检索命中

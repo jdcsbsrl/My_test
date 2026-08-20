@@ -440,6 +440,24 @@ class KnowledgeRetriever:
             if keyword_lower in title or keyword_lower in classification:
                 candidate_files.append(file_info)
 
+        # Prefer indexed chunk sources when metadata is not selective enough.
+        # This keeps the existing rule-level verification while avoiding a
+        # full-file scan for terms already present in the inverted index.
+        if not candidate_files:
+            indexed_hits = self.search_by_inverted_index(keyword, top_k=100)
+            source_names = {os.path.basename(hit.get("source_file", "")) for hit in indexed_hits}
+            if source_names:
+                candidate_files = [
+                    file_info
+                    for file_info in self._rule_file_index
+                    if any(
+                        name.startswith(os.path.splitext(os.path.basename(file_info["original_path"]))[0])
+                        for name in source_names
+                    )
+                ]
+                if candidate_files:
+                    logger.info("关键词 '%s' 通过倒排索引定位到 %d 个候选文件", keyword, len(candidate_files))
+
         if not candidate_files:
             logger.warning(
                 "关键词 '%s' 未匹配到任何文件元数据，降级为全量规则扫描（%d 个文件）",
@@ -513,7 +531,15 @@ class KnowledgeRetriever:
         global_index_path = os.path.join(self.knowledge_base_dir, "index", "global", "global_index.json")
         if os.path.exists(global_index_path):
             with open(global_index_path, encoding="utf-8") as f:
-                return json.load(f)
+                index = json.load(f)
+            registry_ids = set(self.list_available_files())
+            index_ids = {item.get("file_id") for item in index.get("files", []) if isinstance(item, dict)}
+            index["index_status"] = {
+                "valid": registry_ids == index_ids,
+                "missing_files": sorted(registry_ids - index_ids),
+                "stale_files": sorted(index_ids - registry_ids),
+            }
+            return index
 
         legacy_index_path = os.path.join(self.knowledge_base_dir, "index.json")
         if os.path.exists(legacy_index_path):
@@ -967,6 +993,16 @@ class KnowledgeRetriever:
             prefix = kw_lower[:i]
             if prefix in index_data and prefix != keyword and prefix != kw_upper:
                 results.extend(index_data[prefix])
+
+        # Chinese business terms are often embedded in a longer indexed
+        # phrase (for example, "修改告警任务"). Use the index keys as the
+        # bounded fallback before scanning knowledge files.
+        if not results:
+            for indexed_key, entries in index_data.items():
+                if kw_lower in indexed_key.lower():
+                    results.extend(entries)
+                    if len(results) >= top_k * 5:
+                        break
 
         if not results:
             return []
