@@ -2,6 +2,9 @@
 
 from modules.trae_test.orchestrator.audit_engine import AuditEngine, AuditType
 from modules.trae_test.orchestrator.audit_models import AuditResult
+from modules.trae_test.utils.template_builder import ALL_FIELDS
+from modules.trae_test.utils.excel_generator import ExcelGenerator
+from openpyxl import Workbook
 
 
 class TestAuditEngine:
@@ -56,3 +59,27 @@ class TestAuditEngine:
         engine._audit_file_path(str(path), result)
 
         assert [issue for issue in result.issues if issue.rule_id == "FILE_PATH_INVALID"]
+
+    def test_excel_all_audit_runs_business_auditor_after_structure_validation(self, tmp_path, monkeypatch):
+        """Excel路径的ALL审核不能只校验表头，必须继续执行用例业务审核。"""
+        path = tmp_path / "workspace" / "20260727" / "需求demo.xlsx"
+        path.parent.mkdir(parents=True)
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(ALL_FIELDS)
+        sheet.append(["产品 - 产品中心 - 库存SKU", "库存SKU用例", "100", "条件", "步骤", "结果", "功能", "正常", "中", "测试人", "P1", "是", "是", "库存知识", 90])
+        workbook.save(path)
+        monkeypatch.setattr(ExcelGenerator, "validate_excel", staticmethod(lambda _path: (True, "")))
+
+        class FakeAuditor:
+            def audit(self, *_args, **_kwargs):
+                result = AuditResult()
+                result.add_error("REQ_COVERAGE_INCOMPLETE", "覆盖矩阵缺失", "需求级覆盖")
+                return result
+
+        engine = AuditEngine()
+        monkeypatch.setattr(engine, "_get_auditor", lambda auditor_type: FakeAuditor())
+        result = engine.audit(str(path), AuditType.ALL)
+
+        assert any(issue.rule_id == "REQ_COVERAGE_INCOMPLETE" for issue in result.issues)
+        assert result.passed is False

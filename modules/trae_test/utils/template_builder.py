@@ -4,7 +4,7 @@
 新机器 clone 后常常缺失，导致 test_case_generator / test_artifact_generator 直接抛错。
 
 本模块严格对齐知识库《测试用例模板与优先级规则》（assets/knowledge_base/测试规范/测试用例模板与优先级规则.json）规定的 15 字段（11 导入 + 4 扩展），
-铁律："模板没有的字段绝对不能出现"、"禁止额外字段"、"优先级绝对必须在最后一列"。
+铁律："模板没有的字段绝对不能出现"、"禁止额外字段"、"质量评分必须在第15列"。
 
 所有 generator 在写入数据前都应先调用 `ensure_template()`，确保模板链路永远可用。
 """
@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 IMPORT_FIELDS: list[str] = [
     "用例目录",
@@ -28,9 +29,9 @@ IMPORT_FIELDS: list[str] = [
 ]
 EXTENSION_FIELDS: list[str] = [
     "是否可自动化",
-    "关联缺陷ID",
     "回归测试标识",
     "知识库关联",
+    "质量评分",
 ]
 ALL_FIELDS: list[str] = IMPORT_FIELDS + EXTENSION_FIELDS
 
@@ -47,25 +48,24 @@ COLUMN_WIDTHS = {
     "创建人": 12,
     "优先级": 8,
     "是否可自动化": 12,
-    "关联缺陷ID": 12,
     "回归测试标识": 15,
     "知识库关联": 15,
+    "质量评分": 12,
 }
 
 
 def get_default_template_path() -> str:
     """返回项目内约定的模板路径（fixtures/templates/测试用例模板.xlsx）"""
-    here = os.path.dirname(__file__)
-    template_path = os.path.join(here, "..", "..", "fixtures", "templates", "测试用例模板.xlsx")
-    return os.path.normpath(template_path)
+    project_root = Path(__file__).resolve().parents[3]
+    return str(project_root / "fixtures" / "templates" / "测试用例模板.xlsx")
 
 
 def _template_header_matches(template_path: str) -> bool:
     """校验磁盘上的模板表头是否与当前 ALL_FIELDS 完全一致
 
-    历史上曾错误扩展为 18 字段（自动化难度 / 数据影响评估 / 具体影响说明），
-    违反知识库铁律，已回滚至 15 字段。若磁盘模板与当前 ALL_FIELDS 不一致
-    则触发重建，保证交付物永远符合规范。
+    历史上曾错误扩展为 16/18 字段（包含关联缺陷ID或其他评估字段），
+    当前契约固定为15字段。若磁盘模板与当前 ALL_FIELDS 不一致
+    则拒绝继续，保证交付物永远符合规范且不覆盖现有资产。
     """
     try:
         from openpyxl import load_workbook
@@ -76,7 +76,10 @@ def _template_header_matches(template_path: str) -> bool:
     try:
         wb = load_workbook(template_path, read_only=True)
         ws = wb["测试用例"]
-        header = [ws.cell(row=1, column=c).value for c in range(1, len(ALL_FIELDS) + 1)]
+        width = max(ws.max_column, len(ALL_FIELDS))
+        header = [ws.cell(row=1, column=c).value for c in range(1, width + 1)]
+        while header and header[-1] in (None, ""):
+            header.pop()
         return header == ALL_FIELDS
     except Exception:
         return False
@@ -92,7 +95,7 @@ def ensure_template(template_path: str | None = None) -> str:
     """确保模板文件存在且表头字段与最新 ALL_FIELDS 对齐
 
     - 模板不存在：按知识库规定的 15 字段生成
-    - 模板存在但表头不匹配（含历史错误的 18 字段）：删除重建
+    - 模板存在但表头不匹配（含历史错误的 16/18 字段）：拒绝继续，避免静默覆盖资产
     - 模板存在且字段一致：直接返回
 
     Args:
@@ -107,14 +110,12 @@ def ensure_template(template_path: str | None = None) -> str:
     if template_path is None:
         template_path = get_default_template_path()
 
-    if os.path.exists(template_path):
+    if Path(template_path).exists():
         if _template_header_matches(template_path):
             return template_path
-        # 表头过期：删除重建
-        try:
-            os.remove(template_path)
-        except OSError:
-            pass
+        raise ValueError(
+            f"模板表头不符合15字段契约，拒绝覆盖现有文件: {template_path}"
+        )
 
     try:
         from openpyxl import Workbook
@@ -122,7 +123,8 @@ def ensure_template(template_path: str | None = None) -> str:
     except ImportError as exc:
         raise ImportError("请先安装 openpyxl：uv add openpyxl") from exc
 
-    os.makedirs(os.path.dirname(template_path), exist_ok=True)
+    target = Path(template_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
 
     wb = Workbook()
     ws = wb.active
@@ -143,5 +145,5 @@ def ensure_template(template_path: str | None = None) -> str:
     ws.row_dimensions[1].height = 28
     ws.freeze_panes = "A2"
 
-    wb.save(template_path)
-    return template_path
+    wb.save(target)
+    return str(target)

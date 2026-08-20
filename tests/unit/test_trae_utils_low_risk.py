@@ -7,7 +7,8 @@ from modules.trae_test.utils import dir_validator
 from modules.trae_test.utils.business_rule_parser import BusinessRuleParser, parse_knowledge
 from modules.trae_test.utils.excel_generator import ExcelGenerator
 from modules.trae_test.utils.metadata_manager import MetadataManager
-from modules.trae_test.utils.template_builder import ensure_template
+from modules.trae_test.utils.template_builder import ALL_FIELDS, ensure_template, get_default_template_path
+from modules.trae_test.utils.test_case_generator import TestCaseGenerator
 from modules.trae_test.utils.workspace_manager import WorkspaceManager
 
 
@@ -18,6 +19,11 @@ def _case(**overrides):
     case = ExcelGenerator.create_empty_case(case_name="case name")
     case.update(overrides)
     return case
+
+
+def test_directory_matching_uses_leaf_menu_to_resolve_full_hierarchy():
+    hierarchy = {"产品": {"产品中心": ["主SKU", "库存SKU"]}}
+    assert TestCaseGenerator._match_case_directory("库存SKU 批量加入采购计划", hierarchy) == "产品 - 产品中心 - 库存SKU"
 
 
 class TestBusinessRuleParser:
@@ -231,14 +237,24 @@ class TestTemplateBuilderAndExcelGenerator:
 
         assert result == str(template_path)
         assert template_path.exists()
-        assert ExcelGenerator.validate_excel(str(template_path))[0] is False
+        from openpyxl import load_workbook
 
-    def test_generate_new_writes_cases_extra_fields_and_validation_passes(self, tmp_path, monkeypatch):
+        wb = load_workbook(template_path, read_only=True)
+        assert [cell.value for cell in wb["测试用例"][1]] == ALL_FIELDS
+        wb.close()
+        assert ExcelGenerator.validate_excel(str(template_path)) == (False, "Excel文件没有数据行")
+
+    def test_default_template_path_is_project_fixture(self):
+        path = Path(get_default_template_path())
+        assert path.parent.parent.name == "fixtures"
+        assert path.name == "测试用例模板.xlsx"
+
+    def test_generate_new_writes_only_standard_fields_and_validation_passes(self, tmp_path, monkeypatch):
         output = tmp_path / "cases.xlsx"
         monkeypatch.setattr(ExcelGenerator, "TEMPLATE_PATH", str(tmp_path / "missing-template.xlsx"))
-        cases = [_case(extra="value", **{"璐ㄩ噺璇勫垎": 91})]
+        cases = [_case(**{"质量评分": 91})]
 
-        path = ExcelGenerator.generate_excel(cases, requirement_name="demo", output_path=output, extra_fields=["extra"])
+        path = ExcelGenerator.generate_excel(cases, requirement_name="demo", output_path=output)
 
         assert path == str(output)
         assert ExcelGenerator.validate_excel(path) == (True, "")
@@ -262,13 +278,24 @@ class TestTemplateBuilderAndExcelGenerator:
 
         assert ExcelGenerator.execute(payload, requirement_name="demo") == str(output)
 
-    def test_validate_test_cases_fills_optional_quality_and_extra_fields(self):
+    def test_validate_test_cases_rejects_implicit_defaults_and_extra_fields(self):
         case = _case()
+        case.pop("质量评分")
 
-        ExcelGenerator._validate_test_cases([case], extra_fields=["custom"])
+        with pytest.raises(ValueError, match="质量评分"):
+            ExcelGenerator._validate_test_cases([case])
 
-        assert case[ExcelGenerator.STANDARD_FIELDS[-1]] == 0.0
-        assert case["custom"] == ""
+        with pytest.raises(ValueError, match="不允许"):
+            ExcelGenerator._validate_test_cases([_case()], extra_fields=["custom"])
+
+    def test_validate_test_cases_rejects_unknown_fields_and_types(self):
+        unknown = _case(unknown_field="value")
+        with pytest.raises(ValueError, match="未定义字段"):
+            ExcelGenerator._validate_test_cases([unknown])
+
+        wrong_score = _case(**{"质量评分": "91"})
+        with pytest.raises(ValueError, match="质量评分"):
+            ExcelGenerator._validate_test_cases([wrong_score])
 
     def test_validate_test_cases_rejects_empty_missing_field_and_empty_name(self):
         with pytest.raises(ValueError):
@@ -297,7 +324,7 @@ class TestTemplateBuilderAndExcelGenerator:
         assert too_large["success"] is False
 
     def test_batch_export_splits_cases(self, tmp_path):
-        results = ExcelGenerator.batch_export([_case(case_name=f"case {i}") for i in range(3)], str(tmp_path), batch_size=2)
+        results = ExcelGenerator.batch_export([_case(**{"用例名称": f"case {i}"}) for i in range(3)], str(tmp_path), batch_size=2)
 
         assert [result["cases_in_batch"] for result in results] == [2, 1]
         assert all(result["success"] for result in results)

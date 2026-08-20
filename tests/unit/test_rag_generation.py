@@ -48,7 +48,7 @@ def test_case_contains_points_scores_expected_points():
     assert hit_rate == 2 / 3
 
 
-def test_generation_evaluator_passes_local_case(monkeypatch):
+def test_generation_evaluator_blocks_low_quality_local_case(monkeypatch):
     monkeypatch.setenv("TEST_ENV", "test")
     evaluator = RAGGenerationEvaluator(
         generator=LocalRuleRAGCaseGenerator(retriever=StubRetriever()),
@@ -58,10 +58,14 @@ def test_generation_evaluator_passes_local_case(monkeypatch):
 
     result = evaluator.evaluate_one("客户余额不足能否付款", ["余额付款约束", "客户余额"])
 
-    assert result.audit_passed
+    assert result.audit_passed is False
     assert result.point_hit_rate == 1.0
-    assert result.quality_score >= 50
-    assert result.passed
+    assert result.quality_score < 85
+    assert result.original_score == 70
+    assert result.optimized_score == result.final_score
+    assert result.cold_start is True
+    assert result.optimization_attempts == 3
+    assert result.passed is False
 
 
 def test_self_hosted_llm_provider_requires_private_endpoint(monkeypatch):

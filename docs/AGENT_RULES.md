@@ -36,11 +36,13 @@ authority: 专项规范
 2. 检索相关业务规则知识库
 3. 分析业务流程和边界条件
 4. 按15字段模板生成测试用例
-5. 使用 `TestCaseScoreEngine` 对每条用例进行五维度质量评分
+5. 使用 `TestCaseScoreEngine` 对每条用例进行五维度质量评分；冷启动评分只能作为临时评分，不能单独作为最终交付依据。评分记录保留原始评分、优化后评分和最终评分
 6. 使用 `TestCaseOptimizer` 自动优化低分用例（补充步骤/预期结果/用例名称）
 7. 使用 `TestCaseRegenerationLoop` 执行自动重生闭环（最多3次，熔断保护）
-8. 标记 `needs_human_review` 的用例提交人工审查
+8. 标记 `needs_human_review` 的用例提交人工审查；`qualified` 仅为运行时评分状态，不得写入正式“用例状态”字段
 9. 导出优化后的测试用例 Excel，含质量评分列；JSON 仅作为运行时中间数据，不作为交付物
+
+运行时评分与覆盖矩阵必须使用 `_runtime_quality`、`_runtime_coverage_matrix` 命名空间保存，保留评分轨迹和覆盖缺口；不得将原始评分、优化后评分、最终评分、冷启动、置信度或覆盖矩阵扩展为正式Excel列。正式Excel表头始终严格保持15列，第15列为“质量评分”。
 
 **关键工具 v3.0**:
 | 工具 | 用途 |
@@ -222,25 +224,25 @@ IF 用户需求已明确
     │
     ├── THEN 使用 TestCaseScoreEngine 对每条用例评分
     │
-    │   IF 评分 < 70
+    │   IF 最终评分 < 85
     │       │
-    │       ├── THEN 使用 TestCaseOptimizer 优化该用例
+    │       ├── THEN 使用 TestCaseOptimizer 优化该用例，并补齐业务知识、页面对象、分点步骤和可验证结果
     │       │
     │       └── THEN 重新评分
     │
-    │   IF 优化后评分仍 < 70 且 未触发熔断
+    │   IF 优化后最终评分仍 < 85 且 未触发熔断
     │       │
     │       └── THEN 使用 TestCaseRegenerationLoop 执行自动重生
     │
-    │   IF 评分 >= 70
+    │   IF 最终评分 >= 85 且格式、业务内容审核均通过
     │       │
-    │       └── THEN 标记为合格用例
+    │       └── THEN 标记为合格用例；否则不得导出
     │
     │   IF needs_human_review = True
     │       │
     │       └── THEN 提交人工审查队列
     │
-    └── THEN 导出优化后的测试用例 Excel，含质量评分列
+    └── THEN 仅导出格式、业务内容和最终评分均通过的测试用例 Excel
 ```
 
 ### 4.2 AutoTestExecutor 工具调用决策
@@ -284,7 +286,7 @@ IF 测试环境配置有效
     ▼
 IF execution_count < 10（冷启动保护）
     │
-    └── THEN 使用静态维度评分（覆盖率30% + 完整性25% + 优先级20% + 可维护性10%）
+    └── THEN 使用静态维度评分并标记为临时评分（覆盖率30% + 完整性25% + 优先级20% + 可维护性10%）
         │
         └── 跳过可执行性维度（无执行历史数据）
     │
@@ -449,9 +451,9 @@ IF 同一用例在冷却期（3600秒）内重生次数 >= 3
 10. 创建人
 11. 优先级
 12. 是否可自动化
-13. 关联缺陷ID
-14. 回归测试标识
-15. 知识库关联
+13. 回归测试标识
+14. 知识库关联
+15. 质量评分
 
 ### 7.3 代码和工具管理规范
 
@@ -679,7 +681,7 @@ scorer = TestCaseScoreEngine()
 for case in test_cases:
     score = scorer.score(case)
     case['quality_score'] = score
-    case['needs_human_review'] = score < 70
+    case['needs_human_review'] = score < 85 or not case.get('business_audit_passed', False)
     
 # TC_001: 评分85 → 合格
 # TC_002: 评分65 → 需要优化
@@ -693,10 +695,10 @@ optimizer = TestCaseOptimizer()
 
 # 优化低分用例
 for case in test_cases:
-    if case['quality_score'] < 70:
+    if case['quality_score'] < 85:
         optimized_case = optimizer.optimize(case)
         case['quality_score'] = scorer.score(optimized_case)
-        # TC_002: 优化后评分75 → 合格
+        # TC_002: 优化后评分84 → 仍需优化，不得导出
 ```
 
 **Step 6: 自动重生（按需触发）**
@@ -706,7 +708,7 @@ loop = TestCaseRegenerationLoop()
 
 # 如果优化后仍不合格，触发重生（最多3次，熔断保护）
 for case in test_cases:
-    if case['quality_score'] < 70:
+    if case['quality_score'] < 85:
         regenerated = loop.regenerate(case)
         if regenerated:
             case = regenerated
@@ -721,7 +723,7 @@ for case in test_cases:
 from modules.trae_test.utils.excel_generator import ExcelGenerator
 excel_gen = ExcelGenerator()
 excel_gen.generate(test_cases, output_path="workspace/20260716/需求销售订单创建.xlsx")
-# 导出的Excel包含：15字段标准模板 + quality_score列 + needs_human_review列
+# 导出的Excel包含：标准15字段模板，质量评分为第15列；评分轨迹和审核状态仅保留在运行时
 ```
 
 **Step 8: AuditAgent审核**
@@ -732,7 +734,7 @@ AuditAgent审核
     ├── 文件位置：✓ workspace/20260716/
     ├── 文件格式：✓ .xlsx
     ├── Excel表头：✓ 15字段正确
-    ├── 质量评分字段：✓ quality_score列存在
+    ├── 质量评分字段：✓ 质量评分为第15列
     └── 审核通过 → 允许继续
 ```
 
@@ -827,8 +829,8 @@ report_gen.generate(test_results, ".runtime/reports/测试报告_销售订单创
 | 规则 | 触发条件 | 自动行为 |
 |------|----------|----------|
 | 评分规则 | 生成用例后 | 自动执行五维度评分 |
-| 优化规则 | 评分 < 70 | 自动调用TestCaseOptimizer |
-| 重生规则 | 优化后仍 < 70 | 自动执行重生闭环（最多3次） |
+| 优化规则 | 最终评分 < 85 | 自动调用TestCaseOptimizer |
+| 重生规则 | 优化后最终评分仍 < 85 | 自动执行重生闭环（最多3次） |
 | 熔断规则 | 重生次数 >= 3 | 触发熔断，标记needs_human_review |
 | 冷启动保护 | execution_count < 10 | 跳过可执行性维度，使用静态评分 |
 | 懒加载规则 | 文件大小 > 阈值 | DataLoader自动切换为懒加载模式 |

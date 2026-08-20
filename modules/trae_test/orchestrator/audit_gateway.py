@@ -106,9 +106,9 @@ class AuditGateway:
 
     # --- 便捷方法 ---
 
-    def audit_test_cases(self, test_cases: list[dict]) -> AuditResult:
+    def audit_test_cases(self, test_cases: list[dict], context: dict | None = None) -> AuditResult:
         """审核测试用例"""
-        return self.audit(test_cases, AuditType.TEST_CASE)
+        return self.audit(test_cases, AuditType.TEST_CASE, context or {})
 
     def audit_code(self, code: Any, language: str = "python") -> AuditResult:
         """审核代码"""

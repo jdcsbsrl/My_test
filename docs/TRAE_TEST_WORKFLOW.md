@@ -141,7 +141,7 @@ authority: 专项规范
    - 可执行性(15%)：是否可自动化
    - 可维护性(10%)：用例名称规范度
 2. 冷启动保护：执行次数 < 10 时仅用静态维度评分，触发人工审查
-3. 自动优化：分数 < 60 的用例由 TestCaseOptimizer 自动补充步骤和预期结果
+3. 自动优化：最终评分 < 85 的用例由 TestCaseOptimizer 自动优化；评分低于85不得审核通过或导出
 4. 自动重生闭环：TestCaseRegenerationLoop 循环优化，最多 3 次重生
 5. 熔断保护：达到重生上限后标记为 needs_human_review 并触发告警
 
@@ -152,17 +152,34 @@ authority: 专项规范
 | TestCaseOptimizer | 自动优化步骤/预期结果/用例名称 |
 | TestCaseRegenerationLoop | 自动重生闭环 + 熔断机制 |
 
-**输出**: 优化后的测试用例集合（含质量评分、优化状态）
+**输出**: 优化后的测试用例集合（含原始评分、优化后评分、最终评分、评分状态和优化状态）
+
+#### 运行时质量与覆盖矩阵契约
+
+评分轨迹不扩展正式15列模板，统一保存在运行时 `_runtime_quality` 对象中：
+
+| 字段 | 含义 |
+|---|---|
+| `original_score` | 初次生成评分，不得被优化结果覆盖 |
+| `optimized_score` | 最近一次优化后的评分 |
+| `final_score` | 最终审核使用的评分，必须达到85分 |
+| `score_history` | 原始评分及每次优化评分的有序记录 |
+| `score_threshold` | 固定为85 |
+| `is_cold_start` / `confidence` | 冷启动标识和评分置信度 |
+| `optimization_attempts` | 自动优化次数 |
+| `needs_human_review` / `final_audit_passed` | 人工复核和最终审核状态 |
+
+需求覆盖矩阵保存在 `_runtime_coverage_matrix`，仅包含业务规则、业务对象、正常/异常/边界/回滚场景及排除项；矩阵版本保存在 `_runtime_coverage_matrix_version`。这些字段只用于运行时、审核上下文和 `.runtime/reports/`，正式Excel仍严格保持15列。
 
 #### 阶段6：测试用例导出与评审
 
 **输入**: 优化后的测试用例集合
 
 **处理步骤**:
-1. 导出为Excel格式（含质量评分列）
-2. 标注 needs_human_review 的用例提交人工复查
+1. 仅导出格式审核、业务内容审核和最终评分门禁均通过的用例；最终评分必须 >= 85
+2. 标注 needs_human_review 或最终评分 < 85 的用例提交人工复查，不得混入交付文件；正式“用例状态”统一保持为“正常”，qualified 仅保留在运行时评分状态
 3. 生成用例评审报告（含质量分布统计）
-4. 输出用例索引文件
+4. 输出用例索引文件，并记录业务规则、页面对象和覆盖矩阵关联
 
 **输出**: 测试用例Excel文件、评审报告
 
@@ -240,9 +257,9 @@ generator.export_to_excel(cases, output_path)
 10. 创建人
 11. 优先级
 12. 是否可自动化
-13. 关联缺陷ID
-14. 回归测试标识
-15. 知识库关联
+13. 回归测试标识
+14. 知识库关联
+15. 质量评分
 
 ### 评审报告格式
 - 用例总数

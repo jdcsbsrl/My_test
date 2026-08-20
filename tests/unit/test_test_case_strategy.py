@@ -16,6 +16,8 @@ from modules.trae_test.utils.test_case_strategy import (
 from modules.trae_test.utils.test_case_strategy import (
     TestCaseScoreEngine as TSEngine,
 )
+from modules.trae_test.utils.business_rule_parser import RawScenario
+from modules.trae_test.utils.test_case_strategy import TestCaseStrategy
 
 
 class TestScoreEngine:
@@ -174,6 +176,33 @@ class TestScoreEngine:
         assert self.engine._calculate_confidence(5) == 0.5
         assert self.engine._calculate_confidence(0) == 0.0
 
+    def test_strategy_registers_coverage_dimensions(self):
+        strategy = TestCaseStrategy()
+        raw = RawScenario(
+            source="business_rules",
+            module="产品",
+            page_path="产品-产品中心-库存SKU",
+            test_point="批量处理多个SKU，按多个仓库校验多明细，失败需要回滚",
+            business_rule="处理中状态也要校验",
+            scenario_type_hint="exception",
+        )
+
+        scenarios = strategy.generate_scenarios([raw], limit=1)
+
+        assert len(scenarios) == 1
+        assert scenarios[0].coverage_matrix["场景类型"] == "exception"
+        assert {"多对象", "多仓库", "多明细", "状态", "失败"}.issubset(
+            set(scenarios[0].coverage_dimensions)
+        )
+
+    def test_strategy_limit_is_preserved_with_coverage_registration(self):
+        strategy = TestCaseStrategy()
+        raw = RawScenario(source="business_rules", module="产品", page_path="库存SKU", test_point="批量处理多个SKU")
+
+        scenarios = strategy.generate_scenarios([raw, raw], limit=1)
+
+        assert len(scenarios) == 1
+
 
 class TestCaseOptimizerTests:
     """测试用例优化器"""
@@ -237,7 +266,8 @@ class TestRegenerationLoop:
 
         result = loop.generate_and_optimize("test", limit=1)
 
-        assert result[0]["状态"] == "needs_human_review"
+        assert result[0]["用例状态"] == "正常"
+        assert result[0]["needs_human_review"] is True
         assert result[0]["regeneration_count"] >= 3
 
     def test_qualified_case(self):
@@ -252,7 +282,8 @@ class TestRegenerationLoop:
 
         result = loop.generate_and_optimize("test", limit=1)
 
-        assert result[0]["状态"] == "qualified"
+        assert result[0]["用例状态"] == "正常"
+        assert result[0]["needs_human_review"] is False
         assert "质量评分" in result[0]
 
     def test_cool_down_period(self):

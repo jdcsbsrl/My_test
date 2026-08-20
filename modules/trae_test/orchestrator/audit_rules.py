@@ -20,6 +20,19 @@ logger = logging.getLogger(__name__)
 # 默认 YAML 配置文件路径（相对于项目根目录）
 _DEFAULT_CONFIG_REL_PATH = "configs/audit_rules.yaml"
 
+# 评分契约：审核/生成链路统一引用，低于此值不得作为最终交付。
+FINAL_SCORE_THRESHOLD = 85.0
+COLD_START_EXECUTION_THRESHOLD = 10
+
+
+def is_final_score_qualified(score: float | None, *, is_cold_start: bool = False) -> bool:
+    """返回最终评分门禁结果。
+
+    冷启动只表示评分置信度较低，不能单独绕过业务审核；业务审核通过后，
+    显式记录的最终评分仍可参与最终门禁。
+    """
+    return score is not None and score >= FINAL_SCORE_THRESHOLD
+
 
 class RuleManager:
     """审核规则管理器 - 管理规则生命周期
@@ -56,12 +69,12 @@ class RuleManager:
         当 YAML 配置文件不存在或加载失败时使用此默认值。
         """
         return {
-            "用例状态": {
-                "valid_values": ["正常"],
-                "default_value": "正常",
-                "required": True,
-                "error_message": "用例状态必须为'正常'（草稿/待评审等状态不允许提交）",
-            },
+        "用例状态": {
+            "valid_values": ["正常"],
+            "default_value": "正常",
+            "required": True,
+            "error_message": "用例状态只能为'正常'，审核和评分状态不得写入该字段",
+        },
             "用例等级": {
                 "valid_values": ["高", "中", "低"],
                 "default_value": "中",
@@ -326,6 +339,29 @@ class RuleManager:
         """
         engine = self._get_score_engine()
         return engine.score(case)
+
+    def score_contract(self, case: dict[str, Any]) -> dict[str, Any]:
+        """返回审核侧使用的统一评分契约，不改变原有评分接口。"""
+        engine = self._get_score_engine()
+        metadata_fn = getattr(engine, "score_with_metadata", None)
+        if callable(metadata_fn):
+            metadata = dict(metadata_fn(case))
+        else:
+            execution_count = int(case.get("execution_count", 0) or 0)
+            metadata = {
+                "score": float(engine.score(case)),
+                "is_cold_start": execution_count < COLD_START_EXECUTION_THRESHOLD,
+                "confidence": min(execution_count / COLD_START_EXECUTION_THRESHOLD, 1.0),
+            }
+        # 15列模板中的“质量评分”是交付评分字段；若流程已写入最终评分，优先使用它。
+        final_score = case.get("最终评分", case.get("质量评分"))
+        if final_score not in (None, ""):
+            metadata["score"] = float(final_score)
+        metadata["threshold"] = FINAL_SCORE_THRESHOLD
+        metadata["is_final_score_qualified"] = is_final_score_qualified(
+            metadata["score"], is_cold_start=metadata["is_cold_start"]
+        )
+        return metadata
 
     def score_test_cases(self, cases: list[dict[str, Any]]) -> list[float]:
         """对多条测试用例进行批量质量评分
