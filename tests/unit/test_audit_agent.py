@@ -57,6 +57,89 @@ class TestAuditAgentInit:
 
 
 class TestAuditAgentTestCases:
+    @staticmethod
+    def _valid_case(**runtime):
+        case = {
+            "用例目录": "产品 - 产品中心 - 库存SKU",
+            "用例名称": "库存SKU业务规则验证",
+            "需求ID": "REQ-COVERAGE-001",
+            "前置条件": "1. 用户已登录ERP系统并拥有库存SKU权限\n2. 系统中存在可操作的库存SKU数据",
+            "用例步骤": "1. 进入库存SKU页面\n2. 点击业务操作按钮\n3. 在页面提交测试数据并查看结果",
+            "预期结果": "1. 页面显示库存SKU列表\n2. 系统显示处理结果",
+            "用例类型": "功能测试", "用例状态": "正常", "用例等级": "高", "创建人": "余小龙",
+            "优先级": "P0", "是否可自动化": "是", "回归测试标识": "是",
+            "知识库关联": "库存SKU 页面 业务规则 操作 结果",
+            "质量评分": 95,
+        }
+        case.update(runtime)
+        return case
+
+    def test_requirement_coverage_blocks_missing_rule(self):
+        agent = AuditAgent()
+        result = agent.audit_test_cases(
+            [self._valid_case(**{"覆盖规则ID": "R1", "场景类型": "正常"})],
+            {"coverage_matrix": [{"id": "R1", "priority": "P0"}, {"id": "R2", "priority": "P1"}]},
+        )
+        assert result.passed is False
+        assert any(i.rule_id == "REQ_COVERAGE_INCOMPLETE" for i in result.issues)
+
+    def test_requirement_coverage_matrix_required_when_enabled(self):
+        agent = AuditAgent()
+        result = agent.audit_test_cases([self._valid_case()], {"require_requirement_coverage": True})
+        assert result.passed is False
+        assert any(i.rule_id == "REQ_COVERAGE_MATRIX_MISSING" for i in result.issues)
+
+    def test_runtime_coverage_matrix_is_consumed(self):
+        agent = AuditAgent()
+        case = self._valid_case(**{
+            "_runtime_coverage_matrix": {"business_rules": ["RUNTIME-R1"], "normal_scenarios": ["正常"]},
+            "覆盖规则ID": "RUNTIME-R1",
+            "场景类型": "正常",
+            "优先级": "P1",
+        })
+        result = agent.audit_test_cases([case], {"require_requirement_coverage": True})
+        assert result.passed is True
+
+    def test_requirement_p0_missing_scenario_blocks(self):
+        agent = AuditAgent()
+        result = agent.audit_test_cases(
+            [self._valid_case(**{"覆盖规则ID": "R1", "场景类型": "正常"})],
+            {"coverage_matrix": [{"id": "R1", "priority": "P0", "required_scenarios": ["正常", "异常"]}]},
+        )
+        assert result.passed is False
+        assert any(i.rule_id == "REQ_P0_SCENARIO_MISSING" for i in result.issues)
+
+    def test_rollback_missing_blocks_when_required(self):
+        agent = AuditAgent()
+        result = agent.audit_test_cases(
+            [self._valid_case(**{"覆盖规则ID": "R1", "场景类型": "正常", "回滚标识": "否"})],
+            {"coverage_matrix": [{"id": "R1", "priority": "P1"}], "requires_rollback": True},
+        )
+        assert result.passed is False
+        assert any(i.rule_id == "REQ_ROLLBACK_SCENARIO_MISSING" for i in result.issues)
+
+    def test_excluded_scope_blocks(self):
+        agent = AuditAgent()
+        result = agent.audit_test_cases(
+            [self._valid_case(**{"覆盖规则ID": "R1", "场景类型": "正常", "模块": "WMS"})],
+            {"coverage_matrix": [{"id": "R1", "priority": "P1"}], "excluded_scope": ["WMS"]},
+        )
+        assert result.passed is False
+        assert any(i.rule_id == "REQ_SCOPE_BOUNDARY_VIOLATION" for i in result.issues)
+
+    def test_requirement_coverage_passes_with_required_scenarios_and_rollback(self):
+        agent = AuditAgent()
+        cases = [
+            self._valid_case(**{"覆盖规则ID": "R1", "场景类型": "正常", "回滚标识": "否"}),
+            self._valid_case(**{"覆盖规则ID": "R1", "场景类型": "异常", "回滚标识": "是"}),
+        ]
+        result = agent.audit_test_cases(
+            cases,
+            {"coverage_matrix": [{"id": "R1", "priority": "P0", "required_scenarios": ["正常", "异常"]}], "requires_rollback": True},
+        )
+        assert result.passed is True
+        assert any("需求规则覆盖率：100%" in s for s in result.suggestions)
+
     def test_empty_list(self):
         agent = AuditAgent()
         r = agent.audit_test_cases([])
@@ -71,21 +154,22 @@ class TestAuditAgentTestCases:
         agent = AuditAgent()
         cases = [
             {
-                "用例目录": "测试用例/销售",
-                "用例名称": "test",
+                "用例目录": "产品 - 产品中心 - 库存SKU",
+                "用例名称": "销售订单创建成功流程验证",
                 "需求ID": "1",
-                "前置条件": "pre",
-                "用例步骤": "step",
-                "预期结果": "exp",
+                "前置条件": "1. 用户已登录ERP系统并拥有订单权限\n2. 系统中存在可用测试商品",
+                "用例步骤": "1. 进入销售订单页面\n2. 点击新建订单按钮\n3. 选择测试商品并提交订单",
+                "预期结果": "1. 页面打开并显示新建订单按钮\n2. 订单提交成功并生成订单号",
                 "用例类型": "功能测试",
                 "用例状态": "正常",
                 "用例等级": "高",
                 "创建人": "余小龙",
                 "优先级": "P0",
                 "是否可自动化": "是",
-                "关联缺陷ID": "",
                 "回归测试标识": "是",
-                "知识库关联": "kb",
+                "知识库关联": "销售订单 客户 商品 库存 数量 价格 权限 状态 提交 校验 业务规则",
+                "质量评分": 95,
+                "execution_count": 20,
             }
         ]
         r = agent.audit_test_cases(cases)
@@ -96,6 +180,42 @@ class TestAuditAgentTestCases:
         cases = [{"用例名称": "test"}]
         r = agent.audit_test_cases(cases)
         assert r.passed is False
+
+    def test_invalid_directory_is_blocking(self):
+        agent = AuditAgent()
+        case = {
+            "用例目录": "库存SKU",
+            "用例名称": "库存SKU目录校验",
+            "需求ID": "REQ-DIR-001",
+            "前置条件": "1. 用户已登录ERP系统\n2. 用户拥有库存SKU权限",
+            "用例步骤": "1. 进入库存SKU页面\n2. 点击批量加入采购计划按钮\n3. 查看弹窗",
+            "预期结果": "1. 页面显示库存SKU\n2. 弹窗正常打开",
+            "用例类型": "功能测试", "用例状态": "正常", "用例等级": "中", "创建人": "余小龙",
+            "优先级": "P1", "是否可自动化": "是", "回归测试标识": "是",
+            "知识库关联": "库存SKU 产品中心 页面",
+            "质量评分": 95,
+        }
+        result = agent.audit_test_cases([case])
+        assert result.passed is False
+        assert any(issue.rule_id == "TC_DIRECTORY_INVALID" for issue in result.issues)
+
+    def test_score_source_mismatch_blocks_and_normalizes_only_consistent_scores(self):
+        agent = AuditAgent()
+        case = {
+            "用例目录": "测试用例/销售",
+            "用例名称": "销售订单提交结果验证",
+            "需求ID": "REQ-SCORE-001",
+            "前置条件": "1. 用户已登录ERP系统并拥有订单权限\n2. 系统中存在可提交订单",
+            "用例步骤": "1. 进入销售订单页面\n2. 点击新建订单按钮\n3. 填写订单信息并提交",
+            "预期结果": "1. 页面显示销售订单页面\n2. 提交成功并生成订单号",
+            "用例类型": "功能测试", "用例状态": "正常", "用例等级": "中", "创建人": "测试人员",
+            "优先级": "P1", "是否可自动化": "是", "回归测试标识": "是",
+            "知识库关联": "销售订单 页面 提交 订单号 业务规则",
+            "最终评分": 92, "质量评分": 88,
+        }
+        result = agent.audit_test_cases([case])
+        assert result.passed is False
+        assert any(issue.rule_id == "TC_SCORE_SOURCE_MISMATCH" for issue in result.issues)
 
 
 class TestAuditAgentCode:

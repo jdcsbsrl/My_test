@@ -5,6 +5,7 @@ from modules.trae_test.utils.test_case_generator import (
     TestCaseGenerator as GeneratorUnderTest,
     generate_cases,
 )
+from modules.trae_test.utils.template_builder import ALL_FIELDS
 
 
 class TestTestCaseGenerator:
@@ -43,7 +44,8 @@ class TestTestCaseGenerator:
             assert "用例类型" in case
             assert "用例等级" in case
             assert "优先级" in case
-            assert len(case) == 15
+            assert list(case) == ALL_FIELDS
+            assert case["质量评分"] == 0.0
 
     def test_generate_cases_with_list_response(self):
         mock_retriever = Mock()
@@ -85,6 +87,15 @@ class TestTestCaseGenerator:
 
         assert len(cases) == 10
 
+    def test_derive_coverage_matrix_marks_explicit_dimensions(self):
+        matrix = GeneratorUnderTest._derive_coverage_matrix(
+            "库存SKU批量采购计划", "批量处理多个SKU，按多个仓库校验多明细，失败后回滚", "exception"
+        )
+
+        assert matrix["场景类型"] == "exception"
+        assert {"多对象", "多仓库", "多明细", "失败"}.issubset(matrix)
+        assert len(ALL_FIELDS) == 15
+
     def test_build_case_from_knowledge(self):
         with patch("modules.trae_test.utils.test_case_generator._load_module_hierarchy") as mock_load:
             mock_load.return_value = {"销售": {"订单处理": ["销售订单"]}}
@@ -113,6 +124,9 @@ class TestTestCaseGenerator:
         generator.excel_generator = mock_excel_generator
 
         cases = generator.generate_cases("测试")
+        for case in cases:
+            case.update({"原始评分": 90, "优化后评分": 90, "最终评分": 90, "质量评分": 90,
+                         "最终审核通过": True, "用例状态": "正常"})
         output_path = generator.export_to_excel(cases, str(tmp_path / "output.xlsx"))
 
         mock_excel_generator.generate.assert_called_once()
@@ -128,7 +142,14 @@ class TestTestCaseGenerator:
         generator = GeneratorUnderTest(retriever=mock_retriever)
         generator.excel_generator = mock_excel_generator
 
-        generator.generate_and_export("测试")
+        with patch("modules.trae_test.orchestrator.audit_gateway.AuditGateway") as gateway_cls, \
+             patch("modules.trae_test.utils.test_case_generator.TestCaseScoreEngine") as score_cls:
+            gateway_cls.return_value.audit.return_value.passed = True
+            gateway_cls.return_value.audit.return_value.errors = []
+            score_cls.return_value.score.return_value = 90
+            score_cls.return_value._COLD_START_THRESHOLD = 10
+            score_cls.return_value._calculate_confidence.return_value = 0.0
+            generator.generate_and_export("测试")
 
         mock_retriever.retrieve.assert_called_once()
         mock_excel_generator.generate.assert_called_once()

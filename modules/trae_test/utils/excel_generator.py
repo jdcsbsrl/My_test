@@ -29,15 +29,33 @@ try:
 except ImportError:
     raise ImportError("openpyxl未安装，请运行: pip install openpyxl")
 
-from .template_builder import ALL_FIELDS as TEMPLATE_FIELDS
-from .workspace_manager import WorkspaceManager, workspace_manager
+from .template_builder import ALL_FIELDS as TEMPLATE_FIELDS, _template_header_matches, get_default_template_path
+from .workspace_manager import workspace_manager
 
 
 class ExcelGenerator:
     """统一Excel生成器"""
 
-    # 15字段标准顺序（单一定义源：template_builder.ALL_FIELDS）+ 质量评分
-    STANDARD_FIELDS = list(TEMPLATE_FIELDS) + ["质量评分"]
+    # 15字段标准顺序（单一定义源：template_builder.ALL_FIELDS）
+    STANDARD_FIELDS = list(TEMPLATE_FIELDS)
+    QUALITY_FIELD = "质量评分"
+    # 评分、审核和重生轨迹只存在于运行时对象，不得扩展正式 Excel 表头。
+    RUNTIME_FIELDS = {
+        "原始评分",
+        "优化后评分",
+        "最终评分",
+        "最终审核通过",
+        "是否冷启动评分",
+        "评分置信度",
+        "评分历史",
+        "优化次数",
+        "评分门槛",
+        "最终评分是否达标",
+        "regeneration_count",
+        "last_regenerated_at",
+        "execution_count",
+        "用例ID",
+    }
 
     # 列宽配置
     COLUMN_WIDTHS = {
@@ -53,7 +71,6 @@ class ExcelGenerator:
         "创建人": 12,
         "优先级": 10,
         "是否可自动化": 12,
-        "关联缺陷ID": 15,
         "回归测试标识": 12,
         "知识库关联": 30,
         "质量评分": 12,
@@ -61,17 +78,17 @@ class ExcelGenerator:
 
     @classmethod
     def _get_effective_fields(cls, extra_fields: list[str] | None = None) -> list[str]:
-        """获取有效字段列表（标准字段 + 扩展字段）
+        """获取固定的15字段列表。
 
         Args:
-            extra_fields: 额外字段列表
+            extra_fields: 保留的兼容参数；不允许扩展正式表头
         """
-        return cls.STANDARD_FIELDS + (extra_fields or [])
+        if extra_fields:
+            raise ValueError("正式Excel固定为15字段，不允许传入额外字段")
+        return list(cls.STANDARD_FIELDS)
 
     # 模板文件路径（通过项目标记文件推断）
-    TEMPLATE_PATH = str(
-        Path(WorkspaceManager._find_project_root(__file__)) / "fixtures" / "templates" / "测试用例模板.xlsx"
-    )
+    TEMPLATE_PATH = get_default_template_path()
 
     # 文件大小限制（10MB）
     MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -84,7 +101,7 @@ class ExcelGenerator:
             cases: 测试用例列表
             output_path: 输出路径（可选，为空时自动生成规范路径）
             requirement_name: 需求名称（可选，默认"未命名需求"）
-            extra_fields: 额外导出字段列表（可选）
+            extra_fields: 已废弃；正式Excel不允许额外字段
 
         Returns:
             str: 生成的Excel文件路径
@@ -114,8 +131,8 @@ class ExcelGenerator:
         if isinstance(input_data, str):
             try:
                 input_data = json.loads(input_data)
-            except json.JSONDecodeError:
-                print("[WARN] input_data 不是有效的 JSON 字符串，保持原样处理")
+            except json.JSONDecodeError as exc:
+                raise ValueError("input_data 不是有效的 JSON 字符串") from exc
 
         # 如果是字典而不是列表，检查是否有data字段
         if isinstance(input_data, dict) and "data" in input_data:
@@ -154,7 +171,7 @@ class ExcelGenerator:
             requirement_id: 需求ID（可选）
             date_str: 日期字符串（可选，默认当前北京日期）
             output_path: 自定义输出路径（可选，如需自定义位置）
-            extra_fields: 额外导出字段列表（可选），如 ["状态", "regeneration_count"]
+            extra_fields: 已废弃；正式Excel不允许额外字段
 
         Returns:
             str: 生成的Excel文件路径
@@ -195,22 +212,33 @@ class ExcelGenerator:
         if not test_cases:
             raise ValueError("测试用例列表不能为空")
 
-        effective_fields = cls._get_effective_fields(extra_fields)
+        cls._get_effective_fields(extra_fields)
 
         for idx, case in enumerate(test_cases, start=1):
-            # 检查字段（质量评分为可选字段，缺失时自动补0.0）
-            for field in effective_fields:
-                if field == "质量评分":
-                    if field not in case:
-                        case[field] = 0.0
-                    continue
-                # 扩展字段也为可选，缺失时不抛异常
-                if extra_fields and field in extra_fields:
-                    if field not in case:
-                        case[field] = ""
-                    continue
+            if not isinstance(case, dict):
+                raise ValueError(f"第{idx}条用例必须是对象，实际类型: {type(case).__name__}")
+
+            unknown_fields = {
+                field
+                for field in set(case) - set(cls.STANDARD_FIELDS) - cls.RUNTIME_FIELDS
+                if not str(field).startswith("_runtime_")
+            }
+            if unknown_fields:
+                names = ", ".join(sorted(str(field) for field in unknown_fields))
+                raise ValueError(f"第{idx}条用例包含未定义字段: {names}")
+
+            for field in cls.STANDARD_FIELDS:
                 if field not in case:
                     raise ValueError(f"第{idx}条用例缺少字段: {field}")
+
+                value = case[field]
+                if field == cls.QUALITY_FIELD:
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ValueError(f"第{idx}条用例字段'{field}'必须是0-100数字")
+                    if not 0 <= value <= 100:
+                        raise ValueError(f"第{idx}条用例字段'{field}'必须在0-100之间")
+                elif not isinstance(value, str):
+                    raise ValueError(f"第{idx}条用例字段'{field}'必须是字符串")
 
             # 检查用例名称
             case_name = case.get("用例名称", "").strip()
@@ -346,28 +374,33 @@ class ExcelGenerator:
         if p.suffix.lower() != ".xlsx":
             return False, f"文件格式必须为.xlsx: {file_path}"
 
+        wb = None
         try:
             wb = load_workbook(file_path, read_only=True)
             ws = wb["测试用例"]
 
-            header = []
-            for col_idx in range(1, len(cls.STANDARD_FIELDS) + 1):
-                cell_value = ws.cell(row=1, column=col_idx).value
-                header.append(str(cell_value) if cell_value is not None else "")
+            width = max(ws.max_column, len(cls.STANDARD_FIELDS))
+            header = [ws.cell(row=1, column=c).value for c in range(1, width + 1)]
+            while header and header[-1] in (None, ""):
+                header.pop()
 
             for idx, (expected, actual) in enumerate(zip(cls.STANDARD_FIELDS, header)):
                 if expected != actual:
                     return False, f"第{idx + 1}列表头错误: 期望'{expected}', 实际'{actual}'"
+            if header != cls.STANDARD_FIELDS:
+                return False, f"Excel表头必须严格为15字段，实际字段数: {len(header)}"
 
             row_count = ws.max_row - 1
             if row_count == 0:
                 return False, "Excel文件没有数据行"
 
-            wb.close()
             return True, ""
 
         except Exception as e:
             return False, f"验证Excel文件失败: {str(e)}"
+        finally:
+            if wb is not None:
+                wb.close()
 
     @classmethod
     def create_empty_case(
@@ -384,7 +417,6 @@ class ExcelGenerator:
         creator: str = "",
         priority: str = "P2",
         is_automation: str = "否",
-        defect_id: str = "",
         regression_flag: str = "否",
         knowledge_link: str = "",
     ) -> dict[str, str]:
@@ -403,7 +435,6 @@ class ExcelGenerator:
             creator: 创建人
             priority: 优先级
             is_automation: 是否可自动化
-            defect_id: 关联缺陷ID
             regression_flag: 回归测试标识
             knowledge_link: 知识库关联
 
@@ -423,9 +454,9 @@ class ExcelGenerator:
             "创建人": creator,
             "优先级": priority,
             "是否可自动化": is_automation,
-            "关联缺陷ID": defect_id,
             "回归测试标识": regression_flag,
             "知识库关联": knowledge_link,
+            "质量评分": 0.0,
         }
 
     @staticmethod
@@ -451,6 +482,8 @@ class ExcelGenerator:
         """
         output_path = Path(output_path)
         if template_path and Path(template_path).exists():
+            if not _template_header_matches(template_path):
+                raise ValueError(f"模板表头不符合15字段契约: {template_path}")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(template_path, output_path)
             wb = load_workbook(output_path)

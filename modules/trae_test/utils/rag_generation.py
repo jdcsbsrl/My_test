@@ -24,6 +24,7 @@ from .test_case_strategy import TestCaseScoreEngine, TestCaseStrategy
 DEFAULT_CASE_CREATOR = "余小龙"
 DEFAULT_LLM_TIMEOUT = 60
 DEFAULT_LLM_MODEL = "local-rag-generator"
+QUALITY_SCORE_GATE = 85.0
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,11 @@ class GenerationEvalResult:
     audit_errors: list[dict[str, str]]
     audit_warnings: list[dict[str, str]]
     quality_score: float
+    original_score: float
+    optimized_score: float
+    final_score: float
+    cold_start: bool
+    optimization_attempts: int
     passed: bool
 
 
@@ -137,9 +143,9 @@ class LocalRuleRAGCaseGenerator:
             "创建人": self.creator,
             "优先级": "P1",
             "是否可自动化": "是",
-            "关联缺陷ID": "",
             "回归测试标识": "是",
             "知识库关联": query,
+            "质量评分": 0.0,
         }
         return {field: case.get(field, "") for field in ALL_FIELDS}
 
@@ -286,7 +292,7 @@ class RAGGenerationEvaluator:
         audit_gateway: AuditGateway | None = None,
         score_engine: TestCaseScoreEngine | None = None,
         point_threshold: float = 0.6,
-        score_threshold: float = 50.0,
+        score_threshold: float = QUALITY_SCORE_GATE,
     ) -> None:
         self.generator = generator or LocalRuleRAGCaseGenerator()
         self.audit_gateway = audit_gateway or AuditGateway(
@@ -294,27 +300,66 @@ class RAGGenerationEvaluator:
         )
         self.score_engine = score_engine or TestCaseScoreEngine()
         self.point_threshold = point_threshold
-        self.score_threshold = score_threshold
+        # 允许调用方传入更高门槛，但不得降低项目最终交付门槛。
+        self.score_threshold = max(float(score_threshold), QUALITY_SCORE_GATE)
 
     def evaluate_one(self, query: str, expected_points: list[str]) -> GenerationEvalResult:
         case = self.generator.generate_case(query)
-        quality_score = self.score_engine.score(case)
-        audit_result = self.audit_gateway.audit([case], "test_case", {"block_on_fail": False})
+        original_score = float(self.score_engine.score(case))
+        execution_count = int(case.get("execution_count", 0) or 0)
+        cold_start = execution_count < self.score_engine._COLD_START_THRESHOLD
+        case["原始评分"] = original_score
+        case["是否冷启动评分"] = cold_start
+        case["评分置信度"] = round(self.score_engine._calculate_confidence(execution_count), 4)
+        case["评分历史"] = [{"阶段": "original", "评分": original_score}]
+        optimized_score = original_score
+        optimization_attempts = 0
+        from .test_case_strategy import TestCaseOptimizer
+        optimizer = TestCaseOptimizer(self.score_engine)
+        while optimized_score < self.score_threshold and optimization_attempts < 3:
+            optimizer.optimize(case, target_score=self.score_threshold)
+            optimization_attempts += 1
+            optimized_score = float(self.score_engine.score(case))
+            case["评分历史"].append({"阶段": f"optimized_{optimization_attempts}", "评分": optimized_score})
+        final_score = optimized_score
+        case["优化后评分"] = optimized_score
+        case["最终评分"] = final_score
+        case["质量评分"] = final_score
+        case["优化次数"] = optimization_attempts
+        try:
+            audit_result = self.audit_gateway.audit([case], "test_case", {"block_on_fail": True})
+            audit_passed = audit_result.passed
+            audit_errors = audit_result.errors
+            audit_warnings = audit_result.warnings
+        except Exception as exc:
+            # 评估接口返回失败结果，避免审核阻断异常吞掉评分和覆盖率报告。
+            audit_result = None
+            audit_passed = False
+            audit_errors = [{"code": "AUDIT_BLOCKED", "message": str(exc)}]
+            audit_warnings = []
         matched, point_hit_rate = case_contains_points(case, expected_points)
         passed = (
-            audit_result.passed
-            and quality_score >= self.score_threshold
+            audit_passed
+            and final_score >= self.score_threshold
             and point_hit_rate >= self.point_threshold
         )
+        case["最终审核通过"] = passed
+        case["用例状态"] = "正常"
+        case["needs_human_review"] = not passed
         return GenerationEvalResult(
             query=query,
             generated_case=case,
             expected_points=expected_points,
             matched_points=matched,
             point_hit_rate=round(point_hit_rate, 4),
-            audit_passed=audit_result.passed,
-            audit_errors=audit_result.errors,
-            audit_warnings=audit_result.warnings,
-            quality_score=quality_score,
+            audit_passed=audit_passed,
+            audit_errors=audit_errors,
+            audit_warnings=audit_warnings,
+            quality_score=final_score,
+            original_score=original_score,
+            optimized_score=optimized_score,
+            final_score=final_score,
+            cold_start=cold_start,
+            optimization_attempts=optimization_attempts,
             passed=passed,
         )

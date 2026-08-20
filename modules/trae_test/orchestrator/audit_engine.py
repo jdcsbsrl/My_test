@@ -97,7 +97,7 @@ class AuditEngine:
 
         if audit_type == AuditType.TEST_CASE:
             strict_level = context.get("strict_level", self.config.strict_level)
-            result = self._get_auditor(TEST_CASE_AUDITOR).audit(target, strict_level)
+            result = self._get_auditor(TEST_CASE_AUDITOR).audit(target, strict_level, context)
         elif audit_type == AuditType.CODE:
             language = context.get("language", "python")
             result = self._get_auditor(CODE_AUDITOR).audit(target, language)
@@ -155,6 +155,38 @@ class AuditEngine:
                 if is_valid:
                     print("[OK] Excel文件验证通过: %s" % target)
                     combined_result.add_suggestion(f"Excel文件已生成并验证通过: {target}")
+                    # 结构校验通过不等于业务审核通过。将正式交付文件重新
+                    # 解析为用例集合，继续执行字段、业务可执行性、评分和
+                    # 需求级覆盖审核，避免 xlsx 路径绕过 TestCaseAuditor。
+                    try:
+                        from openpyxl import load_workbook
+
+                        workbook = load_workbook(target, read_only=True, data_only=True)
+                        sheet = workbook.active
+                        rows = list(sheet.iter_rows(values_only=True))
+                        headers = [str(value).strip() if value is not None else "" for value in (rows[0] if rows else ())]
+                        cases = [
+                            {headers[index]: row[index] for index in range(min(len(headers), len(row))) if headers[index]}
+                            for row in rows[1:]
+                            if any(value not in (None, "") for value in row)
+                        ]
+                        workbook.close()
+                        if not cases:
+                            combined_result.add_error("TEST_CASE_CONTENT_EMPTY", "Excel文件没有可审核的测试用例数据", target)
+                        else:
+                            content_result = self._get_auditor(TEST_CASE_AUDITOR).audit(
+                                cases,
+                                context.get("strict_level", self.config.strict_level),
+                                context,
+                            )
+                            combined_result.issues.extend(content_result.issues)
+                            combined_result.suggestions.extend(content_result.suggestions)
+                    except Exception as exc:
+                        combined_result.add_error(
+                            "TEST_CASE_CONTENT_AUDIT_ERROR",
+                            f"Excel业务内容审核失败: {exc}",
+                            target,
+                        )
                 else:
                     print("[FAIL] Excel文件验证失败: %s" % error_msg)
                     combined_result.add_error("EXCEL_INVALID", f"Excel文件验证失败: {error_msg}", target)

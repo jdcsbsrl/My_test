@@ -286,7 +286,7 @@ class AuditAgent:
     # 具体审核方法（委托给 AuditEngine）
     # ============================================================
 
-    def audit_test_cases(self, test_cases: Any) -> AuditResult:
+    def audit_test_cases(self, test_cases: Any, context: dict | None = None) -> AuditResult:
         """审核测试用例
 
         Args:
@@ -295,7 +295,7 @@ class AuditAgent:
         Returns:
             AuditResult: 审核结果
         """
-        context = {"strict_level": self.config.strict_level}
+        context = {"strict_level": self.config.strict_level, **(context or {})}
         result = self._engine.audit(test_cases, AuditType.TEST_CASE, context)
         # 记录日志（兼容旧代码）
         if result.execution_time > 0:

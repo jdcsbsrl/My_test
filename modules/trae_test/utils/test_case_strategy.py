@@ -63,6 +63,9 @@ class TestCaseScenario:
     priority: str = "P1"
     case_level: str = "高"
     automation_flag: str = "是"
+    # 运行时覆盖信息，不进入正式15列Excel。
+    coverage_dimensions: list[str] = field(default_factory=list)
+    coverage_matrix: dict[str, str] = field(default_factory=dict)
 
 
 class TestCaseStrategy:
@@ -166,7 +169,9 @@ class TestCaseStrategy:
         """
         self.scenarios = []
 
-        for raw in raw_scenarios[:limit]:
+        for raw in raw_scenarios:
+            if len(self.scenarios) >= limit:
+                break
             scenario_type = self._classify_scenario(raw)
             case_name = self._generate_case_name(raw, scenario_type)
             preconditions = self._generate_preconditions(raw)
@@ -175,6 +180,7 @@ class TestCaseStrategy:
             business_rules = self._extract_business_rules(raw)
             priority = self._determine_priority(raw, scenario_type)
             case_level = self._determine_case_level(raw, scenario_type)
+            coverage_matrix = self._derive_coverage_matrix(raw, scenario_type)
 
             scenario = TestCaseScenario(
                 scenario_type=scenario_type,
@@ -188,10 +194,37 @@ class TestCaseStrategy:
                 priority=priority,
                 case_level=case_level,
                 automation_flag="是" if scenario_type != "e2e" else "否",
+                coverage_dimensions=list(coverage_matrix),
+                coverage_matrix=coverage_matrix,
             )
             self.scenarios.append(scenario)
 
         return self.scenarios
+
+    @staticmethod
+    def _derive_coverage_matrix(raw: RawScenario, scenario_type: str) -> dict[str, str]:
+        """从场景文本登记覆盖维度。
+
+        这是需求级覆盖矩阵的轻量入口：只登记需求文本明确出现的维度，
+        不臆造业务规则；结果仅用于运行时追踪，不改变正式15列字段。
+        """
+        text = " ".join(
+            str(value or "")
+            for value in (raw.test_point, raw.business_rule, raw.constraint, raw.operation, raw.page_path)
+        )
+        dimensions: dict[str, str] = {"场景类型": scenario_type}
+        keyword_groups = {
+            "单对象": ("单个", "单条", "单sku", "单 SKU"),
+            "多对象": ("多个", "批量", "多sku", "多 SKU"),
+            "多仓库": ("多仓", "多个仓库", "按仓库"),
+            "多明细": ("多明细", "多个明细", "部分明细", "明细"),
+            "状态": ("状态", "处理中", "待", "已发货", "未发货"),
+            "失败": ("失败", "异常", "错误", "回滚", "拦截"),
+        }
+        for dimension, keywords in keyword_groups.items():
+            if any(keyword.lower() in text.lower() for keyword in keywords):
+                dimensions[dimension] = "已识别"
+        return dimensions
 
     def _classify_scenario(self, raw: RawScenario) -> str:
         """分类场景类型"""
@@ -543,6 +576,7 @@ class TestCaseScoreEngine:
     }
 
     # 冷启动保护配置
+    FINAL_SCORE_THRESHOLD = 85.0
     _COLD_START_THRESHOLD = 10
     _COLD_START_BASE_SCORE = 50
     _COVERAGE_BASELINE_EMPTY = 30
@@ -553,6 +587,43 @@ class TestCaseScoreEngine:
     _COMPLETENESS_STEPS_THRESHOLD_LOW = 1
     _COMPLETENESS_EXPECTED_THRESHOLD = 2
     _STATIC_DIMENSIONS = ["coverage", "completeness"]  # 静态质量维度
+
+    @classmethod
+    def is_final_score_qualified(cls, score: float | None) -> bool:
+        """判断评分是否达到最终交付门槛。"""
+        return score is not None and score >= cls.FINAL_SCORE_THRESHOLD
+
+    def score_with_metadata(self, case: dict[str, Any]) -> dict[str, Any]:
+        """返回评分及其交付语义，冷启动分不得单独作为最终交付依据。"""
+        execution_count = case.get("execution_count", 0)
+        is_cold_start = execution_count < self._COLD_START_THRESHOLD
+        score = self.score(case)
+        return {
+            "score": score,
+            "is_cold_start": is_cold_start,
+            "confidence": self._calculate_confidence(execution_count),
+            "is_final_score_qualified": self.is_final_score_qualified(score) and not is_cold_start,
+            "threshold": self.FINAL_SCORE_THRESHOLD,
+        }
+
+    def record_score(self, case: dict[str, Any], stage: str) -> float:
+        """记录原始/优化后/最终评分，保留评分轨迹而不覆盖历史值。"""
+        metadata = self.score_with_metadata(case)
+        score = metadata["score"]
+        field_by_stage = {
+            "original": "原始评分",
+            "optimized": "优化后评分",
+            "final": "最终评分",
+        }
+        if stage not in field_by_stage:
+            raise ValueError(f"不支持的评分阶段: {stage}")
+        case[field_by_stage[stage]] = score
+        case["评分置信度"] = metadata["confidence"]
+        case["是否冷启动评分"] = metadata["is_cold_start"]
+        case["评分门槛"] = self.FINAL_SCORE_THRESHOLD
+        if stage == "final":
+            case["最终评分是否达标"] = metadata["is_final_score_qualified"]
+        return score
 
     def score(self, case: dict[str, Any]) -> float:
         """计算用例综合得分（0-100）
@@ -709,8 +780,10 @@ class TestCaseOptimizer:
             self._optimize_case_name,
         ]
 
-    def optimize(self, case: dict[str, Any], target_score: float = 80) -> dict[str, Any]:
+    def optimize(self, case: dict[str, Any], target_score: float | None = None) -> dict[str, Any]:
         """优化用例直到达到目标分数"""
+        if target_score is None:
+            target_score = self.score_engine.FINAL_SCORE_THRESHOLD
         current_score = self.score_engine.score(case)
         if current_score >= target_score:
             return case
@@ -773,7 +846,8 @@ class TestCaseRegenerationLoop:
     - 发送人工介入告警
     """
 
-    AUDIT_FIELDS = ["状态", "regeneration_count", "last_regenerated_at"]
+    # 审计轨迹保留在运行时字典中，不得扩展正式15字段 Excel 表头。
+    AUDIT_FIELDS: tuple[str, ...] = ()
 
     def __init__(
         self,
@@ -787,7 +861,7 @@ class TestCaseRegenerationLoop:
         self.generator = generator or TestCaseGenerator()
         self.score_engine = score_engine or TestCaseScoreEngine()
         self.optimizer = optimizer or TestCaseOptimizer()
-        self._min_score_threshold = 60
+        self._min_score_threshold = TestCaseScoreEngine.FINAL_SCORE_THRESHOLD
         self._max_regeneration_attempts = 3  # 单条用例最大重生次数
         self._cool_down_period = 3600  # 熔断冷却期（秒），防止短时间内重复重生
 
@@ -845,8 +919,10 @@ class TestCaseRegenerationLoop:
             try:
                 # 检查是否已达到重生上限或处于冷却期
                 if self._is_circuit_broken(case):
-                    case["状态"] = "needs_human_review"
-                    case["质量评分"] = self.score_engine.score(case)
+                    case["用例状态"] = "正常"
+                    case["needs_human_review"] = True
+                    self.score_engine.record_score(case, "final")
+                    case["质量评分"] = case["最终评分"]
                     self._send_human_review_alert(case)
                     optimized_cases.append(case)
                     continue
@@ -863,7 +939,7 @@ class TestCaseRegenerationLoop:
         return self.generate_and_optimize(keyword, limit)
 
     def generate_and_export(self, keyword: str, limit: int = 10, output_path: str | None = None) -> str:
-        """生成用例并导出到Excel（自动携带审计字段）
+        """生成用例并导出到Excel（审计字段仅保留在运行时）
 
         Args:
             keyword: 检索关键词
@@ -876,29 +952,44 @@ class TestCaseRegenerationLoop:
         from .excel_generator import ExcelGenerator
 
         cases = self.generate_and_optimize(keyword, limit)
-        return ExcelGenerator.generate(cases, output_path=output_path or "", extra_fields=self.AUDIT_FIELDS)
+        if any(
+            case.get("用例状态") != "正常"
+            or case.get("质量评分", 0) < self._min_score_threshold
+            for case in cases
+        ):
+            raise RuntimeError("存在未达到最终评分门槛的用例，禁止导出")
+        return ExcelGenerator.generate(cases, output_path=output_path or "")
 
     def _regenerate_until_qualified(self, case: dict[str, Any]) -> dict[str, Any]:
         """循环优化直到达标或达到重生上限"""
         regeneration_count = case.get("regeneration_count", 0)
+        if "原始评分" not in case:
+            self.score_engine.record_score(case, "original")
 
         for _ in range(self._max_regeneration_attempts):
             score = self.score_engine.score(case)
             if score >= self._min_score_threshold:
-                case["质量评分"] = score
+                self.score_engine.record_score(case, "final")
+                case["质量评分"] = case["最终评分"]
                 case["regeneration_count"] = regeneration_count
                 case["last_regenerated_at"] = datetime.now().isoformat()
-                case["状态"] = "qualified"
+                case["用例状态"] = "正常"
+                case["needs_human_review"] = False
                 return case
 
-            case = self.optimizer.optimize(case)
+            if "原始评分" not in case:
+                self.score_engine.record_score(case, "original")
+            case = self.optimizer.optimize(case, target_score=self._min_score_threshold)
+            self.score_engine.record_score(case, "optimized")
             regeneration_count += 1
 
         # 达到重生上限，触发熔断
-        case["质量评分"] = self.score_engine.score(case)
+        self.score_engine.record_score(case, "final")
+        case["质量评分"] = case["最终评分"]
         case["regeneration_count"] = regeneration_count
         case["last_regenerated_at"] = datetime.now().isoformat()
-        case["状态"] = "needs_human_review"
+        case["用例状态"] = "正常"
+        case["needs_human_review"] = True
         self._send_human_review_alert(case)
 
         return case
