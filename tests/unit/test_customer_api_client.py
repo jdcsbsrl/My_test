@@ -4,7 +4,6 @@ import pytest
 
 from modules.auto_test.api.customer_api_client import CustomerApiClientAPI
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -41,12 +40,12 @@ def test_list_builds_expected_query_params(api):
             "customerName": "Acme",
             "customerId": "C001",
             "appName": "Portal",
-            "appKey": "key-1",
             "status": 0,
             "extra": "kept",
         },
+        json={"appKey": "key-1"},
     )
-    api.attach_request_info.assert_called_once_with(response)
+    api.attach_request_info.assert_not_called()
 
 
 def test_list_omits_empty_optional_filters_but_keeps_sorting(api):
@@ -73,7 +72,7 @@ def test_list_omits_empty_optional_filters_but_keeps_sorting(api):
             "isAsc": "desc",
         },
     )
-    api.attach_request_info.assert_called_once_with(response)
+    api.attach_request_info.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -101,7 +100,7 @@ def test_customer_client_actions_call_expected_endpoint(api, method_name, transp
     assert result is response
     call = getattr(api, transport).call_args
     assert call.args[0] == expected_endpoint
-    api.attach_request_info.assert_called_once_with(response)
+    api.attach_request_info.assert_not_called()
 
 
 def test_delete_uses_base_http_delete_without_recursing(api):
@@ -112,7 +111,7 @@ def test_delete_uses_base_http_delete_without_recursing(api):
 
     assert result is response
     api.client.delete.assert_called_once_with("/system/customerApiClient/[1, 2]")
-    api.attach_request_info.assert_called_once_with(response)
+    api.attach_request_info.assert_not_called()
 
 
 def test_export_posts_filters_as_params(api):
@@ -136,4 +135,36 @@ def test_export_allows_empty_filter_params(api):
 
     assert result is response
     api.post.assert_called_once_with("/system/customerApiClient/export", params={})
-    api.attach_request_info.assert_called_once_with(response)
+    api.attach_request_info.assert_not_called()
+
+
+def test_list_moves_sensitive_filters_to_json_body(api):
+    response = Mock()
+    api.get = Mock(return_value=response)
+
+    api.list(token="token-value", password="password-value", status=1)
+
+    api.get.assert_called_once_with(
+        "/system/customerApiClient/list",
+        params={
+            "pageNum": 1,
+            "pageSize": 10,
+            "orderByColumn": "",
+            "isAsc": "",
+            "status": 1,
+        },
+        json={"token": "token-value", "password": "password-value"},
+    )
+
+
+def test_export_moves_sensitive_filters_to_json_body(api):
+    response = Mock()
+    api.post = Mock(return_value=response)
+
+    api.export(appSecret="secret-value", status=1)
+
+    api.post.assert_called_once_with(
+        "/system/customerApiClient/export",
+        params={"status": 1},
+        json={"appSecret": "secret-value"},
+    )

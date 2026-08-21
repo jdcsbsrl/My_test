@@ -27,15 +27,19 @@ class SalesOrderExportPage(BasePage):
             start_time = time.time()
             while time.time() - start_time < timeout / 1000:
                 if self.export_url_pattern in self.page.url:
-                    logger.info(f"当前页面已跳转到导出页面: {self.page.url}")
-                    return True
+                    self.wait_for_page_settle(timeout=5000)
+                    if self.page.locator("body").inner_text().strip():
+                        logger.info("导出页面已跳转且页面内容已渲染")
+                        return True
 
                 pages = self.page.context.pages
                 for pg in pages:
                     if self.export_url_pattern in pg.url:
                         self.page = pg
-                        logger.info(f"已切换到导出页面: {pg.url}")
-                        return True
+                        self.wait_for_page_settle(timeout=5000)
+                        if self.page.locator("body").inner_text().strip():
+                            logger.info("已切换到导出页面且页面内容已渲染")
+                            return True
 
                 if int(time.time() - start_time) % 5 == 0:
                     pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
@@ -491,7 +495,7 @@ class SalesOrderExportPage(BasePage):
     @allure.step("等待导出下载")
     def wait_for_download(self, timeout: int = 120000) -> dict:
         """监听实时导出直接触发的浏览器下载事件。"""
-        download_dir = "downloads"
+        download_dir = ".runtime/downloads"
         os.makedirs(download_dir, exist_ok=True)
         file_responses = []
         export_responses = []

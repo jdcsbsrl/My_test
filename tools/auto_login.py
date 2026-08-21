@@ -1,6 +1,7 @@
-"""自动登录工具，用于获取 UAT 和 TEST 环境的 token 并保存为环境变量。"""
+"""自动登录工具，用于验证 UAT 和 TEST 环境的登录状态。"""
 
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -12,15 +13,33 @@ sys.path.insert(0, str(project_root / "modules" / "auto_test"))
 
 from modules.auto_test.core.config_manager import ConfigManager, get_config
 from modules.auto_test.core.environment import validate_environment
-from modules.auto_test.core.logger import get_logger
 from modules.auto_test.core.login_service import get_login_service
+from modules.auto_test.core.secret_manager import get_secret_manager
 from modules.auto_test.core.token_manager import get_token_manager
 
-logger = get_logger()
+
+def _safe_var_metadata(value: object) -> dict[str, bool | int]:
+    """Return only non-sensitive metadata for an environment variable."""
+    if isinstance(value, Mapping) and {"exists", "length"}.issubset(value):
+        return {
+            "exists": bool(value["exists"]),
+            "length": int(value["length"]),
+        }
+    return {
+        "exists": value is not None,
+        "length": len(str(value)) if value is not None else 0,
+    }
+
+
+def _summarize_env_vars(values: Mapping[object, object]) -> dict[str, dict[str, bool | int]]:
+    """Convert raw environment variables into a safe, value-free summary."""
+    if not isinstance(values, Mapping):
+        return {}
+    return {str(key): _safe_var_metadata(value) for key, value in values.items()}
 
 
 def login_to_env(env: str, force: bool = False) -> dict:
-    """登录到指定环境并获取 token。"""
+    """登录到指定环境并返回不含认证字段的最小状态。"""
     print(f"\n{'='*60}")
     print(f"登录 {env.upper()} 环境")
     print(f"{'='*60}")
@@ -34,51 +53,47 @@ def login_to_env(env: str, force: bool = False) -> dict:
         ConfigManager.reset()
 
         # 加载配置
-        config = get_config(env)
+        get_config(env)
         print("✓ 配置加载成功")
-        print(f"  API 地址: {config.api_base_url}")
+
+        # Fail with a safe, actionable preflight result before making a request.
+        secret_manager = get_secret_manager()
+        secret_manager.get_credentials()
+        secret_manager.get_auth_config(env=env)
+        print("✓ 登录配置预检通过")
 
         # 获取登录服务
         login_service = get_login_service()
 
         # 登录
         print("\n正在尝试登录...")
-        result = login_service.login(force=force)
+        result = login_service.login(force=force, env=env)
 
-        if result["success"]:
+        if isinstance(result, Mapping) and result.get("success") is True:
             print("✓ 登录成功！")
-            print(f"  Token: {result['token'][:50]}..." if result["token"] else "")
+            return {"success": True, "env": env}
 
-            # 获取登录响应
-            response = login_service.get_login_response()
-            if response:
-                print("\n登录响应已收到（敏感字段已隐藏）")
+        print("✗ 登录失败")
+        return {"success": False, "env": env, "error": "登录失败"}
 
-            return {"success": True, "env": env, "token": result["token"], "response": response}
-        else:
-            print(f"✗ 登录失败: {result['error']}")
-            return {"success": False, "env": env, "error": result["error"]}
-
-    except Exception as e:
-        print(f"✗ 登录过程出错: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return {"success": False, "env": env, "error": str(e)}
+    except Exception:
+        # Do not print exception text: server/client errors can echo credentials.
+        print("✗ 登录过程出错")
+        return {"success": False, "env": env, "error": "登录过程出错"}
 
 
 def get_env_vars(env: str | None = None) -> dict:
-    """获取指定环境的环境变量，如未指定则获取所有环境。"""
+    """获取指定环境变量的安全摘要，如未指定则获取所有环境。"""
     token_manager = get_token_manager()
 
     if env:
-        return token_manager.get_env_vars(env)
+        return _summarize_env_vars(token_manager.get_env_vars(env))
 
     # 获取所有环境的变量
     all_vars = {}
     for e in ["test", "uat"]:
         all_vars.update(token_manager.get_env_vars(e))
-    return all_vars
+    return _summarize_env_vars(all_vars)
 
 
 def main():
@@ -121,11 +136,8 @@ def main():
         print(f"\n{'='*60}")
         print("环境变量")
         print(f"{'='*60}")
-        env_vars = get_env_vars()
-        for key, value in env_vars.items():
-            if "TOKEN" in key and len(value) > 50:
-                value = value[:50] + "..."
-            print(f"{key}={value}")
+        for key, metadata in _summarize_env_vars(get_env_vars()).items():
+            print(f"{key}: exists={metadata['exists']}, length={metadata['length']}")
 
     print(f"\n{'='*60}")
     print("完成")

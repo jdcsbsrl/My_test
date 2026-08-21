@@ -1,10 +1,12 @@
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
 import allure
 
 from modules.auto_test.api.base_api import BaseAPI
 from modules.auto_test.core.api_client import APIClient
+from modules.auto_test.core.secret_provider import get_secret
 
 
 class OpenAPIClient(BaseAPI):
@@ -14,11 +16,27 @@ class OpenAPIClient(BaseAPI):
         super().__init__(client)
         self.app_key = app_key
         self.app_secret = app_secret
-        self.base_url = os.getenv("OPENAPI_BASE_URL")
+        self.base_url = get_secret("OPENAPI_BASE_URL")
 
     def _get_auth_headers(self) -> dict[str, str]:
         """获取认证头"""
         return {"Content-Type": "application/json", "X-App-Key": self.app_key, "X-App-Secret": self.app_secret}
+
+    def _endpoint(self, path: str) -> str:
+        """Build an endpoint without allowing credentials to enter its query string."""
+        base_url = str(self.base_url or "").strip()
+        parsed = urlsplit(base_url)
+        if (
+            not base_url
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("OPENAPI_BASE_URL must be an HTTP(S) origin without credentials or query parameters")
+        return f"{base_url.rstrip('/')}{path}"
 
     @allure.step("物流查询API")
     def query_logistics_page(self, params: dict[str, Any] | None = None) -> Any:
@@ -27,7 +45,7 @@ class OpenAPIClient(BaseAPI):
 
         Endpoint: POST /oms-admin/system/customerApiResource/openapi/logistics/queryLogisticsPage
         """
-        endpoint = f"{self.base_url}/oms-admin/system/customerApiResource/openapi/logistics/queryLogisticsPage"
+        endpoint = self._endpoint("/oms-admin/system/customerApiResource/openapi/logistics/queryLogisticsPage")
         headers = self._get_auth_headers()
         response = self.post(endpoint, json=params or {}, headers=headers)
         self.attach_request_info(response)
@@ -40,7 +58,7 @@ class OpenAPIClient(BaseAPI):
 
         Endpoint: POST /oms-admin/system/customerApiResource/openapi/order/queryBillPage
         """
-        endpoint = f"{self.base_url}/oms-admin/system/customerApiResource/openapi/order/queryBillPage"
+        endpoint = self._endpoint("/oms-admin/system/customerApiResource/openapi/order/queryBillPage")
         headers = self._get_auth_headers()
         response = self.post(endpoint, json=params or {}, headers=headers)
         self.attach_request_info(response)
@@ -53,7 +71,7 @@ class OpenAPIClient(BaseAPI):
 
         Endpoint: POST /oms-admin/system/customerApiResource/openapi/order/queryBillItem
         """
-        endpoint = f"{self.base_url}/oms-admin/system/customerApiResource/openapi/order/queryBillItem"
+        endpoint = self._endpoint("/oms-admin/system/customerApiResource/openapi/order/queryBillItem")
         headers = self._get_auth_headers()
         response = self.post(endpoint, json=params or {}, headers=headers)
         self.attach_request_info(response)
@@ -66,7 +84,7 @@ class OpenAPIClient(BaseAPI):
 
         Endpoint: POST /oms-admin/system/customerApiResource/openapi/order/queryQuotationPage
         """
-        endpoint = f"{self.base_url}/oms-admin/system/customerApiResource/openapi/order/queryQuotationPage"
+        endpoint = self._endpoint("/oms-admin/system/customerApiResource/openapi/order/queryQuotationPage")
         headers = self._get_auth_headers()
         response = self.post(endpoint, json=params or {}, headers=headers)
         self.attach_request_info(response)
@@ -79,7 +97,7 @@ class OpenAPIClient(BaseAPI):
 
         Endpoint: POST /oms-admin/system/customerApiResource/openapi/order/queryOrderPage
         """
-        endpoint = f"{self.base_url}/oms-admin/system/customerApiResource/openapi/order/queryOrderPage"
+        endpoint = self._endpoint("/oms-admin/system/customerApiResource/openapi/order/queryOrderPage")
         headers = self._get_auth_headers()
         response = self.post(endpoint, json=params or {}, headers=headers)
         self.attach_request_info(response)
@@ -92,7 +110,7 @@ class OpenAPIClient(BaseAPI):
 
         Endpoint: POST /oms-admin/system/customerApiResource/openapi/order/querySkuStockPage
         """
-        endpoint = f"{self.base_url}/oms-admin/system/customerApiResource/openapi/order/querySkuStockPage"
+        endpoint = self._endpoint("/oms-admin/system/customerApiResource/openapi/order/querySkuStockPage")
         headers = self._get_auth_headers()
         response = self.post(endpoint, json=params or {}, headers=headers)
         self.attach_request_info(response)

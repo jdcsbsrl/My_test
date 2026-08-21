@@ -37,11 +37,40 @@ def test_init_configures_base_url_timeout_and_ssl(driver):
     [
         ("/api/orders", "https://erp.example.test/api/orders"),
         ("api/orders", "https://erp.example.test/api/orders"),
-        ("https://external.example.test/orders", "https://external.example.test/orders"),
     ],
 )
-def test_build_url_handles_relative_and_absolute_urls(driver, endpoint, expected):
+def test_build_url_handles_relative_urls(driver, endpoint, expected):
     assert driver._build_url(endpoint) == expected
+
+
+def test_build_url_rejects_cross_origin_absolute_url(driver):
+    with pytest.raises(ValueError, match="outside the configured origin"):
+        driver._build_url("https://external.example.test/orders")
+
+
+def test_build_url_rejects_parent_path_escape(driver):
+    with pytest.raises(ValueError, match="Unsafe endpoint path|escapes"):
+        driver._build_url("../../etc/passwd")
+
+
+def test_http_logs_redact_sensitive_values(driver, monkeypatch):
+    messages = []
+    monkeypatch.setattr("modules.auto_test.drivers.http_driver.logger.debug", messages.append)
+
+    driver._log_request(
+        "POST",
+        "https://erp.example.test/api/login?token=secret",
+        json={"username": "alice", "password": "pw", "nested": {"access_token": "jwt"}},
+        headers={"Authorization": "Bearer jwt", "X-App-Key": "app-key", "X-App-Secret": "app-secret", "X-Trace": "ok"},
+    )
+
+    rendered = " ".join(messages)
+    assert "pw" not in rendered
+    assert "jwt" not in rendered
+    assert "app-key" not in rendered
+    assert "app-secret" not in rendered
+    assert "[REDACTED]" in rendered
+    assert "token=secret" not in rendered
 
 
 def test_request_adds_default_timeout_and_returns_response(driver):

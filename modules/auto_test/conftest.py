@@ -2,10 +2,11 @@
 
 import os
 import json
+import re
 import sys
 import time
 import uuid
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import requests
@@ -20,18 +21,40 @@ from modules.auto_test.core.test_data_factory import (
     TestDataFactory,
 )
 from modules.auto_test.core.token_manager import TokenManager, get_token_manager
+from modules.auto_test.core.secret_provider import get_secret
 from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager
 from modules.auto_test.drivers.browser_driver import BrowserDriver
+from modules.trae_test.utils.runtime_paths import runtime_dir
 from modules.auto_test.pages.login_page import LoginPage
 
 load_dotenv()
 
-USERNAME = os.getenv("TEST_USERNAME")
-PASSWORD = os.getenv("TEST_PASSWORD")
-TEST_RUN_ID = os.getenv("TEST_RUN_ID", uuid.uuid4().hex)
+USERNAME = get_secret("USERNAME")
+PASSWORD = get_secret("PASSWORD")
+TEST_RUN_ID = os.getenv("TEST_RUN_ID") or uuid.uuid4().hex
+os.environ.setdefault("TEST_RUN_ID", TEST_RUN_ID)
 _TEST_ATTEMPTS: dict[str, int] = {}
 _TEST_RESULTS: list[dict] = []
-RUNTIME_REPORTS_DIR = Path(".runtime/reports")
+_WORKER_ID = os.getenv("PYTEST_XDIST_WORKER", "master")
+
+
+def _safe_runtime_component(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    return cleaned or "unknown"
+
+
+def _safe_artifact_name(name: str) -> str:
+    if not name or name in {".", ".."} or any(separator in name for separator in ("/", "\\", ":")):
+        raise ValueError(f"Artifact name must not contain path separators: {name!r}")
+    return name
+
+
+RUNTIME_REPORTS_DIR = (
+    runtime_dir("reports")
+    / "runs"
+    / _safe_runtime_component(TEST_RUN_ID)
+    / _safe_runtime_component(_WORKER_ID)
+)
 RUNTIME_SCREENSHOTS_DIR = RUNTIME_REPORTS_DIR / "screenshots"
 
 if not USERNAME or not PASSWORD:
@@ -131,14 +154,26 @@ def _classify_failure(report: pytest.TestReport) -> str:
 def _ensure_runtime_directories() -> None:
     """Create runtime output directories for clean checkouts and CI workers."""
     for directory in (
-        Path(".runtime/cache/pytest"),
-        Path(".runtime/cache/ruff"),
-        Path(".runtime/downloads"),
-        Path(".runtime/uploads"),
+        runtime_dir("cache") / "pytest",
+        runtime_dir("cache") / "ruff",
+        runtime_dir("downloads"),
+        runtime_dir("uploads"),
         RUNTIME_REPORTS_DIR,
-        Path(".runtime/sheet_build"),
+        runtime_dir("sheet_build"),
     ):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def _close_database_data_generator(generator: DatabaseDataGenerator | None) -> None:
+    if generator is None:
+        return
+    db_helper = getattr(generator, "db_helper", None)
+    if db_helper is None:
+        return
+    close = getattr(db_helper, "close", None)
+    if callable(close):
+        close()
+    generator.db_helper = None
 
 
 @pytest.fixture(scope="session")
@@ -147,27 +182,37 @@ def config_manager() -> ConfigManager:
     return get_config()
 
 
-@pytest.fixture(scope="session")
-def test_data_factory() -> TestDataFactory:
+@pytest.fixture(scope="function")
+def test_data_factory():
     """Provide a test data factory for generating test data (DB-backed when available)."""
-    return EnhancedTestDataFactory()
+    factory = EnhancedTestDataFactory()
+    try:
+        yield factory
+    finally:
+        _close_database_data_generator(getattr(factory, "_generators", {}).get("database"))
 
 
 @pytest.fixture(scope="function")
 def data_lifecycle(config_manager: ConfigManager):
     """Track test-created data and always attempt cleanup after the test."""
     manager = TestDataLifecycleManager(env=config_manager.env)
-    yield manager
-    manager.execute_cleanup()
+    try:
+        yield manager
+    finally:
+        manager.execute_cleanup()
 
 
-@pytest.fixture(scope="session")
-def database_data_generator() -> DatabaseDataGenerator:
+@pytest.fixture(scope="function")
+def database_data_generator():
     """Provide a database-backed data generator for real business data."""
-    return DatabaseDataGenerator()
+    generator = DatabaseDataGenerator()
+    try:
+        yield generator
+    finally:
+        _close_database_data_generator(generator)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def schema_factory() -> SchemaBasedFactory:
     """Provide a schema-based data factory."""
     return SchemaBasedFactory()
@@ -182,8 +227,10 @@ def browser(config_manager: ConfigManager) -> Browser:
         headless=config_manager.get("playwright.headless", True),
         slow_mo=config_manager.get("playwright.slow_mo", 0),
     )
-    yield browser
-    driver.shutdown_browser()
+    try:
+        yield browser
+    finally:
+        driver.shutdown_browser()
 
 
 @pytest.fixture(scope="function")
@@ -202,22 +249,33 @@ def context(
 
     video_config = config_manager.get("playwright.video", "off")
     if video_config in ("on", "retain-on-failure"):
-        context_options["record_video_dir"] = ".runtime/reports/videos"
+        context_options["record_video_dir"] = str(RUNTIME_REPORTS_DIR / "videos")
         context_options["record_video_size"] = viewport
 
     context = browser.new_context(**context_options)
-
     trace_config = config_manager.get("playwright.trace", "off")
-    if trace_config in ("on", "retain-on-failure", "on-first-retry"):
-        context.tracing.start(screenshots=True, snapshots=True, sources=True)
-
-    yield context
-
-    if trace_config != "off":
-        os.makedirs(".runtime/reports/traces", exist_ok=True)
-        trace_path = f".runtime/reports/traces/test_trace_{uuid.uuid4().hex[:8]}.zip"
-        context.tracing.stop(path=trace_path)
-    context.close()
+    trace_started = False
+    try:
+        if trace_config in ("on", "retain-on-failure", "on-first-retry"):
+            context.tracing.start(screenshots=True, snapshots=True, sources=True)
+            trace_started = True
+        yield context
+    finally:
+        errors: list[Exception] = []
+        if trace_started:
+            trace_dir = RUNTIME_REPORTS_DIR / "traces"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            trace_path = trace_dir / f"test_trace_{uuid.uuid4().hex[:8]}.zip"
+            try:
+                context.tracing.stop(path=str(trace_path))
+            except Exception as exc:
+                errors.append(exc)
+        try:
+            context.close()
+        except Exception as exc:
+            errors.append(exc)
+        if errors:
+            raise RuntimeError("Browser context teardown failed") from errors[0]
 
 
 @pytest.fixture(scope="session")
@@ -229,22 +287,26 @@ def authenticated_storage_state(
     auth_file = auth_dir / "state.json"
     base_url = config_manager.base_url
     for attempt in range(2):
-        auth_context = browser.new_context(
-            viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
-        )
-        auth_page = auth_context.new_page()
+        auth_context = None
+        auth_page = None
         try:
+            auth_context = browser.new_context(
+                viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
+            )
+            auth_page = auth_context.new_page()
             if not LoginPage(auth_page).login(USERNAME, PASSWORD):
                 raise RuntimeError("登录流程未成功返回")
             _assert_authenticated_page(auth_page, base_url, timeout=30000)
             auth_context.storage_state(path=str(auth_file))
             return str(auth_file)
         except Exception as exc:
-            _capture_authentication_diagnostic(auth_page, f"storage-state-{attempt + 1}")
+            if auth_page is not None:
+                _capture_authentication_diagnostic(auth_page, f"storage-state-{attempt + 1}")
             if attempt == 1:
                 pytest.fail(f"Unable to create authenticated browser state: {exc}")
         finally:
-            auth_context.close()
+            if auth_context is not None:
+                auth_context.close()
 
     raise AssertionError("unreachable")
 
@@ -253,8 +315,10 @@ def authenticated_storage_state(
 def page(context: BrowserContext) -> Page:
     """Create a new page for each test function."""
     page = context.new_page()
-    yield page
-    page.close()
+    try:
+        yield page
+    finally:
+        page.close()
 
 
 @pytest.fixture(scope="function")
@@ -359,47 +423,56 @@ def login_response(
 
     Uses Playwright to perform a real browser login and captures the API response.
     """
-    login_result = {}
+    def capture() -> dict:
+        login_result: dict = {}
 
-    def handle_response(response):
-        if "/auth/login" in response.url:
-            try:
-                login_result["response"] = response.json()
-                headers = response.request.all_headers()
-                login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
-            except Exception:
-                pass
+        def handle_response(response):
+            if "/auth/login" in response.url:
+                try:
+                    login_result["response"] = response.json()
+                    headers = response.request.all_headers()
+                    login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
+                except Exception:
+                    pass
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=config_manager.get("playwright.headless", True))
+        driver = BrowserDriver()
+        browser = driver.start_browser(
+            browser=config_manager.get("playwright.browser", "chromium"),
+            headless=config_manager.get("playwright.headless", True),
+            slow_mo=config_manager.get("playwright.slow_mo", 0),
+        )
         try:
-            page = browser.new_page(viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080}))
+            page = browser.new_page(
+                viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
+            )
             page.on("response", handle_response)
-
             page.goto(ui_base_url)
             page.wait_for_load_state("networkidle")
-
-            login_page = LoginPage(page)
-            login_page.login(test_user_credentials["username"], test_user_credentials["password"])
-
+            LoginPage(page).login(test_user_credentials["username"], test_user_credentials["password"])
             if "response" not in login_result:
-                pytest.fail("Failed to capture login API response")
-
+                raise RuntimeError("Failed to capture login API response")
             login_result["response"]["_clientid"] = login_result.get("clientid")
             login_result["response"]["_cookies"] = page.context.cookies()
             return login_result["response"]
-
-        except Exception as e:
-            pytest.fail(f"Failed to get login response: {e}")
         finally:
-            browser.close()
+            driver.shutdown_browser()
+
+    try:
+        # Some suites embed async browser work before this session fixture is
+        # requested. Playwright Sync API must run outside that event-loop
+        # thread, so capture the browser response in a short-lived worker.
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="login-capture") as executor:
+            return executor.submit(capture).result()
+    except Exception as e:
+        pytest.fail(f"Failed to get login response: {e}")
 
 
 @pytest.fixture(scope="session")
-def login_token(login_response: dict, token_manager: TokenManager, config_manager: ConfigManager) -> str:
+def login_token(login_response: dict) -> str:
     """Provide the authentication token for API requests.
 
-    The token is cached using TokenManager to avoid repeated login during the test session.
+    The token is cached by pytest for this test session only; it is not persisted
+    to the shared token file.
 
     Returns:
         str: The access token for API authentication
@@ -408,9 +481,6 @@ def login_token(login_response: dict, token_manager: TokenManager, config_manage
         data = login_response.get("data") or {}
         token = data.get("token") or data.get("access_token")
         if token:
-            token_manager.save_token(
-                env=config_manager.env, token=str(token), username=USERNAME, expires_in=data.get("expire_in", 7200)
-            )
             return str(token)
     pytest.fail("Failed to extract token from login response")
 
@@ -432,7 +502,7 @@ def authenticated_http_client(http_client, login_token: str, login_response: dic
     Returns:
         requests.Session: HTTP session with Authorization header
     """
-    clientid = login_response.get("_clientid") or os.getenv("TEST_CLIENTID")
+    clientid = login_response.get("_clientid") or get_secret("CLIENTID")
     headers = {"Authorization": f"Bearer {login_token}", "Content-Type": "application/json"}
     if clientid:
         headers["clientid"] = clientid
@@ -452,11 +522,16 @@ def auto_cleanup():
 
     yield add_cleanup
 
+    failures: list[Exception] = []
     for func, args, kwargs in reversed(cleanup_items):
         try:
-            func(*args, **kwargs)
-        except Exception:
-            pass
+            result = func(*args, **kwargs)
+            if result is False:
+                raise RuntimeError(f"Cleanup callback returned False: {func!r}")
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise RuntimeError(f"{len(failures)} cleanup callback(s) failed") from failures[0]
 
 
 @pytest.fixture(scope="function")
@@ -464,10 +539,11 @@ def screenshot_helper(page: Page):
     """Provide a helper function for taking screenshots during tests."""
 
     def take_screenshot(name: str):
-        os.makedirs(".runtime/reports/screenshots", exist_ok=True)
+        safe_name = _safe_artifact_name(name)
+        RUNTIME_SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        path = f".runtime/reports/screenshots/{name}_{timestamp}_{uuid.uuid4().hex[:6]}.png"
-        page.screenshot(path=path, full_page=True)
-        return path
+        path = RUNTIME_SCREENSHOTS_DIR / f"{safe_name}_{timestamp}_{uuid.uuid4().hex[:6]}.png"
+        page.screenshot(path=str(path), full_page=True)
+        return str(path)
 
     return take_screenshot

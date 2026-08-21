@@ -102,9 +102,9 @@ openapi:
       app_secret: "${OPENAPI_APP_SECRET}"
     invalid:
       - app_key: "invalid_key"
-        app_secret: "invalid_secret"
+        app_secret: "<INVALID_APP_SECRET>"
       - app_key: "${OPENAPI_APP_KEY}"
-        app_secret: "wrong_secret"
+        app_secret: "<WRONG_APP_SECRET>"
   
   # API请求参数
   order_query:

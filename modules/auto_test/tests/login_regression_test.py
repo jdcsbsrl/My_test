@@ -1,10 +1,12 @@
-"""Login Regression Test - Capture auth parameters from UAT and TEST environments."""
+"""Login regression capture with secrets-free runtime reporting."""
 
 import json
 import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")
@@ -13,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from dotenv import load_dotenv
 import pytest
+
+from modules.trae_test.utils.runtime_paths import runtime_dir
 
 load_dotenv()
 
@@ -34,14 +38,52 @@ ENVIRONMENTS = {
 }
 
 
+def _safe_endpoint_path(value: Any) -> str:
+    """Return only a URL path, never a query, fragment, or credential-bearing URL."""
+    if not isinstance(value, str) or not value:
+        return "[unavailable]"
+    if value in {"[redacted]", "[unavailable]"}:
+        return value
+
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "[redacted]"
+
+    if parsed.query or parsed.fragment or parsed.username or parsed.password:
+        return "[redacted]"
+    if parsed.path.startswith("/"):
+        return parsed.path
+    return "[unavailable]"
+
+
+def _response_code(response: Any) -> int | str | None:
+    """Return a primitive response code without retaining or formatting the response body."""
+    code = response.get("code") if isinstance(response, dict) else response
+    if isinstance(code, bool):
+        return None
+    if isinstance(code, int):
+        return code
+    if isinstance(code, str) and code.isdigit() and len(code) <= 16:
+        return code
+    return None
+
+
+def _response_succeeded(response: Any) -> bool:
+    """Summarize login response success without exposing response contents."""
+    return isinstance(response, dict) and (response.get("code") == 200 or response.get("success") is True)
+
+
+def _safe_error_type(value: Any) -> str:
+    """Keep only a Python exception class name in the report."""
+    return value if isinstance(value, str) and value.isidentifier() else "UnknownError"
+
+
 def run_login_capture(env_name: str, ui_base_url: str) -> dict:
-    """Capture auth params by performing browser login."""
+    """Capture login data in memory and return only a safe execution summary."""
     from modules.auto_test.core.playwright_login_capture import capture_auth_login_via_browser
 
-    print(f"\n{'='*60}")
-    print(f"[{env_name}] Starting login capture...")
-    print(f"[{env_name}] UI URL: {ui_base_url}")
-    print(f"{'='*60}")
+    print(f"\n[{env_name}] Starting login capture...")
 
     try:
         captured, response = capture_auth_login_via_browser(
@@ -56,77 +98,42 @@ def run_login_capture(env_name: str, ui_base_url: str) -> dict:
         result = {
             "env": env_name,
             "status": "success",
-            "clientid": captured.clientid,
-            "encrypt_key": captured.encrypt_key,
-            "post_url": captured.post_url,
-            "response_success": response.get("code") == 200 or response.get("success") is True,
-            "response_message": response.get("message", ""),
+            "clientid_present": bool(captured.clientid),
+            "encrypt_key_present": bool(captured.encrypt_key),
+            "login_path": _safe_endpoint_path(captured.post_url),
+            "response_code": _response_code(response),
+            "response_success": _response_succeeded(response),
         }
 
-        print(f"[{env_name}] SUCCESS!")
-        print(f"[{env_name}] ClientID: {captured.clientid[:8]}...")
-        print(f"[{env_name}] EncryptKey: {captured.encrypt_key[:20]}...")
+        print(
+            f"[{env_name}] SUCCESS: auth headers captured "
+            f"(clientid={'yes' if result['clientid_present'] else 'no'}, "
+            f"encrypt-key={'yes' if result['encrypt_key_present'] else 'no'}); "
+            f"response_success={'yes' if result['response_success'] else 'no'}; "
+            f"login_path={result['login_path']}"
+        )
         return result
 
     except Exception as e:
-        print(f"[{env_name}] FAILED: {e}")
+        error_type = type(e).__name__
+        print(f"[{env_name}] FAILED: {error_type}")
         return {
             "env": env_name,
             "status": "failed",
-            "error": str(e),
-            "clientid": None,
-            "encrypt_key": None,
+            "error_type": error_type,
+            "clientid_present": False,
+            "encrypt_key_present": False,
+            "login_path": "[unavailable]",
         }
 
 
-def update_env_file(results: list[dict]) -> None:
-    """Update .env file with captured auth parameters."""
-    env_path = Path(__file__).parent.parent / ".env"
-
-    updates = {}
-    for result in results:
-        if result["status"] != "success":
-            continue
-        env_key = result["env"].upper()
-        prefix = f"TEST_{env_key}_"
-        updates[f"{prefix}CLIENTID"] = result["clientid"]
-        updates[f"{prefix}ENCRYPT_KEY"] = result["encrypt_key"]
-
-    lines = env_path.read_text(encoding="utf-8").splitlines()
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        skip = False
-        for key in updates:
-            if stripped.startswith(f"{key}="):
-                skip = True
-                break
-        if skip:
-            continue
-        new_lines.append(line)
-        if stripped.startswith("# TEST 环境认证配置") and "TEST_TEST_CLIENTID" not in updates:
-            new_lines.append(f"TEST_TEST_CLIENTID={updates.get('TEST_TEST_CLIENTID', '')}")
-            new_lines.append(f"TEST_TEST_ENCRYPT_KEY={updates.get('TEST_TEST_ENCRYPT_KEY', '')}")
-        if stripped.startswith("# UAT 环境认证配置") and "TEST_UAT_CLIENTID" not in updates:
-            new_lines.append(f"TEST_UAT_CLIENTID={updates.get('TEST_UAT_CLIENTID', '')}")
-            new_lines.append(f"TEST_UAT_ENCRYPT_KEY={updates.get('TEST_UAT_ENCRYPT_KEY', '')}")
-
-    for key, value in updates.items():
-        new_lines.append(f"{key}={value}")
-
-    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
-    print("\n.env file updated with auth parameters")
-
-
 def generate_report(results: list[dict], timestamp: str) -> Path:
-    """Generate test report JSON."""
-    report_dir = Path(__file__).parent.parent / "reports"
-    report_dir.mkdir(exist_ok=True)
+    """Generate a secrets-free JSON report under the unified runtime directory."""
+    report_dir = runtime_dir("reports")
 
     report = {
         "test_type": "login_regression",
         "timestamp": timestamp,
-        "test_account": {"username": USERNAME, "password": "***"},
         "environments": {},
         "summary": {
             "total": len(results),
@@ -139,13 +146,16 @@ def generate_report(results: list[dict], timestamp: str) -> Path:
         env_name = result["env"]
         report["environments"][env_name] = {
             "status": result["status"],
-            "ui_url": ENVIRONMENTS[env_name]["ui_base_url"],
-            "clientid": result.get("clientid"),
-            "encrypt_key": result.get("encrypt_key"),
-            "post_url": result.get("post_url"),
+            "auth_summary": {
+                "required_headers_present": bool(result.get("clientid_present"))
+                and bool(result.get("encrypt_key_present")),
+                "login_path": _safe_endpoint_path(result.get("login_path")),
+                "response_code": _response_code(result.get("response_code")),
+                "response_success": bool(result.get("response_success")),
+            },
         }
         if result["status"] == "failed":
-            report["environments"][env_name]["error"] = result.get("error", "Unknown error")
+            report["environments"][env_name]["error_type"] = _safe_error_type(result.get("error_type"))
 
     report_path = report_dir / f"login_regression_{timestamp}.json"
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -158,15 +168,12 @@ def main():
     print("=" * 60)
     print("Login Regression Test - Auth Parameter Capture")
     print("=" * 60)
-    print(f"Username: {USERNAME}")
     print(f"Timestamp: {timestamp}")
 
     results = []
     for env_name, config in ENVIRONMENTS.items():
         result = run_login_capture(env_name, config["ui_base_url"])
         results.append(result)
-
-    update_env_file(results)
 
     report_path = generate_report(results, timestamp)
 
@@ -177,8 +184,11 @@ def main():
         status_icon = "✓" if result["status"] == "success" else "✗"
         print(f"{status_icon} [{result['env']}] {result['status'].upper()}")
         if result["status"] == "success":
-            print(f"    ClientID: {result['clientid'][:12]}...")
-            print(f"    EncryptKey: {result['encrypt_key'][:24]}...")
+            print(
+                f"    Auth summary: clientid={'present' if result['clientid_present'] else 'missing'}, "
+                f"encrypt-key={'present' if result['encrypt_key_present'] else 'missing'}, "
+                f"response_success={'yes' if result['response_success'] else 'no'}"
+            )
     print("=" * 60)
     print(f"Report: {report_path}")
 

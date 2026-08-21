@@ -23,8 +23,10 @@ from playwright.sync_api import Page
 from modules.auto_test.facades.inventory_sku_facade import InventorySKUFacade
 from modules.auto_test.pages.login_page import LoginPage
 
-USERNAME = os.getenv("TEST_USERNAME")
-PASSWORD = os.getenv("TEST_PASSWORD")
+from modules.auto_test.core.secret_provider import get_secret
+
+USERNAME = get_secret("USERNAME")
+PASSWORD = get_secret("PASSWORD")
 
 SEARCH_KEYWORDS = [
     "YX-L",
@@ -146,7 +148,7 @@ class TestInventorySKUSearch:
     def test_search_combination(self, facade: InventorySKUFacade):
         """组合条件查询：SKU编码+产品名称"""
         result = facade.search_by_combination(sku_code="YX", product_name="")
-        assert result["count"] >= 0
+        assert result["count"] > 0, f"组合查询YX应有结果: {result}"
 
         allure.attach(
             json.dumps(result, ensure_ascii=False, indent=2, default=str),
@@ -166,7 +168,8 @@ class TestInventorySKUSearch:
         facade.sku_page.wait_for_search_results()
 
         sku_input = facade.sku_page.page.locator('input[placeholder*="库存SKU编码"]').first
-        actual_value = sku_input.input_value() if sku_input.count() > 0 else ""
+        assert sku_input.count() > 0, "库存SKU编码输入框不存在"
+        actual_value = sku_input.input_value()
         assert actual_value == "", f"重置后输入框应为空，实际值: '{actual_value}'"
 
     @allure.feature("库存SKU管理")
@@ -244,7 +247,8 @@ class TestInventorySKUPagination:
             name="分页导航结果",
             attachment_type=allure.attachment_type.JSON,
         )
-        assert result.get("navigation_works", True), "分页导航功能异常"
+        assert "navigation_works" in result, f"分页结果缺少navigation_works字段: {result}"
+        assert result["navigation_works"] is True, f"分页导航功能异常: {result}"
 
     @allure.feature("库存SKU管理")
     @allure.story("分页功能")
@@ -348,8 +352,8 @@ class TestInventorySKUExport:
                     name=f"分页{page_size}导出结果",
                     attachment_type=allure.attachment_type.JSON,
                 )
-                if result.get("success"):
-                    assert result["file_size"] > 1024
+                assert result["success"], f"分页{page_size}导出失败: {result.get('error')}"
+                assert result["file_size"] > 1024, f"分页{page_size}导出文件过小"
 
 
 @pytest.mark.regression

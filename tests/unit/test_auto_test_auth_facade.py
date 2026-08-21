@@ -94,6 +94,16 @@ def test_login_posts_password_payload_without_real_network(facade):
     ]
 
 
+def test_login_path_rejects_absolute_or_parent_paths(facade):
+    facade._config.get = lambda key, default=None: "https://evil.example/login" if key == "api.auth_login_path" else default
+    with pytest.raises(ValueError, match="relative path"):
+        facade._login_path()
+
+    facade._config.get = lambda key, default=None: "/../login" if key == "api.auth_login_path" else default
+    with pytest.raises(ValueError, match="escape"):
+        facade._login_path()
+
+
 def test_get_token_accepts_token_and_access_token(monkeypatch, facade):
     facade.login = lambda username=None, password=None, env=None: SimpleNamespace(
         json=lambda: {"code": 200, "data": {"access_token": "access"}}

@@ -137,7 +137,19 @@ class InventorySKUPage(BasePage):
             raise ValueError(f"未找到可见的导出当前搜索库存SKU菜单项: {clicked}")
 
         logger.info("閫夋嫨瀵煎嚭褰撳墠鎼滅储鐨勫簱瀛楽KU: {}", clicked)
-        self._wait_for_inventory_export_navigation()
+        try:
+            self._wait_for_inventory_export_navigation()
+        except TimeoutError:
+            # The UAT Vue menu occasionally consumes the first synthetic click
+            # while closing the dropdown. Reopen it and use a native locator
+            # click once before treating navigation as a real failure.
+            self.click_export()
+            retry_item = self.page.locator(
+                '.el-dropdown-menu__item:visible:has-text("导出当前搜索的库存SKU")'
+            ).first
+            retry_item.wait_for(state="visible", timeout=10000)
+            retry_item.click(force=True)
+            self._wait_for_inventory_export_navigation(timeout=30000)
 
     def _wait_for_inventory_export_navigation(self, timeout: int = 30000) -> None:
         start_time = time.time()
