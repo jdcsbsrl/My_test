@@ -26,6 +26,14 @@ build/
 !.runtime/**/
 !.runtime/**/.keep
 .runtime/tmp/**
+tmp*/
+pytest-of-*/
+modules/auto_test/reports/
+modules/auto_test/logs/
+modules/.env
+modules/.auth_tokens.json
+modules/auto_test/.env
+configs/auth_state.json
 test_*.xlsx
 htmlcov/
 .coverage
@@ -97,6 +105,7 @@ modules/assets/
 secrets/
 credentials/
 .auth_tokens.json
+**/.auth_tokens.json
 
 # ========== 数据库文件 ==========
 *.db
