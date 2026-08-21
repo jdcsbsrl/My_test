@@ -44,6 +44,20 @@ def test_scanner_blocks_short_secret_as_password_value(tmp_path: Path, monkeypat
     assert scan(tmp_path) == 1
 
 
+def test_scanner_blocks_short_secret_in_allure_container_sensitive_field(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TEST_PASSWORD", "123456")
+    (tmp_path / "fixture-container.json").write_text('{"password": "123456"}', encoding="utf-8")
+
+    assert scan(tmp_path) == 1
+
+
+def test_scanner_ignores_configured_secret_in_allure_container_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TEST_PASSWORD", "123456")
+    (tmp_path / "fixture-container.json").write_text('{"name": "123456", "start": 1234567890}', encoding="utf-8")
+
+    assert scan(tmp_path) == 0
+
+
 def test_scanner_ignores_short_secret_in_ordinary_message(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TEST_PASSWORD", "123456")
     (tmp_path / "result.json").write_text('{"message": "order-123456-created"}', encoding="utf-8")

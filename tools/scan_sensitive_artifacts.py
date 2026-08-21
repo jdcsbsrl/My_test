@@ -51,8 +51,8 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "secret-assignment",
         re.compile(
-            r"(?i)\b(?:password|passwd|secret|access[_-]?token|refresh[_-]?token|api[_-]?key|cookie)\b"
-            r"\s*[=:]\s*[\"']?[^\s\"',}]{8,}"
+            r"(?i)[\"']?\b(?:password|passwd|secret|access[_-]?token|refresh[_-]?token|api[_-]?key|cookie)\b[\"']?"
+            r"\s*[=:]\s*[\"']?[^\s\"',}]{4,}"
         ),
     ),
 )
@@ -104,6 +104,12 @@ def _configured_secret_found(path: Path, text: str, secrets: tuple[str, ...]) ->
     """Match configured secrets without treating IDs or timestamps as leaks."""
 
     if not secrets:
+        return False
+
+    # Allure container files contain fixture lifecycle metadata. They do not
+    # contain test payloads, and short account values can legitimately match a
+    # fixture name or metadata string. Generic token/field rules still run.
+    if path.name.endswith("-container.json"):
         return False
 
     if path.suffix.lower() == ".json":
