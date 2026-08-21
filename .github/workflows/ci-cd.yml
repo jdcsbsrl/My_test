@@ -134,6 +134,9 @@ jobs:
             --cov-report=xml:.runtime/reports/coverage/coverage.xml \
             --cov-report=term \
             --cov-fail-under=60
+      - name: Scan unit test artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
       - name: Upload unit test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -170,6 +173,9 @@ jobs:
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir .runtime/reports/allure-results
+      - name: Scan integration test artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -237,6 +243,9 @@ jobs:
           # an asyncio loop around fixture setup, so UI retries are disabled.
           # The test itself and the framework retain bounded domain retries.
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Scan UI test artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
@@ -250,17 +259,6 @@ jobs:
           name: allure-results-ui-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
-      - name: Upload UI diagnostics
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: ui-diagnostics-shard-${{ matrix.shard }}
-          path: |
-            .runtime/reports/screenshots/
-            .runtime/reports/traces/
-            .runtime/reports/videos/
-          if-no-files-found: ignore
-
   report:
     name: 生成测试报告
     runs-on: ubuntu-latest
@@ -285,6 +283,8 @@ jobs:
           pattern: allure-results-*
           merge-multiple: true
           path: .runtime/reports/allure-results/
+      - name: Scan merged Allure results for secrets
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports/allure-results
       - name: Validate Allure results
         run: |
           RESULT_COUNT=$(find .runtime/reports/allure-results -name '*-result.json' -type f | wc -l)
