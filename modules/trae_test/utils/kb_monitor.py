@@ -1,6 +1,8 @@
 """知识库监控模块，实现文件大小监控和自动分割触发"""
 
 import os
+import shutil
+import tempfile
 from collections.abc import Callable
 from typing import Any
 
@@ -136,7 +138,7 @@ class KnowledgeBaseMonitor:
             return result
 
         for filename in os.listdir(self.ORIGINAL_DIR):
-            if filename.endswith(".json"):
+            if filename.lower().endswith((".json", ".md")):
                 file_path = os.path.join(self.ORIGINAL_DIR, filename)
                 result["total_files"] += 1
 
@@ -168,8 +170,22 @@ class KnowledgeBaseMonitor:
             处理结果字典
         """
         result = {"success": False, "file_path": file_path, "split": None, "index": None, "error": ""}
+        rollback_dir = tempfile.mkdtemp(prefix="kb-process-")
+        old_chunks = []
+        old_index = None
 
         try:
+            title = os.path.splitext(os.path.basename(file_path))[0]
+            existing_chunks = self.splitter.get_existing_chunks(title) if hasattr(self.splitter, "get_existing_chunks") else []
+            for path in existing_chunks:
+                target = os.path.join(rollback_dir, os.path.basename(path))
+                shutil.copy2(path, target)
+                old_chunks.append(target)
+            index_path = os.path.join(self.INDEX_DIR, "files", f"{title.replace(' ', '_').lower()}_index.json")
+            if os.path.exists(index_path):
+                old_index = os.path.join(rollback_dir, "old_index.json")
+                shutil.copy2(index_path, old_index)
+
             split_result = self.splitter.split_file(file_path)
             result["split"] = split_result
 
@@ -191,6 +207,17 @@ class KnowledgeBaseMonitor:
         except Exception as e:
             result["error"] = str(e)
             return result
+        finally:
+            if not result["success"]:
+                current_chunks = self.splitter.get_existing_chunks(title) if hasattr(self.splitter, "get_existing_chunks") else []
+                for path in current_chunks:
+                    os.unlink(path)
+                for backup in old_chunks:
+                    shutil.copy2(backup, os.path.join(self.splitter.CONTENT_DIR, os.path.basename(backup)))
+                if old_index:
+                    os.makedirs(os.path.dirname(index_path), exist_ok=True)
+                    shutil.copy2(old_index, index_path)
+            shutil.rmtree(rollback_dir, ignore_errors=True)
 
     def process_all_files(self) -> dict[str, Any]:
         """完整处理所有需要处理的文件

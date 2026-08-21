@@ -1,5 +1,6 @@
 """知识库数据访问层 - 文件仓储"""
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -12,8 +13,8 @@ class FileRepository:
 
     def __init__(self, kb_base_dir: str = None):
         self.kb_base_dir = kb_base_dir or PathManager.get_kb_base_dir()
-        self.original_dir = PathManager.get_original_dir()
-        self.chunks_dir = PathManager.get_chunks_dir()
+        self.original_dir = os.path.join(self.kb_base_dir, "data", "original")
+        self.chunks_dir = os.path.join(self.kb_base_dir, "data", "chunks")
 
         self._file_cache = {}
         self._index_cache = {}
@@ -28,9 +29,6 @@ class FileRepository:
             文件内容字典，未找到返回None
         """
         file_id = file_info.get("file_id")
-        if file_id in self._file_cache:
-            return self._file_cache[file_id]
-
         original_path = file_info.get("original_path")
         if not original_path:
             return None
@@ -38,6 +36,18 @@ class FileRepository:
         full_path = os.path.join(self.kb_base_dir, original_path)
         if os.path.exists(full_path):
             try:
+                try:
+                    stat = os.stat(full_path)
+                    with open(full_path, "rb") as raw:
+                        content_hash = hashlib.sha256(raw.read()).hexdigest()
+                    signature = (stat.st_mtime_ns, stat.st_size, content_hash)
+                except OSError:
+                    # Test doubles may patch exists/open without providing a
+                    # real filesystem entry; retain cache compatibility.
+                    signature = None
+                cached = self._file_cache.get(file_id)
+                if cached and cached["signature"] == signature:
+                    return cached["content"]
                 if original_path.lower().endswith(".json"):
                     with open(full_path, encoding="utf-8") as f:
                         content = json.load(f)
@@ -47,7 +57,7 @@ class FileRepository:
                     content = {"title": file_info.get("title", ""), "raw_markdown": raw_text}
                 else:
                     return None
-                self._file_cache[file_id] = content
+                self._file_cache[file_id] = {"signature": signature, "content": content}
                 return content
             except Exception as e:
                 print(f"[FileRepository] 加载文件失败 {full_path}: {e}")
@@ -65,24 +75,31 @@ class FileRepository:
         """
         chunks = []
 
-        if not os.path.exists(self.chunks_dir):
-            return chunks
-
         normalized_title = file_title.replace(" ", "_").lower()
         valid_prefixes = (file_title + "_", normalized_title + "_")
 
-        for filename in os.listdir(self.chunks_dir):
-            if is_chunk_filename(filename) and filename.startswith(valid_prefixes):
-                chunk_path = os.path.join(self.chunks_dir, filename)
-                try:
-                    with open(chunk_path, encoding="utf-8") as f:
-                        chunk = json.load(f)
-                    chunk["source_filename"] = filename
-                    chunks.append(chunk)
-                except Exception as e:
-                    print(f"[FileRepository] 加载块失败 {chunk_path}: {e}")
+        if os.path.exists(self.chunks_dir):
+            for filename in os.listdir(self.chunks_dir):
+                if is_chunk_filename(filename) and filename.startswith(valid_prefixes):
+                    chunk_path = os.path.join(self.chunks_dir, filename)
+                    try:
+                        with open(chunk_path, encoding="utf-8") as f:
+                            chunk = json.load(f)
+                        chunk["source_filename"] = filename
+                        chunks.append(chunk)
+                    except Exception as e:
+                        print(f"[FileRepository] 加载块失败 {chunk_path}: {e}")
 
         chunks.sort(key=lambda x: x.get("chunk_index", 0))
+        if not chunks:
+            original_path = os.path.join(self.original_dir, f"{file_title}.json")
+            if os.path.exists(original_path):
+                with open(original_path, encoding="utf-8") as f:
+                    return [{"chunk_index": 0, "total_chunks": 1, "data": json.load(f), "source": "original"}]
+            markdown_path = os.path.join(self.original_dir, f"{file_title}.md")
+            if os.path.exists(markdown_path):
+                with open(markdown_path, encoding="utf-8") as f:
+                    return [{"chunk_index": 0, "total_chunks": 1, "data": {"title": file_title, "raw_markdown": f.read()}, "source": "original"}]
         return chunks
 
     def get_chunk_by_id(self, file_title: str, chunk_index: int) -> dict[str, Any] | None:
@@ -124,6 +141,8 @@ class FileRepository:
         chunks = self.get_all_chunks(file_title)
 
         if chunks:
+            if chunks[0].get("source") == "original":
+                return chunks[0].get("data")
             first_chunk = chunks[0]
             data_container = first_chunk.get("data")
 

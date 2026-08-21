@@ -4,6 +4,8 @@ import gzip
 import json
 import os
 import re
+import tempfile
+from datetime import datetime, timezone
 from collections import Counter
 from typing import Any
 
@@ -160,6 +162,21 @@ class IndexBuilderV3:
 
         # 确保目录存在
         self._ensure_directories()
+
+    @staticmethod
+    def _atomic_write_json(path: str, payload: dict[str, Any]) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix="index_", suffix=".tmp", dir=os.path.dirname(path))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+        except Exception:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
 
     def _ensure_directories(self):
         """确保必要的目录存在"""
@@ -552,8 +569,7 @@ class IndexBuilderV3:
 
             # 保存文件级索引
             index_path = os.path.join(self.files_index_dir, f"{file_id}_index.json")
-            with open(index_path, "w", encoding="utf-8") as f:
-                json.dump(file_index, f, ensure_ascii=False, indent=2)
+            self._atomic_write_json(index_path, file_index)
 
             result["success"] = True
             result["index_path"] = index_path
@@ -644,13 +660,22 @@ class IndexBuilderV3:
                 result["error"] = "文件级索引目录不存在"
                 return result
 
-            # 扫描所有文件级索引
+            self._load_registry()
+            registry_files = (self._registry or {}).get("files")
+            allowed_ids = set(registry_files) if registry_files else None
+            # Only current registered files may enter the global index.
             index_files = [f for f in os.listdir(self.files_index_dir) if f.endswith("_index.json")]
+            orphan_indexes = []
+            if allowed_ids is not None:
+                orphan_indexes = [f for f in index_files if f.removesuffix("_index.json") not in allowed_ids]
+                index_files = [f for f in index_files if f not in orphan_indexes]
 
             # 聚合索引信息
             global_index = {
                 "version": "3.0",
-                "generated_at": os.path.getmtime(__file__),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "file_count": len(index_files),
+                "orphan_indexes": orphan_indexes,
                 "files": [],
                 "tags": {},
                 "classifications": {},
@@ -690,8 +715,7 @@ class IndexBuilderV3:
 
             # 保存全局索引
             global_index_path = os.path.join(self.global_index_dir, "global_index.json")
-            with open(global_index_path, "w", encoding="utf-8") as f:
-                json.dump(global_index, f, ensure_ascii=False, indent=2)
+            self._atomic_write_json(global_index_path, global_index)
 
             result["success"] = True
             result["indexed_files"] = len(index_files)
@@ -716,7 +740,7 @@ class IndexBuilderV3:
         """
         print("[IndexBuilderV3] 开始构建所有索引...")
 
-        result = {"file_indexes": {}, "global_index": {}, "overall_success": False}
+        result = {"file_indexes": {}, "global_index": {}, "inverted_index": {}, "overall_success": False}
 
         # 构建文件级索引
         file_result = self.build_file_indexes(file_filter)
@@ -726,7 +750,9 @@ class IndexBuilderV3:
             # 构建全局索引
             global_result = self.build_global_index()
             result["global_index"] = global_result
-            result["overall_success"] = global_result["success"]
+            if global_result["success"]:
+                result["inverted_index"] = self.build_inverted_index()
+            result["overall_success"] = global_result["success"] and result["inverted_index"].get("success", False)
 
         return result
 
@@ -779,6 +805,19 @@ class IndexBuilderV3:
 
         return result
 
+    def prune_orphan_file_indexes(self, confirm: bool = False) -> dict[str, Any]:
+        """Report or explicitly remove file indexes absent from the registry."""
+        self._load_registry()
+        registered = set((self._registry or {}).get("files", {}))
+        existing = [f for f in os.listdir(self.files_index_dir) if f.endswith("_index.json")]
+        orphaned = [f for f in existing if f.removesuffix("_index.json") not in registered]
+        result = {"success": True, "orphaned": orphaned, "removed": []}
+        if confirm:
+            for filename in orphaned:
+                os.remove(os.path.join(self.files_index_dir, filename))
+                result["removed"].append(filename)
+        return result
+
     def build_inverted_index(self) -> dict[str, Any]:
         """构建倒排索引
 
@@ -805,7 +844,15 @@ class IndexBuilderV3:
 
             # 构建倒排索引
             inverted_index = self._construct_inverted_index(chunk_files)
+            failed_chunks = getattr(self, "_last_inverted_failures", [])
+            result["failed_chunks"] = failed_chunks
+            if failed_chunks:
+                result["error"] = f"{len(failed_chunks)} 个chunk读取失败"
+                return result
             result["total_keywords"] = len(inverted_index)
+            if not inverted_index:
+                result["error"] = "chunk未提取到任何关键词"
+                return result
 
             # 优化索引
             self._optimize_index(inverted_index)
@@ -836,9 +883,10 @@ class IndexBuilderV3:
         chunk_files = []
 
         if os.path.exists(self.chunks_dir):
-            for filename in os.listdir(self.chunks_dir):
-                if "_chunk_" in filename and filename.endswith(".json"):
-                    chunk_files.append(os.path.join(self.chunks_dir, filename))
+            for root, _, filenames in os.walk(self.chunks_dir):
+                for filename in filenames:
+                    if "_chunk_" in filename and filename.endswith(".json"):
+                        chunk_files.append(os.path.join(root, filename))
 
         return chunk_files
 
@@ -880,6 +928,8 @@ class IndexBuilderV3:
 
         # 合并所有文本
         full_text = " ".join(text_parts)
+        if not full_text.strip():
+            full_text = json.dumps(chunk_content, ensure_ascii=False)
 
         # 提取中文词和英文词
         chinese_words = re.findall(r"[\u4e00-\u9fa5]{2,}", full_text)
@@ -927,13 +977,14 @@ class IndexBuilderV3:
             倒排索引：{关键词: [{chunk_id, weight, field}, ...]}
         """
         inverted_index = {}
+        self._last_inverted_failures = []
 
         for chunk_path in chunk_files:
             try:
                 with open(chunk_path, encoding="utf-8") as f:
                     chunk = json.load(f)
 
-                chunk_id = chunk.get("chunk_id", "")
+                chunk_id = chunk.get("chunk_id") or os.path.splitext(os.path.basename(chunk_path))[0]
                 if not chunk_id:
                     continue
 
@@ -956,6 +1007,7 @@ class IndexBuilderV3:
 
             except Exception as e:
                 print(f"[IndexBuilderV3] 处理chunk文件失败 {chunk_path}: {e}")
+                self._last_inverted_failures.append(chunk_path)
 
         return inverted_index
 
@@ -993,7 +1045,7 @@ class IndexBuilderV3:
         """
         index_data = {
             "version": "3.0",
-            "generated_at": os.path.getmtime(__file__),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
             "total_keywords": len(inverted_index),
             "index": inverted_index,
         }
@@ -1002,12 +1054,19 @@ class IndexBuilderV3:
         compressed_path = os.path.join(self.inverted_index_dir, "inverted_index.json.gz")
 
         # 保存未压缩版本（便于调试）
-        with open(index_path, "w", encoding="utf-8") as f:
-            json.dump(index_data, f, ensure_ascii=False, indent=2)
+        self._atomic_write_json(index_path, index_data)
 
         # 保存压缩版本
-        with gzip.open(compressed_path, "wt", encoding="utf-8") as f:
-            json.dump(index_data, f, ensure_ascii=False)
+        fd, temp_path = tempfile.mkstemp(prefix="inverted_", suffix=".tmp", dir=self.inverted_index_dir)
+        os.close(fd)
+        try:
+            with gzip.open(temp_path, "wt", encoding="utf-8") as f:
+                json.dump(index_data, f, ensure_ascii=False)
+            os.replace(temp_path, compressed_path)
+        except Exception:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+            raise
 
         print(f"[IndexBuilderV3] 倒排索引已保存到 {index_path}")
 
@@ -1064,8 +1123,7 @@ class IndexBuilderV3:
 
         index_path = os.path.join(self.files_index_dir, index_name)
 
-        with open(index_path, "w", encoding="utf-8") as f:
-            json.dump(index_data, f, ensure_ascii=False, indent=2)
+        self._atomic_write_json(index_path, index_data)
 
         return index_path
 

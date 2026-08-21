@@ -16,7 +16,12 @@ from .dir_validator import _load_module_hierarchy
 from .excel_generator import ExcelGenerator
 from .knowledge_retriever import KnowledgeRetriever
 from .template_builder import ensure_template
-from .test_case_strategy import TestCaseStrategy
+from .test_case_strategy import TestCaseOptimizer, TestCaseScoreEngine, TestCaseStrategy
+from .coverage_matrix import CoverageMatrix, build_requirement_coverage_matrix
+
+
+QUALITY_SCORE_GATE = 85.0
+MAX_AUTO_OPTIMIZATION_ATTEMPTS = 3
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +40,8 @@ class TestCaseGenerator:
         """
         self.retriever = retriever or KnowledgeRetriever()
         self.excel_generator = ExcelGenerator()
+        # 需求级覆盖矩阵只保存在运行时，不改变每条用例的15字段结构。
+        self.last_coverage_matrix = CoverageMatrix()
 
     def generate_cases(self, keyword: str, limit: int = 10) -> list[dict[str, Any]]:
         """根据关键词从知识库生成测试用例
@@ -61,7 +68,10 @@ class TestCaseGenerator:
         if not knowledge:
             knowledge = self.retriever.retrieve(keyword)
         if not knowledge:
+            self.last_coverage_matrix = CoverageMatrix()
             return []
+
+        self.last_coverage_matrix = build_requirement_coverage_matrix(keyword, knowledge)
 
         # ── 历史用例学习 ─────────────────────────────────────
         try:
@@ -84,6 +94,10 @@ class TestCaseGenerator:
                 cases.append(case)
 
         return cases
+
+    def get_coverage_matrix(self) -> dict[str, list[str]]:
+        """返回最近一次生成任务的需求级覆盖矩阵快照。"""
+        return self.last_coverage_matrix.to_dict()
 
     @staticmethod
     def _infer_scenario_type(keyword: str, knowledge_str: str) -> str:
@@ -112,15 +126,7 @@ class TestCaseGenerator:
         knowledge_str = str(knowledge) if not isinstance(knowledge, str) else knowledge
 
         hierarchy = _load_module_hierarchy()
-        case_directory = ""
-        for top, second_map in hierarchy.items():
-            if keyword == top or top in keyword or keyword in top:
-                second_keys = list(second_map.keys())
-                if second_keys:
-                    third_list = second_map.get(second_keys[0], [])
-                    if third_list:
-                        case_directory = f"{top} - {second_keys[0]} - {third_list[0]}"
-                break
+        case_directory = self._match_case_directory(keyword, hierarchy)
 
         # ── 场景类型推断 ─────────────────────────────────────
         scenario_type = self._infer_scenario_type(keyword, knowledge_str)
@@ -179,10 +185,53 @@ class TestCaseGenerator:
             "创建人": "余小龙",
             "优先级": priority_p,
             "是否可自动化": "是",
-            "关联缺陷ID": "",
             "回归测试标识": "否",
             "知识库关联": f"{keyword}\n{knowledge_str[:8000]}",
+            "质量评分": 0.0,
         }
+
+    @staticmethod
+    def _derive_coverage_matrix(keyword: str, knowledge: str, scenario_type: str) -> dict[str, str]:
+        text = f"{keyword} {knowledge}"
+        dimensions = {"场景类型": scenario_type}
+        groups = {
+            "单对象": ("单个", "单条", "单sku", "单 SKU"),
+            "多对象": ("多个", "批量", "多sku", "多 SKU"),
+            "多仓库": ("多仓", "多个仓库", "按仓库"),
+            "多明细": ("多明细", "多个明细", "部分明细", "明细"),
+            "状态": ("状态", "处理中", "待", "已发货", "未发货"),
+            "失败": ("失败", "异常", "错误", "回滚", "拦截"),
+        }
+        for dimension, keywords in groups.items():
+            if any(value.lower() in text.lower() for value in keywords):
+                dimensions[dimension] = "已识别"
+        return dimensions
+
+    @staticmethod
+    def _match_case_directory(keyword: str, hierarchy: dict[str, dict[str, list[str]]]) -> str:
+        """根据关键词从导航层级反向匹配最具体的合法目录。
+
+        需求通常只包含三级菜单名（如“库存SKU”），不能要求用户同时输入一级、
+        二级模块名；因此优先按三级菜单命中，再回退到二级、一级匹配。
+        """
+        normalized = "".join(str(keyword or "").lower().split())
+        candidates: list[tuple[int, str]] = []
+        for top, second_map in hierarchy.items():
+            top_norm = "".join(top.lower().split())
+            if top_norm and top_norm in normalized:
+                candidates.append((1, f"{top} - {next(iter(second_map), '')} - {next(iter(second_map.values()), [''])[0]}"))
+            for second, thirds in (second_map or {}).items():
+                second_norm = "".join(second.lower().split())
+                if second_norm and second_norm in normalized:
+                    for third in thirds or []:
+                        candidates.append((2, f"{top} - {second} - {third}"))
+                for third in thirds or []:
+                    third_norm = "".join(str(third).lower().split())
+                    if third_norm and third_norm in normalized:
+                        candidates.append((3, f"{top} - {second} - {third}"))
+        if candidates:
+            return max(candidates, key=lambda item: (item[0], len(item[1])))[1]
+        return ""
 
     def export_to_excel(
         self,
@@ -195,12 +244,26 @@ class TestCaseGenerator:
         Args:
             cases: 测试用例列表
             output_path: 输出路径，若为None则使用默认路径
-            extra_fields: 额外导出字段列表（可选），如 ["状态", "regeneration_count"]
+            extra_fields: 已废弃；正式Excel固定为15字段
 
         Returns:
             导出文件的路径
         """
         ensure_template()
+
+        # 导出是最终交付动作，禁止绕过评分和最终审核门禁。
+        not_ready = [
+            case.get("用例名称", "未命名用例")
+            for case in cases
+            if case.get("最终审核通过") is not True
+            or float(case.get("最终评分", case.get("质量评分", 0)) or 0) < QUALITY_SCORE_GATE
+            or case.get("用例状态") != "正常"
+        ]
+        if not_ready:
+            raise RuntimeError(
+                f"最终审核未通过，禁止导出 {len(not_ready)} 条用例；"
+                f"评分门槛为{QUALITY_SCORE_GATE:g}分"
+            )
 
         return self.excel_generator.generate(cases, output_path, extra_fields=extra_fields)
 
@@ -210,7 +273,7 @@ class TestCaseGenerator:
         limit: int = 10,
         output_path: str | None = None,
         extra_fields: list[str] | None = None,
-        block_on_audit_fail: bool = False,
+        block_on_audit_fail: bool = True,
     ) -> str:
         """生成测试用例并导出到Excel（包含评分和审核）
 
@@ -219,33 +282,64 @@ class TestCaseGenerator:
             limit: 返回用例数量限制
             output_path: 输出路径
             extra_fields: 额外导出字段列表（可选）
-            block_on_audit_fail: 审核失败时是否阻断导出（默认False，仅警告）
+            block_on_audit_fail: 保留兼容参数；当前最终审核未通过时始终阻断导出
 
         Returns:
             导出文件的路径
         """
         from modules.trae_test.orchestrator.audit_gateway import AuditGateway
-        from modules.trae_test.utils.test_case_strategy import TestCaseScoreEngine
-
         cases = self.generate_cases(keyword, limit)
-
-        # 恢复逐条评分（与旧逻辑一致）
         score_engine = TestCaseScoreEngine()
+        optimizer = TestCaseOptimizer(score_engine)
         for case in cases:
-            case["质量评分"] = score_engine.score(case)
+            self._score_and_optimize(case, score_engine, optimizer)
 
         # 使用 AuditGateway 统一入口
         gateway = AuditGateway()
-        context = {"block_on_fail": block_on_audit_fail}
+        context = {"block_on_fail": True}
         audit_result = gateway.audit(cases, "test_case", context)
 
-        if not audit_result.passed:
-            if block_on_audit_fail:
-                raise RuntimeError(f"审核未通过，导出已阻断：{len(audit_result.errors)}个错误")
-            else:
-                logger.warning(f"测试用例审核未通过: {audit_result.errors}")
+        for case in cases:
+            canonical_score = float(case.get("最终评分", case.get("质量评分", 0)) or 0)
+            case["最终评分"] = canonical_score
+            case["质量评分"] = canonical_score
+            case["最终审核通过"] = bool(audit_result.passed) and canonical_score >= QUALITY_SCORE_GATE
+            case["用例状态"] = "正常"
+            case["needs_human_review"] = not case["最终审核通过"]
+
+        if not audit_result.passed or any(not case["最终审核通过"] for case in cases):
+            raise RuntimeError(f"审核未通过，导出已阻断：{len(audit_result.errors)}个错误")
 
         return self.export_to_excel(cases, output_path, extra_fields=extra_fields)
+
+    @staticmethod
+    def _score_and_optimize(
+        case: dict[str, Any], score_engine: TestCaseScoreEngine, optimizer: TestCaseOptimizer
+    ) -> dict[str, Any]:
+        """记录不可覆盖的评分轨迹，并在低于85分时自动优化或退回人工。"""
+        original = float(score_engine.score(case))
+        case.setdefault("原始评分", original)
+        execution_count = int(case.get("execution_count", 0) or 0)
+        cold_start_threshold = int(getattr(score_engine, "_COLD_START_THRESHOLD", 10) or 10)
+        case["是否冷启动评分"] = execution_count < cold_start_threshold
+        case["评分置信度"] = round(float(score_engine._calculate_confidence(execution_count)), 4)
+        case["评分历史"] = list(case.get("评分历史", []))
+        case["评分历史"].append({"阶段": "original", "评分": original})
+        current = original
+        for attempt in range(1, MAX_AUTO_OPTIMIZATION_ATTEMPTS + 1):
+            if current >= QUALITY_SCORE_GATE:
+                break
+            optimizer.optimize(case, target_score=QUALITY_SCORE_GATE)
+            current = float(score_engine.score(case))
+            case["评分历史"].append({"阶段": f"optimized_{attempt}", "评分": current})
+        case["优化后评分"] = current
+        case["最终评分"] = current
+        case["质量评分"] = current
+        case["优化次数"] = max(0, len(case["评分历史"]) - 1)
+        case["用例状态"] = "正常"
+        case["needs_human_review"] = current < QUALITY_SCORE_GATE
+        case["最终审核通过"] = False
+        return case
 
 
 DEFAULT_CREATOR = TestCaseGenerator()

@@ -222,7 +222,14 @@ def test_index_chunk_cache_file_management_and_stats(tmp_path):
     retriever._file_repository.chunk_by_id[("A", 1)] = {"chunk_index": 1}
     retriever._file_repository.aggregated["A"] = {"all": True}
 
-    assert retriever.get_index() == global_index
+    loaded_index = retriever.get_index()
+    assert loaded_index["version"] == global_index["version"]
+    assert loaded_index["files"] == global_index["files"]
+    assert loaded_index["index_status"] == {
+        "valid": False,
+        "missing_files": ["A"],
+        "stale_files": ["a"],
+    }
     assert retriever.list_available_files() == ["A"]
     assert retriever.get_all_chunks("A", max_chunks=2) == [{"chunk_index": 0}, {"chunk_index": 1}]
     assert retriever.get_chunk_by_id("A", 1) == {"chunk_index": 1}

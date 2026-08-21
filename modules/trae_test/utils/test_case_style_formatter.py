@@ -63,9 +63,9 @@ class TestCaseStyleFormatter:
         case["创建人"] = "余小龙"
         case["优先级"] = scenario.priority
         case["是否可自动化"] = scenario.automation_flag
-        case["关联缺陷ID"] = ""
         case["回归测试标识"] = self._format_regression_flag(scenario)
         case["知识库关联"] = self._format_knowledge_association(scenario)
+        case["质量评分"] = 0.0
 
         logger.debug("格式化完成: %s", case.get("用例名称", "未命名"))
         return case
