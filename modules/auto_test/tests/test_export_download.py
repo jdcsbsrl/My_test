@@ -10,6 +10,7 @@ import pytest
 from playwright.sync_api import Page
 
 from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
 
@@ -22,10 +23,17 @@ class TestExportDownload:
     def test_export_download_simple(self, logged_in_page: Page) -> None:
         """Test simple export download."""
         export_page = SalesOrderExportPage(logged_in_page)
+        sales_order_page = SalesOrderPage(logged_in_page)
 
         print("\n=== Step 1: Navigate to export page ===")
+        sales_order_page.navigate_to("sales/order/saleOrder")
+        logged_in_page.wait_for_load_state("networkidle")
+        order_numbers = sales_order_page.get_sorted_order_numbers(limit=1)
+        assert order_numbers, "测试环境没有可用于导出的订单"
         timestamp = str(int(time.time() * 1000))
-        export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo=")
+        export_page.navigate_to(
+            f"sales/order/exportPage?t={timestamp}&orderNo={order_numbers[0]}"
+        )
         assert export_page.wait_for_export_page(timeout=30000), "导出页面未完成加载"
 
         print(f"URL: {export_page.current_url}")
@@ -66,47 +74,26 @@ class TestExportDownload:
         for btn in buttons:
             print(f"  [{btn['index']}] text='{btn['text']}', class={btn['className']}, id={btn['id']}")
 
-        print("\n=== Step 4: Find and click real-time export button ===")
-        realtime_btn_found = False
-        for i, btn in enumerate(buttons):
-            if "导出" in btn["text"]:
-                print(f"\nFound export button: index={i}, text='{btn['text']}'")
-                try:
-                    logged_in_page.evaluate(
-                        """
-                        (index) => {
-                            const btns = document.querySelectorAll('button');
-                            if (btns[index]) {
-                                btns[index].click();
-                                return true;
-                            }
-                            return false;
-                        }
-                    """,
-                        i,
-                    )
-                    realtime_btn_found = True
-                    print(f"Clicked button index {i}")
-                    break
-                except Exception as e:
-                    print(f"Failed to click button {i}: {e}")
+        print("\n=== Step 4: Select the first available export template ===")
+        selects = logged_in_page.locator(".el-select")
+        assert selects.count() > 0, "未找到导出模板选择器"
+        selects.first.click()
+        options = logged_in_page.locator(".el-select-dropdown__item:visible, .el-option:visible")
+        options.first.wait_for(state="visible", timeout=30000)
+        assert options.count() > 0, "测试环境未返回可用导出模板"
+        options.first.click()
 
-        if realtime_btn_found:
-            print("\n=== Step 5: Wait for download ===")
-            try:
-                result = export_page.wait_for_download(timeout=120000)
-                assert result["success"], result.get("error", "download failed")
-                filename = result["filename"]
-                file_path = result["file_path"]
-                file_size = result["file_size"]
+        print("\n=== Step 5: Wait for download (the page object performs one click) ===")
+        result = export_page.wait_for_download(timeout=120000)
+        assert result["success"], result.get("error", "download failed")
+        assert result["file_size"] > 0, "下载文件为空"
+        filename = result["filename"]
+        file_path = result["file_path"]
+        file_size = result["file_size"]
 
-                print("\n✓ Download successful!")
-                print(f"  Filename: {filename}")
-                print(f"  File path: {file_path}")
-                print(f"  File size: {file_size} bytes")
-            except Exception as e:
-                print(f"\n✗ Download failed: {e}")
-        else:
-            print("\n✗ No export button found")
+        print("\n✓ Download successful!")
+        print(f"  Filename: {filename}")
+        print(f"  File path: {file_path}")
+        print(f"  File size: {file_size} bytes")
 
         print("\n=== Test completed ===")

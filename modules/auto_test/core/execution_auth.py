@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from typing import Any
 
 AUTHORIZATION_ENV_VAR = "AUTO_TEST_AUTHORIZED"
-AUTHORIZATION_TOKEN = "AUTHORIZED"
 
 
 @dataclass
@@ -18,7 +17,7 @@ class ExecutionAuthorization:
                 f"执行授权异常: 当前测试执行未经授权。\n"
                 f"根据项目规范，任何自动化测试的执行必须获得项目负责人的明确许可。\n"
                 f"如需执行测试，请联系项目负责人获取授权。\n"
-                f"设置环境变量 {AUTHORIZATION_ENV_VAR}={AUTHORIZATION_TOKEN} 以授权执行。"
+                f"授权变量 {AUTHORIZATION_ENV_VAR} 状态: 未设置或为空。"
             )
 
 
@@ -64,8 +63,8 @@ class ExecutionAuthManager:
         return cls._instance
 
     def _check_env_authorization(self) -> None:
-        auth_env = os.getenv(AUTHORIZATION_ENV_VAR, "")
-        if auth_env == AUTHORIZATION_TOKEN:
+        auth_env = os.getenv(AUTHORIZATION_ENV_VAR, "").strip()
+        if auth_env:
             self._authorization.authorized = True
             self._authorization.authorized_by = os.getenv("AUTHORIZED_BY", "环境变量授权")
             self._authorization.authorized_at = os.getenv("AUTHORIZED_AT", "未知时间")

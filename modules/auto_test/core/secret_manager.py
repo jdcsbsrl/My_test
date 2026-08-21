@@ -1,11 +1,8 @@
-import os
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from dotenv import load_dotenv
-
-load_dotenv()
+from modules.auto_test.core.secret_provider import get_secret
 
 
 def _origin_from_api_base(api_base_url: str) -> str:
@@ -49,8 +46,8 @@ class SecretManager:
         if cache_key in self._secrets_cache:
             return self._secrets_cache[cache_key]
 
-        username = os.getenv("TEST_USERNAME")
-        password = os.getenv("TEST_PASSWORD")
+        username = get_secret("USERNAME")
+        password = get_secret("PASSWORD")
 
         if not username or not password:
             raise ValueError(
@@ -78,15 +75,24 @@ class SecretManager:
 
         cfg_base = api_base_url or get_config(env).api_base_url
 
-        clientid = os.getenv(f"TEST_{env.upper()}_CLIENTID") or os.getenv("TEST_CLIENTID")
-        encrypt_key = os.getenv(f"TEST_{env.upper()}_ENCRYPT_KEY") or os.getenv("TEST_ENCRYPT_KEY")
-        isencrypt = os.getenv(f"TEST_{env.upper()}_ISENCRYPT") or os.getenv("TEST_ISENCRYPT", "true")
-        content_language = os.getenv(f"TEST_{env.upper()}_CONTENT_LANGUAGE") or os.getenv(
-            "TEST_CONTENT_LANGUAGE", "zh_CN"
+        clientid = get_secret(
+            f"{env.upper()}_CLIENTID", environment=env, fallbacks=(f"TEST_{env.upper()}_CLIENTID", "TEST_CLIENTID")
         )
-        origin = os.getenv(f"TEST_{env.upper()}_ORIGIN") or os.getenv("TEST_ORIGIN") or _origin_from_api_base(cfg_base)
-        user_agent = os.getenv(f"TEST_{env.upper()}_USER_AGENT") or os.getenv(
-            "TEST_USER_AGENT",
+        encrypt_key = get_secret(
+            f"{env.upper()}_ENCRYPT_KEY", environment=env, fallbacks=(f"TEST_{env.upper()}_ENCRYPT_KEY", "TEST_ENCRYPT_KEY")
+        )
+        isencrypt = get_secret(
+            f"{env.upper()}_ISENCRYPT", environment=env, fallbacks=(f"TEST_{env.upper()}_ISENCRYPT", "TEST_ISENCRYPT")
+        ) or "true"
+        content_language = get_secret(
+            f"{env.upper()}_CONTENT_LANGUAGE", environment=env, fallbacks=(f"TEST_{env.upper()}_CONTENT_LANGUAGE", "TEST_CONTENT_LANGUAGE")
+        ) or "zh_CN"
+        origin = get_secret(
+            f"{env.upper()}_ORIGIN", environment=env, fallbacks=(f"TEST_{env.upper()}_ORIGIN", "TEST_ORIGIN")
+        ) or _origin_from_api_base(cfg_base)
+        user_agent = get_secret(
+            f"{env.upper()}_USER_AGENT", environment=env, fallbacks=(f"TEST_{env.upper()}_USER_AGENT", "TEST_USER_AGENT")
+        ) or (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )
 
@@ -117,7 +123,7 @@ class SecretManager:
         if cache_key in self._secrets_cache:
             return str(self._secrets_cache[cache_key])
 
-        value = os.getenv("TEST_ENCRYPTED_LOGIN_PASSWORD") or os.getenv("TEST_PASSWORD")
+        value = get_secret("ENCRYPTED_LOGIN_PASSWORD") or get_secret("PASSWORD")
         if not value:
             raise ValueError("Set TEST_ENCRYPTED_LOGIN_PASSWORD or TEST_PASSWORD for the login API request body.")
         self._secrets_cache[cache_key] = value
@@ -127,13 +133,13 @@ class SecretManager:
         if "proxy" in self._secrets_cache:
             return self._secrets_cache["proxy"]
 
-        proxy = os.getenv("TEST_PROXY")
+        proxy = get_secret("PROXY")
         self._secrets_cache["proxy"] = proxy
         return proxy
 
     def get_api_key(self, key_name: str = "default") -> str | None:
         env_key = f"API_KEY_{key_name.upper()}"
-        return os.getenv(env_key)
+        return get_secret(env_key, fallbacks=(env_key,))
 
     def clear_cache(self) -> None:
         self._secrets_cache.clear()

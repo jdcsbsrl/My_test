@@ -12,16 +12,40 @@
 import logging
 import json
 import os
+import re
 import time
 import uuid
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from modules.auto_test.core.db_helper import DBHelper
+from modules.trae_test.utils.runtime_paths import runtime_dir
 
 logger = logging.getLogger(__name__)
+
+
+class CleanupFailureError(RuntimeError):
+    """Raised when one or more cleanup operations are not confirmed successful."""
+
+
+class CleanupOwnershipError(ValueError):
+    """Raised when a cleanup target is not owned by the current test run."""
+
+
+def _safe_runtime_component(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    return cleaned or "unknown"
+
+
+def _cleanup_failure_path() -> Path:
+    run_id = _safe_runtime_component(os.getenv("TEST_RUN_ID", "local"))
+    worker_id = _safe_runtime_component(os.getenv("PYTEST_XDIST_WORKER", "master"))
+    report_dir = runtime_dir("reports") / "runs" / run_id / worker_id
+    report_dir.mkdir(parents=True, exist_ok=True)
+    return report_dir / "cleanup-failures.jsonl"
 
 
 class TestDataLifecycleManager:
@@ -38,7 +62,7 @@ class TestDataLifecycleManager:
 
     def __init__(self, env: str = "test"):
         self.env = env
-        self.run_id = os.getenv("TEST_RUN_ID", uuid.uuid4().hex)
+        self.run_id = os.getenv("TEST_RUN_ID") or uuid.uuid4().hex
         self.db_helper = DBHelper()
         self._setup_tasks: list[tuple] = []
         self._cleanup_tasks: list[dict[str, Any]] = []
@@ -51,8 +75,8 @@ class TestDataLifecycleManager:
         # 已创建的测试数据记录（用于清理）
         self._created_data: list[dict[str, Any]] = []
         self._cleanup_failures: list[dict[str, Any]] = []
-        # 是否启用DB直连兜底清理（仅限测试环境）
-        self._enable_db_fallback = env != "production"
+        # DB 兜底只允许项目认可的测试环境，未知环境默认关闭。
+        self._enable_db_fallback = env in {"test", "test_env", "uat"}
 
     def register_setup_task(
         self,
@@ -82,6 +106,9 @@ class TestDataLifecycleManager:
         task: Callable,
         *args,
         fallback: Callable | None = None,
+        data_type: str | None = None,
+        data_id: str | None = None,
+        owner_run_id: str | None = None,
         **kwargs,
     ) -> None:
         """注册数据清理任务
@@ -89,13 +116,25 @@ class TestDataLifecycleManager:
         Args:
             task: 清理任务函数（通常是API删除）
             fallback: 兜底清理任务（DB直连硬删除，仅限测试环境）
+            data_type: 兜底清理对应的白名单数据类型
+            data_id: 兜底清理对应的数据主键
+            owner_run_id: 数据所属测试运行ID，必须与当前运行一致
         """
+        target_run_id = self.run_id if owner_run_id is None else owner_run_id
+        target = {
+            "type": data_type,
+            "id": data_id,
+            "run_id": target_run_id,
+        }
+        if fallback is not None:
+            self._validate_owned_target(target)
         self._cleanup_tasks.append(
             {
                 "task": task,
                 "args": args,
                 "kwargs": kwargs,
                 "fallback": fallback,
+                **target,
             }
         )
 
@@ -112,15 +151,15 @@ class TestDataLifecycleManager:
             data_id: 数据ID
             cleanup_func: 清理函数
         """
-        self._created_data.append(
-            {
-                "type": data_type,
-                "id": data_id,
-                "cleanup": cleanup_func,
-                "created_at": datetime.now(),
-                "run_id": self.run_id,
-            }
-        )
+        data_item = {
+            "type": data_type,
+            "id": data_id,
+            "cleanup": cleanup_func,
+            "created_at": datetime.now(),
+            "run_id": self.run_id,
+        }
+        self._validate_owned_target(data_item)
+        self._created_data.append(data_item)
 
     def execute_setup(self) -> None:
         """执行所有数据准备任务（按依赖顺序）"""
@@ -153,6 +192,10 @@ class TestDataLifecycleManager:
             else:
                 # 执行已创建数据的清理
                 self._execute_data_cleanup(item)
+        if self._cleanup_failures:
+            raise CleanupFailureError(
+                f"{len(self._cleanup_failures)} cleanup operation(s) were not confirmed successful"
+            )
 
     def _execute_cleanup_task(self, cleanup_item: dict[str, Any]) -> None:
         """执行单个清理任务（含兜底机制）"""
@@ -162,22 +205,36 @@ class TestDataLifecycleManager:
         fallback = cleanup_item.get("fallback")
 
         try:
-            task(*args, **kwargs)
+            result = task(*args, **kwargs)
+            if result is False:
+                raise RuntimeError("API cleanup returned False")
         except Exception as api_error:
             logger.warning(f"API cleanup failed: {api_error}")
 
             # 尝试兜底清理（DB直连）
             if fallback and self._enable_db_fallback:
                 try:
-                    fallback(*args, **kwargs)
+                    self._validate_owned_target(cleanup_item)
+                    result = fallback(*args, **kwargs)
+                    if result is False:
+                        raise RuntimeError("DB fallback cleanup returned False")
                     logger.info("Fallback cleanup (DB) succeeded")
                 except Exception as db_error:
                     logger.error(f"Both API and DB cleanup failed: {db_error}")
                     self._record_cleanup_failure(cleanup_item, api_error, db_error)
                     self._log_cleanup_failure(cleanup_item, str(api_error), str(db_error))
             else:
-                self._record_cleanup_failure(cleanup_item, api_error, None)
-                self._log_cleanup_failure(cleanup_item, str(api_error), None)
+                fallback_error = None
+                if fallback and not self._enable_db_fallback:
+                    fallback_error = CleanupOwnershipError(
+                        f"DB fallback is disabled for environment {self.env!r}"
+                    )
+                self._record_cleanup_failure(cleanup_item, api_error, fallback_error)
+                self._log_cleanup_failure(
+                    cleanup_item,
+                    str(api_error),
+                    str(fallback_error) if fallback_error else None,
+                )
 
     def _execute_data_cleanup(self, data_item: dict[str, Any]) -> None:
         """执行已创建数据的清理"""
@@ -186,9 +243,13 @@ class TestDataLifecycleManager:
         except Exception as e:
             logger.warning(f"Data cleanup failed for {data_item['type']}:{data_item['id']}: {e}")
             # 尝试DB兜底清理
-            if self._enable_db_fallback:
+            try:
+                if not self._enable_db_fallback:
+                    raise CleanupOwnershipError(f"DB fallback is disabled for environment {self.env!r}")
                 self._db_fallback_cleanup(data_item)
-            self._record_cleanup_failure(data_item, e, None)
+            except Exception as fallback_error:
+                self._record_cleanup_failure(data_item, e, fallback_error)
+                self._log_cleanup_failure(data_item, str(e), str(fallback_error))
 
     def _record_cleanup_failure(self, item: Any, api_error: Exception, db_error: Exception | None) -> None:
         """Persist a local fallback record even when the database is unavailable."""
@@ -201,26 +262,36 @@ class TestDataLifecycleManager:
             "created_at": datetime.now().isoformat(),
         }
         self._cleanup_failures.append(failure)
-        os.makedirs(os.path.dirname(".runtime/reports/cleanup-failures.jsonl"), exist_ok=True)
-        with open(".runtime/reports/cleanup-failures.jsonl", "a", encoding="utf-8") as stream:
+        with _cleanup_failure_path().open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(failure, ensure_ascii=False) + "\n")
 
     @property
     def cleanup_failures(self) -> list[dict[str, Any]]:
         return list(self._cleanup_failures)
 
+    def _validate_owned_target(self, data_item: dict[str, Any]) -> None:
+        owner_run_id = data_item.get("run_id")
+        if owner_run_id != self.run_id:
+            raise CleanupOwnershipError(
+                f"Cleanup target belongs to run {owner_run_id!r}, not current run {self.run_id!r}"
+            )
+        data_type = data_item.get("type")
+        if data_type not in self.TABLE_MAP:
+            raise CleanupOwnershipError(f"Unsupported cleanup data type: {data_type!r}")
+        data_id = data_item.get("id")
+        if data_id is None or not str(data_id).strip():
+            raise CleanupOwnershipError("Cleanup target must have a non-empty data id")
+
     def _db_fallback_cleanup(self, data_item: dict[str, Any]) -> None:
-        """DB直连兜底清理（仅限测试环境）"""
+        """DB直连兜底清理（仅限当前测试运行拥有的目标）。"""
+        self._validate_owned_target(data_item)
+        table_name = self.TABLE_MAP[data_item["type"]]
+        db = self.db_helper.connect()
         try:
-            table_name = self.TABLE_MAP.get(data_item["type"])
-            if table_name:
-                db = self.db_helper.connect()
-                db.execute(f"DELETE FROM {table_name} WHERE id = %s", (data_item["id"],))
-                db.close()
-                logger.info(f"DB fallback cleanup succeeded for " f"{data_item['type']}:{data_item['id']}")
-        except Exception as e:
-            logger.error(f"DB fallback cleanup failed: {e}")
-            self._log_cleanup_failure(data_item, None, str(e))
+            db.execute(f"DELETE FROM {table_name} WHERE id = %s", (data_item["id"],))
+            logger.info(f"DB fallback cleanup succeeded for " f"{data_item['type']}:{data_item['id']}")
+        finally:
+            db.close()
 
     def _topological_sort(self) -> list[str]:
         """拓扑排序任务依赖（使用Kahn算法，天然支持环检测）
@@ -296,6 +367,7 @@ class TestDataLifecycleManager:
         db_error: str | None,
     ) -> None:
         """记录清理失败到日志表"""
+        db = None
         try:
             db = self.db_helper.connect()
             db.execute(
@@ -310,9 +382,14 @@ class TestDataLifecycleManager:
                     datetime.now(),
                 ),
             )
-            db.close()
         except Exception as e:
             logger.error(f"Failed to log cleanup failure: {e}")
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    logger.exception("Failed to close cleanup failure log connection")
 
     def _execute_with_retry(self, task: Callable, *args, **kwargs) -> None:
         """带重试机制的任务执行"""

@@ -47,12 +47,14 @@ class TestExportWithOrderData:
         print("=" * 70)
         selected_count = facade.select_all_current_page()
         print(f"✅ Selected {selected_count} orders")
+        assert selected_count > 0, "当前页没有可导出的订单"
 
         print("\n" + "=" * 70)
         print("Step 6: Get page order numbers for verification")
         print("=" * 70)
         page_order_numbers = facade.get_sorted_order_numbers(50)
         print(f"✅ Got {len(page_order_numbers)} order numbers for verification")
+        assert page_order_numbers, "页面未返回订单号，无法验证导出顺序"
         if page_order_numbers:
             print(f"   First 10: {page_order_numbers[:10]}")
 
@@ -63,40 +65,18 @@ class TestExportWithOrderData:
             select_all_fields=False, template_name=EXPORT_TEMPLATE, ensure_fields=["系统单号"]
         )
 
-        if export_result["success"]:
-            print("\n✅ Export download successful")
-            print(f"   - Filename: {export_result['filename']}")
-            print(f"   - File path: {export_result['file_path']}")
-            print(f"   - File size: {export_result['file_size']} bytes")
+        assert export_result["success"], f"导出下载失败: {export_result.get('error')}"
+        print("\n✅ Export download successful")
+        print(f"   - Filename: {export_result['filename']}")
+        print(f"   - File path: {export_result['file_path']}")
+        print(f"   - File size: {export_result['file_size']} bytes")
 
-            print("\n" + "=" * 70)
-            print("Step 8: Verify export file integrity")
-            print("=" * 70)
-            file_verify = SalesOrderFacade.verify_export_file(export_result["file_path"])
-            print(f"✅ File verification: valid={file_verify['valid']}")
-            print(f"   - Row count: {file_verify.get('row_count', 'N/A')}")
-            print(f"   - Column count: {file_verify.get('col_count', 'N/A')}")
-            print(f"   - Headers: {file_verify.get('headers', [])}")
-
-            print("\n" + "=" * 70)
-            print("Step 9: Verify order consistency between page and export")
-            print("=" * 70)
-            consistency = SalesOrderFacade.verify_export_order_consistency(
-                export_result["file_path"], page_order_numbers
-            )
-
-            if consistency["success"]:
-                print("✅ Order consistency verification PASSED")
-                print(f"   - Expected count: {consistency['expected_count']}")
-                print(f"   - Export count: {consistency['export_count']}")
-                print(f"   - Matching count: {consistency['matching_count']}")
-            else:
-                print("❌ Order consistency verification FAILED")
-                print(f"   - Error: {consistency.get('error', 'Unknown')}")
-                if consistency.get("mismatched_positions"):
-                    print(f"   - Mismatched positions: {consistency['mismatched_positions']}")
-        else:
-            print(f"\n❌ Export download failed: {export_result['error']}")
+        file_verify = SalesOrderFacade.verify_export_file(export_result["file_path"])
+        assert file_verify["valid"], f"导出文件校验失败: {file_verify}"
+        consistency = SalesOrderFacade.verify_export_order_consistency(
+            export_result["file_path"], page_order_numbers
+        )
+        assert consistency["success"], f"导出顺序不一致: {consistency}"
 
         print("\n" + "=" * 70)
         print("Test completed")
@@ -131,12 +111,14 @@ class TestExportWithOrderData:
         print("=" * 70)
         selected_count = facade.select_all_current_page()
         print(f"✅ Selected {selected_count} orders")
+        assert selected_count > 0, "当前页没有可导出的订单"
 
         print("\n" + "=" * 70)
         print("Step 6: Get page order numbers for verification")
         print("=" * 70)
         page_order_numbers = facade.get_sorted_order_numbers(20)
         print(f"✅ Got {len(page_order_numbers)} order numbers")
+        assert page_order_numbers, "页面未返回订单号，无法验证导出顺序"
 
         print("\n" + "=" * 70)
         print("Step 7: Export selected orders")
@@ -145,23 +127,12 @@ class TestExportWithOrderData:
             select_all_fields=False, template_name=EXPORT_TEMPLATE, ensure_fields=["系统单号"]
         )
 
-        if export_result["success"]:
-            print(f"\n✅ Export successful: {export_result['file_path']}")
-
-            print("\n" + "=" * 70)
-            print("Step 8: Verify order consistency")
-            print("=" * 70)
-            consistency = SalesOrderFacade.verify_export_order_consistency(
-                export_result["file_path"], page_order_numbers
-            )
-
-            if consistency["success"]:
-                print("✅ Order consistency verification PASSED")
-            else:
-                print("❌ Order consistency verification FAILED")
-                print(f"   - Mismatched: {consistency.get('mismatched_positions', [])}")
-        else:
-            print(f"\n❌ Export failed: {export_result['error']}")
+        assert export_result["success"], f"导出失败: {export_result.get('error')}"
+        print(f"\n✅ Export successful: {export_result['file_path']}")
+        consistency = SalesOrderFacade.verify_export_order_consistency(
+            export_result["file_path"], page_order_numbers
+        )
+        assert consistency["success"], f"导出顺序不一致: {consistency}"
 
         print("\n" + "=" * 70)
         print("Test completed")
@@ -196,6 +167,7 @@ class TestExportWithOrderData:
         print("=" * 70)
         selected_count = facade.select_all_current_page()
         print(f"✅ Selected {selected_count} orders")
+        assert selected_count > 0, "当前页没有可导出的订单"
 
         print("\n" + "=" * 70)
         print("Step 6: Export selected orders")
@@ -204,13 +176,10 @@ class TestExportWithOrderData:
             select_all_fields=False, template_name=EXPORT_TEMPLATE, ensure_fields=["系统单号"]
         )
 
-        if export_result["success"]:
-            print(f"\n✅ Export successful: {export_result['file_path']}")
-
-            file_verify = SalesOrderFacade.verify_export_file(export_result["file_path"])
-            print(f"✅ File valid: {file_verify['valid']}, rows: {file_verify.get('row_count', 'N/A')}")
-        else:
-            print(f"\n❌ Export failed: {export_result['error']}")
+        assert export_result["success"], f"导出失败: {export_result.get('error')}"
+        print(f"\n✅ Export successful: {export_result['file_path']}")
+        file_verify = SalesOrderFacade.verify_export_file(export_result["file_path"])
+        assert file_verify["valid"], f"导出文件校验失败: {file_verify}"
 
         print("\n" + "=" * 70)
         print("Test completed")

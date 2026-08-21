@@ -1,9 +1,10 @@
+import os
 from typing import Any
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-from modules.auto_test.core.config_manager import get_config
+from modules.auto_test.core.config_manager import EnvironmentSecurityError, EnvironmentType, get_config
 from modules.auto_test.core.logger import get_logger
 
 logger = get_logger()
@@ -17,17 +18,68 @@ class DBHelper:
         database: str | None = None,
         user: str | None = None,
         password: str | None = None,
+        *,
+        env: str | None = None,
     ) -> None:
-        config = get_config()
-        self.host = host or config.get("database.host", "localhost")
-        self.port = port or config.get("database.port", 5432)
-        self.database = database or config.get("database.name", "")
-        self.user = user or config.get("database.user", "")
-        self.password = password or config.get("database.password", "")
+        config = get_config(env) if env else get_config()
+        self.environment = str(getattr(config, "env", os.getenv("TEST_ENV", "test"))).strip().lower()
+        if not EnvironmentType.is_allowed(self.environment):
+            raise EnvironmentSecurityError(
+                f"Database access is disabled for environment {self.environment!r}; "
+                "only test, test_env and uat are allowed."
+            )
+        prefix = "UAT" if self.environment == "uat" else "TEST"
+
+        def configured(name: str, default: Any) -> Any:
+            return os.getenv(f"{prefix}_DB_{name.upper()}") or os.getenv(
+                f"{prefix}_DATABASE_{name.upper()}"
+            ) or config.get(f"database.{name}", default)
+
+        configured_values = {
+            "host": configured("host", "localhost"),
+            "port": configured("port", 5432),
+            "name": configured("name", ""),
+            "user": configured("user", ""),
+            "password": configured("password", ""),
+        }
+        supplied_values = {"host": host, "port": port, "name": database, "user": user, "password": password}
+        for name, value in supplied_values.items():
+            if value is not None and str(value) != str(configured_values[name]):
+                raise EnvironmentSecurityError(
+                    f"Explicit database {name} does not match the configured {self.environment} database"
+                )
+        self.host = str(configured_values["host"])
+        self.port = int(configured_values["port"])
+        self.database = str(configured_values["name"])
+        self.user = str(configured_values["user"])
+        self.password = str(configured_values["password"])
+        configured_env = config.get("database.environment") or os.getenv(f"{prefix}_DB_ENV") or os.getenv("DB_ENV") or self.environment
+        self.database_environment = str(configured_env).lower()
         self.connection = None
         self.cursor = None
 
+    def _validate_target(self) -> None:
+        if self.database_environment != self.environment:
+            raise EnvironmentSecurityError(
+                f"Database environment binding mismatch: configured={self.database_environment!r}, "
+                f"runtime={self.environment!r}"
+            )
+        if not self.database:
+            raise EnvironmentSecurityError("Database name must be configured before connecting")
+        target = f"{self.host}/{self.database}".lower()
+        if any(marker in target for marker in ("production", "/prod", "prod.", "_prod")):
+            raise EnvironmentSecurityError("Refusing database connection to a production-looking target")
+        allowed_hosts = {"localhost", "127.0.0.1", "::1"}
+        raw_allowed_hosts = os.getenv("AUTO_TEST_ALLOWED_DB_HOSTS", "")
+        allowed_hosts.update(host.strip().lower() for host in raw_allowed_hosts.split(",") if host.strip())
+        if str(self.host).lower() not in allowed_hosts:
+            raise EnvironmentSecurityError(
+                f"Refusing database connection to unapproved host {self.host!r}; "
+                "configure AUTO_TEST_ALLOWED_DB_HOSTS explicitly for an approved test database."
+            )
+
     def connect(self) -> "DBHelper":
+        self._validate_target()
         self.connection = psycopg2.connect(
             host=self.host,
             port=self.port,

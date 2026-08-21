@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from dotenv import load_dotenv
@@ -27,6 +28,13 @@ class EnvironmentType(Enum):
 
 class EnvironmentSecurityError(Exception):
     pass
+
+
+_DEFAULT_ALLOWED_ORIGINS = {
+    "test": frozenset({"https://erptest.dayoneerp.com"}),
+    "test_env": frozenset({"https://erptest.dayoneerp.com"}),
+    "uat": frozenset({"https://erpuat.dayoneerp.com"}),
+}
 
 
 @dataclass
@@ -59,7 +67,7 @@ class ConfigManager:
     _instance: "ConfigManager | None" = None
 
     def __new__(cls, env: str | None = None) -> "ConfigManager":
-        target_env = env or os.getenv("TEST_ENV", "test")
+        target_env = str(env or os.getenv("TEST_ENV", "test")).strip().lower()
         if cls._instance is None or cls._instance.env != target_env:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -71,7 +79,7 @@ class ConfigManager:
     def _load_config(self, env: str) -> None:
         self._validate_environment(env)
 
-        config_path = Path(__file__).parent.parent / "configs" / f"{env}.yaml"
+        config_path = Path(__file__).resolve().parents[3] / "configs" / f"{env}.yaml"
         if not config_path.exists():
             raw_config = self._build_environment_config(env)
         else:
@@ -93,31 +101,63 @@ class ConfigManager:
         """Validate resolved configuration before any client is created."""
         origin = str(self._config.get("origin", "")).strip()
         if not origin:
+            for candidate in (
+                self._config.get("base_url"),
+                self._config.get("api_base_url"),
+                self._config.get("api", {}).get("base_url")
+                if isinstance(self._config.get("api", {}), dict)
+                else None,
+            ):
+                if candidate:
+                    origin = self._origin_from_url(str(candidate))
+                    break
+        if not origin:
             raise ValueError(
                 f"Missing test environment origin for '{self.env}'. "
                 "Set the environment YAML or the corresponding *_WEB_API_BASE_URL variable."
             )
-        if origin.lower().startswith(("http://", "https://")) is False:
-            raise ValueError(f"Invalid test environment origin: {origin!r}")
-
-        forbidden_tokens = ("production", "/prod", "prod.")
-        if any(token in origin.lower() for token in forbidden_tokens):
+        origin = self._normalize_origin(origin, field="origin")
+        if origin not in self._allowed_origins():
             raise EnvironmentSecurityError(
-                f"Refusing to run automation against a production-looking endpoint: {origin}"
+                f"Refusing to run automation against an unapproved endpoint for {self.env}: {origin}. "
+                "Add the exact origin to the environment-specific allowlist if this is an approved test stack."
             )
+
+        ui_path = str(self._config.get("ui_path", ""))
+        api_path = str(self._config.get("api_path", "/oms-uat-api"))
+        ui_url = str(self._config.get("base_url") or f"{origin}{ui_path}").strip()
+        api_url = str(
+            self._config.get("api_base_url")
+            or (
+                self._config.get("api", {}).get("base_url")
+                if isinstance(self._config.get("api", {}), dict)
+                else None
+            )
+            or f"{origin}{api_path}"
+        ).strip()
+        self._validate_same_origin(ui_url, origin, "base_url")
+        self._validate_same_origin(api_url, origin, "api_base_url")
+        self._config["origin"] = origin
+        self._config["base_url"] = ui_url.rstrip("/")
+        self._config["api_base_url"] = api_url.rstrip("/")
+        if not isinstance(self._config.get("api"), dict):
+            self._config["api"] = {}
+        self._config["api"]["base_url"] = api_url.rstrip("/")
 
     @staticmethod
     def _build_environment_config(env: str) -> dict[str, Any]:
         """Build a secrets-free CI configuration when private YAML is not checked in."""
         prefix = "UAT" if env == "uat" else "TEST"
         origin = os.getenv(f"{prefix}_WEB_API_BASE_URL", "")
+        default_ui_path = "/oms-uat-ui" if env == "uat" else "/oms-ui"
+        default_api_path = "/oms-uat-api" if env == "uat" else "/oms-api"
         return {
             "origin": origin,
-            "ui_path": "/oms-uat-ui" if env == "uat" else "/oms-ui",
-            "api_path": "/oms-uat-api" if env == "uat" else "/oms-api",
-            "base_url": os.getenv(f"{prefix}_WEB_BASE_URL", ""),
+            "ui_path": default_ui_path,
+            "api_path": default_api_path,
+            "base_url": os.getenv(f"{prefix}_WEB_BASE_URL") or f"{origin}{default_ui_path}",
             "api": {
-                "base_url": f"{origin}/{'oms-uat-api' if env == 'uat' else 'oms-api'}",
+                "base_url": f"{origin}{default_api_path}",
                 "timeout": 30,
                 "retries": 3,
                 "verify_ssl": True,
@@ -155,16 +195,100 @@ class ConfigManager:
         return obj
 
     def _load_endpoints(self) -> None:
-        origin = self._config.get("origin", os.getenv("TEST_WEB_API_BASE_URL"))
-        ui_path = self._config.get("ui_path", "")
-        api_path = self._config.get("api_path", "/oms-uat-api")
+        api_base_url = self._config["api_base_url"]
+        login_path = str(self.get("api.auth_login_path", "/oms-admin/auth/login")).strip()
+        if not login_path.startswith("/") or ".." in login_path.split("/") or "\\" in login_path:
+            raise EnvironmentSecurityError("Configured authentication path is unsafe")
 
         self._endpoints = EndpointConfig(
-            base_url=f"{origin}{ui_path}",
-            api_base_url=f"{origin}{api_path}",
-            auth_url=f"{origin}{api_path}/oms-admin/auth/login",
+            base_url=self._config["base_url"],
+            api_base_url=api_base_url,
+            auth_url=f"{api_base_url.rstrip('/')}{login_path}",
             admin_path="/oms-admin",
         )
+
+    @staticmethod
+    def _origin_from_url(value: str) -> str:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return ""
+        return f"{parsed.scheme}://{parsed.netloc}".rstrip("/").lower()
+
+    @classmethod
+    def _normalize_origin(cls, value: str, *, field: str = "endpoint") -> str:
+        origin = cls._origin_from_url(value)
+        parsed = urlparse(value.strip())
+        if not origin or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+            raise ValueError(f"Invalid {field}: {value!r}")
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise EnvironmentSecurityError(f"HTTPS is required for non-local {field}: {value!r}")
+        return origin
+
+    def _allowed_origins(self) -> set[str]:
+        allowed = set(_DEFAULT_ALLOWED_ORIGINS.get(self._env_name.lower(), ()))
+        configured = self._config.get("allowed_origins", [])
+        if isinstance(configured, str):
+            configured = configured.split(",")
+        for value in configured or []:
+            allowed.add(self._normalize_origin(str(value), field="allowed origin"))
+        for env_key in (f"{self._env_name.upper()}_ALLOWED_ORIGINS", "AUTO_TEST_ALLOWED_ORIGINS"):
+            raw = os.getenv(env_key, "")
+            if raw:
+                for value in raw.split(","):
+                    allowed.add(self._normalize_origin(value, field=env_key))
+        return allowed
+
+    def _allowed_external_origins(self) -> set[str]:
+        allowed: set[str] = set()
+        configured = self._config.get("allowed_external_origins", [])
+        if isinstance(configured, str):
+            configured = configured.split(",")
+        for value in configured or []:
+            allowed.add(self._normalize_origin(str(value), field="allowed external origin"))
+        for env_key in ("OPENAPI_ALLOWED_ORIGINS", "AUTO_TEST_ALLOWED_EXTERNAL_ORIGINS"):
+            raw = os.getenv(env_key, "")
+            if raw:
+                for value in raw.split(","):
+                    allowed.add(self._normalize_origin(value, field=env_key))
+        return allowed
+
+    def _validate_same_origin(self, endpoint: str, origin: str, field: str) -> None:
+        parsed = urlparse(endpoint)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or "\\" in parsed.path
+            or ".." in parsed.path.split("/")
+        ):
+            raise ValueError(f"Invalid {field}: credentials, query strings and fragments are not allowed")
+        if self._origin_from_url(endpoint) != origin:
+            raise EnvironmentSecurityError(f"{field} must use the approved environment origin: {endpoint!r}")
+
+    def validate_endpoint(self, endpoint: str, *, purpose: str = "api", allow_external: bool = True) -> str:
+        """Validate an absolute endpoint before a request or browser navigation."""
+        value = str(endpoint or "").strip()
+        if not value:
+            raise ValueError(f"Empty {purpose} endpoint")
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise EnvironmentSecurityError(f"Invalid absolute {purpose} endpoint: {value!r}")
+        origin = self._origin_from_url(value)
+        allowed = {self._config["origin"]}
+        if allow_external:
+            allowed.update(self._allowed_external_origins())
+        if origin not in allowed:
+            raise EnvironmentSecurityError(f"Unapproved {purpose} endpoint: {value!r}")
+        if parsed.username or parsed.password or parsed.fragment:
+            raise EnvironmentSecurityError(f"Credentials and fragments are not allowed in {purpose} endpoints")
+        if "\\" in parsed.path or ".." in parsed.path.split("/"):
+            raise EnvironmentSecurityError(f"Traversal is not allowed in {purpose} endpoints")
+        if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise EnvironmentSecurityError(f"HTTPS is required for {purpose} endpoints")
+        return value
 
     def get(self, key: str, default: Any = None) -> Any:
         keys = key.split(".")

@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from modules.auto_test.core.logger import get_logger
+from modules.auto_test.core.logger import get_logger, redact_sensitive_data
 
 logger = get_logger()
 
@@ -38,21 +38,21 @@ class TestFrameworkError(Exception):
         cause: Exception | None = None,
         context: dict[str, Any] | None = None,
     ):
-        super().__init__(message)
+        super().__init__(redact_sensitive_data(message))
         self.error_code = error_code
         self.cause = cause
-        self.context = context or {}
+        self.context = redact_sensitive_data(context or {})
         self.timestamp = datetime.now()
-        self.traceback = traceback.format_exc()
+        self.traceback = redact_sensitive_data(traceback.format_exc())
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "error_code": self.error_code.value,
             "error_type": self.error_code.name,
-            "message": str(self),
+            "message": redact_sensitive_data(str(self)),
             "timestamp": self.timestamp.isoformat(),
-            "cause": str(self.cause) if self.cause else None,
-            "context": self.context,
+            "cause": redact_sensitive_data(str(self.cause)) if self.cause else None,
+            "context": redact_sensitive_data(self.context),
         }
 
 
@@ -141,8 +141,11 @@ class ErrorContext:
     additional_info: dict[str, Any] = None
 
     def __post_init__(self):
+        self.url = redact_sensitive_data(self.url)
         if self.additional_info is None:
             self.additional_info = {}
+        else:
+            self.additional_info = redact_sensitive_data(self.additional_info)
 
 
 class ErrorHandler:
@@ -200,7 +203,7 @@ class ErrorHandler:
             lines.append(f"Cause: {error.cause}")
         if error.context:
             lines.append(f"Context: {error.context}")
-        return "\n".join(lines)
+        return redact_sensitive_data("\n".join(lines))
 
 
 def handle_errors(
@@ -327,7 +330,7 @@ class ErrorReporter:
         """Generate a comprehensive error report."""
         report = {
             "error": error.to_dict(),
-            "context": context.__dict__ if context else {},
+            "context": redact_sensitive_data(context.__dict__) if context else {},
             "system_info": {
                 "python_version": sys.version,
                 "timestamp": datetime.now().isoformat(),

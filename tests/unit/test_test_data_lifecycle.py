@@ -11,7 +11,11 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager as LifecycleManagerUnderTest
+from modules.auto_test.core.test_data_lifecycle import (
+    CleanupFailureError,
+    CleanupOwnershipError,
+    TestDataLifecycleManager as LifecycleManagerUnderTest,
+)
 
 
 class TestTopologicalSort:
@@ -111,7 +115,6 @@ class TestCleanupMechanism:
         mock_task = Mock(return_value=True)
         self.manager.register_cleanup_task(
             mock_task,
-            fallback=Mock(),
         )
 
         self.manager.execute_cleanup()
@@ -124,6 +127,8 @@ class TestCleanupMechanism:
         self.manager.register_cleanup_task(
             Mock(side_effect=Exception("API error")),
             fallback=mock_fallback,
+            data_type="order",
+            data_id="12345",
         )
 
         self.manager.execute_cleanup()
@@ -139,10 +144,12 @@ class TestCleanupMechanism:
         self.manager.register_cleanup_task(
             Mock(side_effect=Exception("API error")),
             fallback=Mock(side_effect=Exception("DB error")),
+            data_type="order",
+            data_id="12345",
         )
 
-        # 不应抛出异常
-        self.manager.execute_cleanup()
+        with pytest.raises(CleanupFailureError):
+            self.manager.execute_cleanup()
 
     def test_created_data_cleanup(self):
         """测试已创建数据的清理"""
@@ -177,6 +184,10 @@ class TestCleanupMechanism:
     def test_cleanup_failure_does_not_block(self):
         """测试单个清理失败不阻塞后续"""
         cleanup_log = []
+        self.manager.db_helper = MagicMock()
+        fallback_db = MagicMock()
+        fallback_db.execute.side_effect = RuntimeError("DB unavailable")
+        self.manager.db_helper.connect.return_value = fallback_db
 
         def cleanup_success():
             cleanup_log.append("success")
@@ -184,11 +195,12 @@ class TestCleanupMechanism:
         self.manager.register_created_data("order", "fail", Mock(side_effect=Exception("cleanup error")))
         self.manager.register_created_data("order", "ok", cleanup_success)
 
-        # 不应抛出异常
-        self.manager.execute_cleanup()
+        with pytest.raises(CleanupFailureError):
+            self.manager.execute_cleanup()
 
         # 成功的清理仍应执行
         assert "success" in cleanup_log
+        fallback_db.close.assert_called()
 
 
 class TestRetryMechanism:
@@ -228,6 +240,9 @@ class TestRetryMechanism:
 class TestEnvironmentConfig:
     """测试环境配置"""
 
+    def setup_method(self):
+        self.manager = LifecycleManagerUnderTest(env="test")
+
     def test_production_disables_db_fallback(self):
         """测试生产环境禁用DB兜底"""
         manager = LifecycleManagerUnderTest(env="production")
@@ -238,10 +253,29 @@ class TestEnvironmentConfig:
         manager = LifecycleManagerUnderTest(env="test")
         assert manager._enable_db_fallback is True
 
-    def test_staging_enables_db_fallback(self):
-        """测试预生产环境启用DB兜底"""
+    def test_unknown_environment_disables_db_fallback(self):
+        """未知环境默认禁用DB兜底"""
         manager = LifecycleManagerUnderTest(env="staging")
-        assert manager._enable_db_fallback is True
+        assert manager._enable_db_fallback is False
+
+    def test_fallback_requires_owned_target(self):
+        with pytest.raises(CleanupOwnershipError):
+            self.manager.register_cleanup_task(
+                Mock(side_effect=RuntimeError("API error")),
+                fallback=Mock(),
+            )
+
+    def test_fallback_rejects_foreign_run(self, monkeypatch):
+        monkeypatch.setenv("TEST_RUN_ID", "current-run")
+        manager = LifecycleManagerUnderTest(env="test")
+        with pytest.raises(CleanupOwnershipError):
+            manager.register_cleanup_task(
+                Mock(side_effect=RuntimeError("API error")),
+                fallback=Mock(),
+                data_type="order",
+                data_id="12345",
+                owner_run_id="other-run",
+            )
 
     def test_empty_setup_tasks(self):
         """测试无准备任务时不执行"""

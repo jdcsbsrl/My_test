@@ -10,6 +10,7 @@ import base64
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -57,11 +58,35 @@ class CapturedAuthLoginRequest:
 
 def _login_page_url(ui_base_url: str) -> str:
     base = (ui_base_url or "").strip().rstrip("/")
-    if not base:
+    parsed = urlsplit(base)
+    if (
+        not base
+        or parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or "\\" in parsed.path
+        or ".." in parsed.path.split("/")
+    ):
         raise ValueError("UI base_url 为空：请检查 configs 中 base_url 或 TEST_WEB_BASE_URL。")
     if base.endswith("/login"):
         return base
     return f"{base}/login"
+
+
+def _is_expected_login_url(url: str, expected_url: str) -> bool:
+    actual = urlsplit(url)
+    expected = urlsplit(expected_url)
+    return (
+        actual.scheme.lower() == expected.scheme.lower()
+        and actual.netloc.lower() == expected.netloc.lower()
+        and actual.path.rstrip("/") == expected.path.rstrip("/")
+        and not actual.username
+        and not actual.password
+        and not actual.fragment
+    )
 
 
 def _header_ci(headers: dict[str, str], name: str) -> str | None:
@@ -172,6 +197,8 @@ def capture_auth_login_via_browser(
         headless = bool(cfg.get("playwright.headless", True))
 
     login_url = _login_page_url(ui_base_url)
+    cfg.validate_endpoint(login_url, purpose="login page", allow_external=False)
+    expected_login_url = cfg.endpoints.auth_url
     logger.info("login capture: navigating {} headless={}", login_url, headless)
 
     with sync_playwright() as p:
@@ -185,7 +212,10 @@ def capture_auth_login_via_browser(
             def is_login_post(resp: Response) -> bool:
                 try:
                     req = resp.request
-                    return req.method == "POST" and "auth/login" in req.url
+                    if req.method != "POST" or not _is_expected_login_url(req.url, expected_login_url):
+                        return False
+                    cfg.validate_endpoint(req.url, purpose="captured login", allow_external=False)
+                    return True
                 except Exception:
                     return False
 
@@ -208,6 +238,8 @@ def capture_auth_login_via_browser(
                 clientid=_header_ci(raw_headers, "clientid"),
                 encrypt_key=_header_ci(raw_headers, "encrypt-key"),
             )
+            if not _is_expected_login_url(captured.post_url, expected_login_url):
+                raise RuntimeError("捕获到的登录请求不属于当前环境的认证端点。")
             if not captured.clientid or not captured.encrypt_key:
                 raise RuntimeError(
                     "已拦截 auth/login 请求，但缺少 clientid 或 encrypt-key 请求头；"
@@ -222,8 +254,8 @@ def capture_auth_login_via_browser(
                 raise RuntimeError("登录响应 JSON 根节点必须是对象。")
 
             logger.info(
-                "login capture: ok post_url={} clientid_prefix={}…",
-                captured.post_url,
+                "login capture: ok post_path={} clientid_prefix={}…",
+                urlsplit(captured.post_url).path,
                 (captured.clientid or "")[:4],
             )
             return captured, payload
@@ -243,6 +275,9 @@ def replay_captured_auth_login(
         verify_ssl = bool(cfg.get("api.verify_ssl", True))
     if timeout_sec is None:
         timeout_sec = int(cfg.get("api.timeout", 30))
+    cfg.validate_endpoint(captured.post_url, purpose="login replay", allow_external=False)
+    if not _is_expected_login_url(captured.post_url, cfg.endpoints.auth_url):
+        raise ValueError("Captured login request does not match the configured authentication endpoint")
 
     return requests.post(
         captured.post_url,

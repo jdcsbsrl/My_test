@@ -3,18 +3,16 @@
 import os
 
 import pytest
-from dotenv import load_dotenv
 from playwright.sync_api import Browser, Page
 
 from modules.auto_test.core.config_manager import get_config
 from modules.auto_test.drivers.browser_driver import BrowserDriver
 from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.pages.sku_search_page import SKUSearchPage
+from modules.auto_test.core.secret_provider import get_secret
 
-load_dotenv()
-
-USERNAME = os.getenv("TEST_USERNAME")
-PASSWORD = os.getenv("TEST_PASSWORD")
+USERNAME = get_secret("USERNAME")
+PASSWORD = get_secret("PASSWORD")
 DYNAMIC_FIRST_AVAILABLE = "__FIRST_AVAILABLE__"
 
 

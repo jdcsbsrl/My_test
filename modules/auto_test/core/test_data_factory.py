@@ -1,13 +1,14 @@
 import csv
-import glob
 import json
 import logging
 import os
 import random
 import re
 import string
+import tempfile
 from collections.abc import Generator
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from faker import Faker
@@ -26,7 +27,7 @@ class DataValidationError(Exception):
 class DataLoader:
     """外部数据加载器 - 支持多种文件格式，提供全量加载和流式加载两种模式"""
 
-    def __init__(self):
+    def __init__(self, allowed_roots: list[str | os.PathLike[str]] | None = None):
         self._loaders = {
             "json": self._load_json,
             "yaml": self._load_yaml,
@@ -41,6 +42,30 @@ class DataLoader:
         }
         # 检查ijson是否可用，不可用时降级为全量加载
         self._ijson_available = self._check_ijson()
+        project_root = Path(__file__).resolve().parents[3]
+        roots = allowed_roots or [
+            project_root / "data",
+            project_root / "fixtures",
+            project_root / ".runtime",
+            # Existing callers use tempfile-backed fixtures; this remains an isolated
+            # test-data root while preventing reads from arbitrary existing files.
+            tempfile.gettempdir(),
+        ]
+        self._allowed_roots = tuple(Path(root).expanduser().resolve() for root in roots)
+
+    def _safe_path(self, file_path: str | os.PathLike[str]) -> Path:
+        """Resolve a data path without allowing traversal outside an approved root."""
+        candidate = Path(file_path)
+        if not str(candidate).strip():
+            raise DataValidationError("Data file path must not be empty")
+        resolved = candidate.expanduser().resolve()
+        if not any(resolved == root or root in resolved.parents for root in self._allowed_roots):
+            if not resolved.exists():
+                # Preserve the historical FileNotFoundError contract without opening
+                # an out-of-scope path when it does exist.
+                return resolved
+            raise DataValidationError("Data file path is outside the approved data directories")
+        return resolved
 
     def _check_ijson(self) -> bool:
         """检查ijson库是否可用"""
@@ -66,21 +91,22 @@ class DataLoader:
             lazy=True: 返回生成器，按需逐行读取
             lazy=False: 返回完整数据列表（默认）
         """
-        ext = file_path.split(".")[-1].lower()
+        safe_path = self._safe_path(file_path)
+        ext = safe_path.suffix.lstrip(".").lower()
 
         if lazy:
             # JSON懒加载需要ijson，如果不可用则降级为全量加载
             if ext == "json" and not self._ijson_available:
                 logger.info("ijson not available, falling back to full JSON load")
-                return self._load_json(file_path)
+                return self._load_json(safe_path)
 
             if ext not in self._lazy_loaders:
                 raise DataValidationError(f"Unsupported lazy load format: {ext}")
-            return self._lazy_loaders[ext](file_path)
+            return self._lazy_loaders[ext](safe_path)
 
         if ext not in self._loaders:
             raise DataValidationError(f"Unsupported file format: {ext}")
-        return self._loaders[ext](file_path)
+        return self._loaders[ext](safe_path)
 
     def _load_json(self, path: str) -> Any:
         with open(path, encoding="utf-8") as f:
@@ -233,41 +259,57 @@ class DataVersionManager:
     """数据版本管理器"""
 
     def __init__(self, data_dir: str = "data/test_data"):
-        self.data_dir = data_dir
-        self._loader = DataLoader()
+        self.data_dir = Path(data_dir).expanduser().resolve()
+        self._loader = DataLoader(allowed_roots=[self.data_dir])
+
+    @staticmethod
+    def _validate_identifier(value: str, field_name: str) -> str:
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value):
+            raise DataValidationError(f"Invalid {field_name}: path separators and traversal are not allowed")
+        return value
+
+    def _version_path(self, data_name: str, version: str) -> Path:
+        safe_name = self._validate_identifier(data_name, "data name")
+        safe_version = self._validate_identifier(version, "version")
+        path = (self.data_dir / f"{safe_name}_v{safe_version}.json").resolve()
+        if path.parent != self.data_dir:
+            raise DataValidationError("Version path escaped the configured data directory")
+        return path
 
     def get_version(self, data_name: str, version: str = "latest") -> Any:
         """获取指定版本的测试数据"""
+        self._validate_identifier(data_name, "data name")
         if version == "latest":
             version = self._get_latest_version(data_name)
 
-        file_path = os.path.join(self.data_dir, f"{data_name}_v{version}.json")
-        return self._loader.load(file_path)
+        return self._loader.load(self._version_path(data_name, version))
 
     def _get_latest_version(self, data_name: str) -> str:
         """获取最新版本号"""
-        pattern = f"{data_name}_v*.json"
-        files = glob.glob(os.path.join(self.data_dir, pattern))
+        safe_name = self._validate_identifier(data_name, "data name")
+        files = [f for f in self.data_dir.glob(f"{safe_name}_v*.json") if f.is_file()]
         if not files:
             return "1.0"
 
-        versions = [f.split("_v")[1].replace(".json", "") for f in files]
+        versions = [f.name[len(safe_name) + 2 : -len(".json")] for f in files]
         return sorted(versions)[-1]
 
     def save_version(self, data_name: str, data: Any, version: str) -> None:
         """保存测试数据版本"""
-        os.makedirs(self.data_dir, exist_ok=True)
-        file_path = os.path.join(self.data_dir, f"{data_name}_v{version}.json")
-        with open(file_path, "w", encoding="utf-8") as f:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        file_path = self._version_path(data_name, version)
+        with file_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
     def list_versions(self, data_name: str) -> list[str]:
         """列出指定数据的所有版本"""
-        pattern = f"{data_name}_v*.json"
-        files = glob.glob(os.path.join(self.data_dir, pattern))
+        safe_name = self._validate_identifier(data_name, "data name")
+        files = self.data_dir.glob(f"{safe_name}_v*.json")
         versions = []
         for f in files:
-            version = f.split("_v")[1].replace(".json", "")
+            if not f.is_file():
+                continue
+            version = f.name[len(safe_name) + 2 : -len(".json")]
             versions.append(version)
         return sorted(versions)
 

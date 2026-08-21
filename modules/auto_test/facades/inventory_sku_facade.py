@@ -103,7 +103,7 @@ class InventorySKUFacade:
 
     @allure.step("完整流程：导出当前搜索结果")
     def export_current_search(
-        self, select_all_fields: bool = True, fields: list[str] | None = None, download_dir: str = "downloads"
+        self, select_all_fields: bool = True, fields: list[str] | None = None, download_dir: str = ".runtime/downloads"
     ) -> dict[str, Any]:
         """导出当前搜索结果
 
@@ -147,7 +147,7 @@ class InventorySKUFacade:
 
     @allure.step("完整流程：导出勾选的SKU")
     def export_selected(
-        self, select_all_fields: bool = True, fields: list[str] | None = None, download_dir: str = "downloads"
+        self, select_all_fields: bool = True, fields: list[str] | None = None, download_dir: str = ".runtime/downloads"
     ) -> dict[str, Any]:
         """导出勾选的SKU
 

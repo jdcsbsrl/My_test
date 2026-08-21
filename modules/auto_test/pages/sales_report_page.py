@@ -2,6 +2,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import allure
 from playwright.sync_api import Page
@@ -21,6 +22,10 @@ class SalesReportPage(BasePage):
         super().__init__(page)
         self.last_search_payload: dict[str, Any] | None = None
         self.last_sort_payloads: list[dict[str, Any] | None] = []
+
+    def _api_prefix(self) -> str:
+        """Use the API path belonging to the active test environment."""
+        return urlsplit(self.config.api_base_url).path.rstrip("/")
 
     @allure.step("Navigate to sales product sales report")
     def navigate_to_report(self) -> None:
@@ -691,7 +696,7 @@ class SalesReportPage(BasePage):
 
     def trigger_async_export(self, payload: dict[str, Any]) -> dict[str, Any]:
         result = self.page.evaluate(
-            """async (payload) => {
+            """async ({ payload, apiPrefix }) => {
                 const authHeaders = (() => {
                     const read = (key) => localStorage.getItem(key) || sessionStorage.getItem(key) || '';
                     const tokenKeys = ['Admin-Token', 'access_token', 'accessToken', 'token', 'Authorization'];
@@ -711,7 +716,7 @@ class SalesReportPage(BasePage):
                     return headers;
                 })();
                 const response = await fetch(
-                    '/oms-api/oms-admin/sales/salesProductReport/syncProductSalesReportExport',
+                    `${apiPrefix}/oms-admin/sales/salesProductReport/syncProductSalesReportExport`,
                     {
                         method: 'POST',
                         credentials: 'include',
@@ -734,7 +739,7 @@ class SalesReportPage(BasePage):
                     headers: Object.fromEntries(response.headers.entries()),
                 };
             }""",
-            payload,
+            {"payload": payload, "apiPrefix": self._api_prefix()},
         )
         return {
             "ok": result["ok"],
@@ -747,7 +752,7 @@ class SalesReportPage(BasePage):
 
     def query_report_api(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.page.evaluate(
-            """async (payload) => {
+            """async ({ payload, apiPrefix }) => {
                 const authHeaders = (() => {
                     const read = (key) => localStorage.getItem(key) || sessionStorage.getItem(key) || '';
                     const tokenKeys = ['Admin-Token', 'access_token', 'accessToken', 'token', 'Authorization'];
@@ -767,7 +772,7 @@ class SalesReportPage(BasePage):
                     return headers;
                 })();
                 const response = await fetch(
-                    '/oms-api/oms-admin/sales/salesProductReport/productSalesReport',
+                    `${apiPrefix}/oms-admin/sales/salesProductReport/productSalesReport`,
                     {
                         method: 'POST',
                         credentials: 'include',
@@ -786,7 +791,7 @@ class SalesReportPage(BasePage):
                     body,
                 };
             }""",
-            payload,
+            {"payload": payload, "apiPrefix": self._api_prefix()},
         )
 
     def snapshot(self, name: str) -> str:

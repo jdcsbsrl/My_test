@@ -4,7 +4,6 @@ import pytest
 
 from modules.auto_test.api.openapi_client import OpenAPIClient
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -58,3 +57,25 @@ def test_openapi_methods_default_empty_payload(api):
     api.query_order_page()
 
     assert api.post.call_args.kwargs["json"] == {}
+
+
+def test_openapi_keeps_credentials_in_headers_and_payload_in_json(api):
+    api.query_order_page({"token": "token-value", "password": "password-value"})
+
+    call = api.post.call_args
+    assert call.kwargs["json"] == {"token": "token-value", "password": "password-value"}
+    assert "token" not in call.kwargs.get("params", {})
+    assert "password" not in call.kwargs.get("params", {})
+    assert call.kwargs["headers"]["X-App-Key"] == "app-key"
+    assert call.kwargs["headers"]["X-App-Secret"] == "app-secret"
+
+
+def test_openapi_rejects_base_url_with_query_without_echoing_it(monkeypatch):
+    monkeypatch.setenv("OPENAPI_BASE_URL", "https://openapi.example.test?token=secret-value")
+    api = OpenAPIClient("app-key", "app-secret", Mock())
+
+    with pytest.raises(ValueError) as excinfo:
+        api.query_order_page()
+
+    assert "secret-value" not in str(excinfo.value)
+    assert "token=secret-value" not in str(excinfo.value)

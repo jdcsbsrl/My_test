@@ -1,4 +1,4 @@
-﻿"""RetryManager 单元测试"""
+"""RetryManager 单元测试"""
 
 import pytest
 

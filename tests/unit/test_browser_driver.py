@@ -94,12 +94,12 @@ def test_new_context_and_page_uses_video_and_trace_options(monkeypatch):
     result = driver.new_context_and_page()
 
     assert result == (context, page)
-    browser.new_context.assert_called_once_with(
-        viewport={"width": 1280, "height": 720},
-        accept_downloads=True,
-        record_video_dir=".runtime/reports/videos",
-        record_video_size={"width": 1280, "height": 720},
-    )
+    browser.new_context.assert_called_once()
+    options = browser.new_context.call_args.kwargs
+    assert options["viewport"] == {"width": 1280, "height": 720}
+    assert options["accept_downloads"] is True
+    assert "/runs/" in options["record_video_dir"].replace("\\", "/")
+    assert options["record_video_size"] == {"width": 1280, "height": 720}
     context.tracing.start.assert_called_once_with(screenshots=True, snapshots=True, sources=True)
 
 
@@ -122,6 +122,36 @@ def test_close_context_stops_trace_when_path_is_given(monkeypatch):
     context.close.assert_called_once_with()
 
 
+def test_close_context_closes_context_when_trace_save_fails(monkeypatch):
+    monkeypatch.setattr(
+        "modules.auto_test.drivers.browser_driver.get_config",
+        lambda: FakeConfig({"playwright.trace": "on"}),
+    )
+    driver = BrowserDriver()
+    context = Mock()
+    context.tracing.stop.side_effect = RuntimeError("trace failed")
+
+    with pytest.raises(RuntimeError, match="teardown failed"):
+        driver.close_context(context, trace_path=".runtime/reports/traces/test.zip")
+
+    context.close.assert_called_once_with()
+
+
+def test_close_context_rejects_trace_path_outside_runtime(monkeypatch):
+    monkeypatch.setattr(
+        "modules.auto_test.drivers.browser_driver.get_config",
+        lambda: FakeConfig({"playwright.trace": "on"}),
+    )
+    driver = BrowserDriver()
+    context = Mock()
+
+    with pytest.raises(RuntimeError, match="teardown failed"):
+        driver.close_context(context, trace_path="../outside.zip")
+
+    context.tracing.stop.assert_not_called()
+    context.close.assert_called_once_with()
+
+
 def test_shutdown_browser_closes_browser_and_playwright(driver):
     browser = Mock()
     playwright = Mock()
@@ -131,6 +161,21 @@ def test_shutdown_browser_closes_browser_and_playwright(driver):
     driver.shutdown_browser()
 
     browser.close.assert_called_once_with()
+    playwright.stop.assert_called_once_with()
+    assert driver.browser is None
+    assert driver._playwright is None
+
+
+def test_shutdown_browser_stops_playwright_when_browser_close_fails(driver):
+    browser = Mock()
+    browser.close.side_effect = RuntimeError("browser close failed")
+    playwright = Mock()
+    driver.browser = browser
+    driver._playwright = playwright
+
+    with pytest.raises(RuntimeError, match="teardown failed"):
+        driver.shutdown_browser()
+
     playwright.stop.assert_called_once_with()
     assert driver.browser is None
     assert driver._playwright is None

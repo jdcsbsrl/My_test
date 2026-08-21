@@ -12,13 +12,26 @@ from typing import Any
 import openpyxl
 import pytest
 from playwright.sync_api import Page
+from urllib.parse import urlsplit
 
+from modules.auto_test.core.config_manager import get_config
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
+from modules.auto_test.pages.login_page import LoginPage
+from modules.auto_test.core.secret_provider import get_secret
 
 
 ORDER_RE = re.compile(r"SO\d{14,}")
+SENSITIVE_KEY_RE = re.compile(r"(?:token|secret|password|passwd|cookie|authorization|client.?id|api.?key)", re.IGNORECASE)
+SENSITIVE_VALUE_RE = re.compile(
+    r"(?:Bearer\s+\S+|shpat_[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"
+)
 REPORT_DIR = Path(".runtime/reports") / f"sales_order_export_field_validation_{time.strftime('%Y%m%d_%H%M%S')}"
 BASELINE_PATH = Path(".runtime/reports/sales_order_export_baseline.local.json")
+
+
+def _api_prefix() -> str:
+    """Return the active environment's API path, not the test-stack default."""
+    return urlsplit(get_config().api_base_url).path.rstrip("/")
 
 
 BASE_LIST_PAYLOAD: dict[str, Any] = {
@@ -81,7 +94,7 @@ def _api(page: Page, method: str, path: str, payload: dict[str, Any] | None = No
 
 def _download_export(page: Page, payload: dict[str, Any], target: Path) -> dict[str, Any]:
     result = page.evaluate(
-        """async ({ payload }) => {
+        """async ({ payload, apiPrefix }) => {
             const read = (key) => localStorage.getItem(key) || sessionStorage.getItem(key) || '';
             const tokenKeys = ['Admin-Token', 'access_token', 'accessToken', 'token', 'Authorization'];
             let token = '';
@@ -96,7 +109,7 @@ def _download_export(page: Page, payload: dict[str, Any], target: Path) -> dict[
                 headers['Admin-Token'] = token.replace(/^Bearer\\s+/i, '');
             }
             if (clientid) headers.clientid = clientid;
-            const response = await fetch('/oms-api/oms-admin/sales/order/batch/orderExportNew', {
+            const response = await fetch(`${apiPrefix}/oms-admin/sales/order/batch/orderExportNew`, {
                 method: 'POST',
                 credentials: 'include',
                 headers,
@@ -104,7 +117,7 @@ def _download_export(page: Page, payload: dict[str, Any], target: Path) -> dict[
             });
             const contentType = response.headers.get('content-type') || '';
             if (contentType.toLowerCase().includes('json')) {
-                return { ok: response.ok, status: response.status, json: await response.json() };
+                return { ok: response.ok, status: response.status, contentType, json: await response.json() };
             }
             const bytes = new Uint8Array(await response.arrayBuffer());
             let binary = '';
@@ -117,12 +130,99 @@ def _download_export(page: Page, payload: dict[str, Any], target: Path) -> dict[
                 base64: btoa(binary),
             };
         }""",
-        {"payload": payload},
+        {"payload": payload, "apiPrefix": _api_prefix()},
     )
     if result.get("base64"):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(base64.b64decode(result["base64"]))
     return result
+
+
+def _reauthenticate(page: Page) -> bool:
+    """Refresh the current browser session after an API reports 401."""
+    username = get_secret("USERNAME")
+    password = get_secret("PASSWORD")
+    if not username or not password:
+        return False
+    try:
+        return bool(LoginPage(page).login(username, password))
+    except Exception:
+        return False
+
+
+def _redact_text(value: Any, limit: int = 240) -> str:
+    """Return a short response value safe for a local diagnostic report."""
+    text = str(value or "")
+    text = SENSITIVE_VALUE_RE.sub("<redacted>", text)
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
+def _summarize_response_value(value: Any, depth: int = 0) -> Any:
+    """Keep useful response diagnostics without persisting credentials or large bodies."""
+    if depth >= 3:
+        return "<nested value omitted>"
+    if isinstance(value, dict):
+        summary: dict[str, Any] = {}
+        for index, (key, child) in enumerate(value.items()):
+            if index >= 20:
+                summary["<additional keys>"] = "<omitted>"
+                break
+            key_text = str(key)
+            summary[key_text] = (
+                "<redacted>"
+                if SENSITIVE_KEY_RE.search(key_text)
+                else _summarize_response_value(child, depth + 1)
+            )
+        return summary
+    if isinstance(value, list):
+        summary = [_summarize_response_value(item, depth + 1) for item in value[:5]]
+        if len(value) > 5:
+            summary.append("<additional items omitted>")
+        return summary
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return _redact_text(value) if isinstance(value, str) else value
+    return _redact_text(value)
+
+
+def _response_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """Build a bounded, non-secret summary for a single template response."""
+    summary: dict[str, Any] = {
+        "ok": bool(result.get("ok")),
+        "httpStatus": result.get("status"),
+        "contentType": _redact_text(result.get("contentType"), 120),
+        "filename": _redact_text(result.get("filename"), 200),
+    }
+    if "json" in result:
+        summary["responseType"] = "json"
+        summary["json"] = _summarize_response_value(result.get("json"))
+    elif result.get("base64"):
+        summary["responseType"] = "binary"
+        try:
+            summary["binaryBytes"] = len(base64.b64decode(result["base64"]))
+        except (TypeError, ValueError):
+            summary["binaryBytes"] = "<invalid base64>"
+    else:
+        summary["responseType"] = "unknown"
+    return summary
+
+
+def _export_failure_reason(result: dict[str, Any], file_path: Path) -> str:
+    """Classify the first observable reason a template did not produce a workbook."""
+    status = result.get("status")
+    if not result.get("ok"):
+        return f"http_error:{status or 'unknown'}"
+    body = result.get("json")
+    if body is not None:
+        if isinstance(body, dict) and body.get("code") not in (None, 200, "200"):
+            return f"business_error:{body.get('code')}"
+        return "json_response_without_workbook"
+    if not result.get("base64"):
+        return "missing_workbook_payload"
+    if not file_path.exists():
+        return "workbook_not_written"
+    if file_path.stat().st_size == 0:
+        return "empty_workbook"
+    return "unknown_export_failure"
 
 
 def _assert_api_ok(result: dict[str, Any], name: str) -> Any:
@@ -349,14 +449,14 @@ class TestSalesOrderExportFieldValidation:
         SalesOrderPage(logged_in_page).wait_for_table_data()
 
         template_data = _assert_api_ok(
-            _api(logged_in_page, "GET", "/oms-api/oms-admin/base/exportTemplate/list?type=3"),
+            _api(logged_in_page, "GET", f"{_api_prefix()}/oms-admin/base/exportTemplate/list?type=3"),
             "exportTemplate/list",
         )
         templates = _parse_templates(template_data)
         assert templates, "No templates returned by exportTemplate/list"
 
         list_data = _assert_api_ok(
-            _api(logged_in_page, "POST", "/oms-api/oms-admin/sales/order/batchListNew", BASE_LIST_PAYLOAD),
+            _api(logged_in_page, "POST", f"{_api_prefix()}/oms-admin/sales/order/batchListNew", BASE_LIST_PAYLOAD),
             "sales/order/batchListNew",
         )
         order_numbers, list_records = _select_orders(list_data, 50)
@@ -369,7 +469,7 @@ class TestSalesOrderExportFieldValidation:
             _api(
                 logged_in_page,
                 "POST",
-                "/oms-api/oms-admin/sales/orderItem/queryAllList",
+                f"{_api_prefix()}/oms-admin/sales/orderItem/queryAllList",
                 {"orderNoList": order_numbers},
             ),
             "sales/orderItem/queryAllList",
@@ -381,6 +481,7 @@ class TestSalesOrderExportFieldValidation:
         manifest: list[dict[str, Any]] = []
         for index, template in enumerate(templates, start=1):
             file_path = REPORT_DIR / f"template_{index:03d}.xlsx"
+            file_path.unlink(missing_ok=True)
             payload = {
                 "checkColumns": template["columns"],
                 "orderNos": order_numbers,
@@ -388,29 +489,66 @@ class TestSalesOrderExportFieldValidation:
                 "mergeMultipleProInfo": False,
                 "mergeOrderSharedInfo": False,
             }
-            export_result = _download_export(logged_in_page, payload, file_path)
-            if not export_result.get("ok") or not file_path.exists() or file_path.stat().st_size == 0:
-                blocking_failures.append({"template": template["name"], "error": export_result})
+            diagnostic: dict[str, Any] = {
+                "index": index,
+                "templateId": template.get("id"),
+                "group": template["group"],
+                "template": template["name"],
+                "file": file_path.name,
+                "status": "failed",
+                "httpStatus": None,
+                "responseSummary": {},
+                "failureReason": None,
+            }
+            try:
+                export_result = _download_export(logged_in_page, payload, file_path)
+                response_body = export_result.get("json")
+                if isinstance(response_body, dict) and response_body.get("code") == 401:
+                    if _reauthenticate(logged_in_page):
+                        export_result = _download_export(logged_in_page, payload, file_path)
+                diagnostic["httpStatus"] = export_result.get("status")
+                diagnostic["responseSummary"] = _response_summary(export_result)
+            except Exception as exc:  # noqa: BLE001 - persist the per-template failure and continue
+                diagnostic["failureReason"] = f"export_request_exception:{type(exc).__name__}"
+                diagnostic["responseSummary"] = {"exception": _redact_text(exc)}
+                blocking_failures.append(diagnostic)
+                manifest.append(diagnostic)
                 continue
 
-            headers, rows = _read_workbook(file_path)
+            if not export_result.get("ok") or not file_path.exists() or file_path.stat().st_size == 0:
+                diagnostic["failureReason"] = _export_failure_reason(export_result, file_path)
+                blocking_failures.append(diagnostic)
+                manifest.append(diagnostic)
+                continue
+
+            try:
+                headers, rows = _read_workbook(file_path)
+            except Exception as exc:  # noqa: BLE001 - preserve template-level diagnostics
+                diagnostic["failureReason"] = f"workbook_read_exception:{type(exc).__name__}"
+                diagnostic["responseSummary"]["workbookReadError"] = _redact_text(exc)
+                blocking_failures.append(diagnostic)
+                manifest.append(diagnostic)
+                continue
+
             validation = _validate_fields(template, rows, order_numbers, list_records, detail_data)
-            manifest.append(
+            diagnostic.update(
                 {
-                    "index": index,
-                    "group": template["group"],
-                    "template": template["name"],
-                    "file": file_path.name,
+                    "status": "passed" if rows else "failed",
                     "columns": len(headers),
                     "rows": len(rows),
                     **validation,
                 }
             )
             if not rows:
-                blocking_failures.append({"template": template["name"], "error": "empty workbook"})
+                diagnostic["failureReason"] = "empty_workbook"
+                blocking_failures.append(diagnostic)
+            manifest.append(diagnostic)
 
         (REPORT_DIR / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         (REPORT_DIR / "orders.txt").write_text("\n".join(order_numbers), encoding="utf-8")
 
         assert len(templates) == len(manifest), "Not every realtime template produced a workbook"
-        assert not blocking_failures, f"Sales order export blocking failures: {blocking_failures}"
+        assert not blocking_failures, (
+            "Sales order export blocking failures: "
+            f"{json.dumps(blocking_failures, ensure_ascii=False, indent=2)}"
+        )

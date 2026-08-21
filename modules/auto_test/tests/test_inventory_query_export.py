@@ -42,6 +42,7 @@ class TestInventoryQuery:
         count = sku_page.get_result_count()
 
         assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert count > 0, "无条件搜索应返回至少一条库存SKU"
         print(f"\n✅ 无条件搜索成功 - 响应时间: {response_time:.2f}秒, 结果数: {count}")
 
     def test_search_by_sku_code(self, logged_in_page: Page) -> None:
@@ -66,12 +67,9 @@ class TestInventoryQuery:
         for invalid_input in invalid_inputs:
             sku_page.click_reset()
             sku_page.fill_sku_code(invalid_input)
-            try:
-                response_time = sku_page.click_search()
-                assert response_time < 30, f"响应时间过长: {response_time}秒"
-                print(f"\n✅ 无效输入 '{invalid_input}' 处理成功")
-            except Exception as e:
-                print(f"\n⚠️ 无效输入 '{invalid_input}' 导致异常: {e}")
+            response_time = sku_page.click_search()
+            assert response_time < 30, f"无效输入'{invalid_input}'响应时间过长: {response_time}秒"
+            print(f"\n✅ 无效输入 '{invalid_input}' 处理成功")
 
     def test_search_edge_cases(self, logged_in_page: Page) -> None:
         """Test search with edge case inputs."""
@@ -83,12 +81,9 @@ class TestInventoryQuery:
         for edge_case in edge_cases:
             sku_page.click_reset()
             sku_page.fill_sku_code(edge_case)
-            try:
-                response_time = sku_page.click_search()
-                assert response_time < 30, f"响应时间过长: {response_time}秒"
-                print(f"\n✅ 边缘输入 '{edge_case[:20]}...' 处理成功")
-            except Exception as e:
-                print(f"\n⚠️ 边缘输入 '{edge_case[:20]}...' 导致异常: {e}")
+            response_time = sku_page.click_search()
+            assert response_time < 30, f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
+            print(f"\n✅ 边缘输入 '{edge_case[:20]}...' 处理成功")
 
     def test_search_result_count(self, logged_in_page: Page) -> None:
         """Test search result count display."""
@@ -99,7 +94,8 @@ class TestInventoryQuery:
         sku_page.click_search()
         count = sku_page.get_result_count()
 
-        assert count >= 0, "结果数应为非负数"
+        assert isinstance(count, int), f"结果数必须是整数，实际类型: {type(count).__name__}"
+        assert count > 0, "无条件搜索应返回至少一条库存SKU"
         print(f"\n✅ 搜索结果数量: {count}")
 
     def test_search_results_format(self, logged_in_page: Page) -> None:
@@ -111,6 +107,8 @@ class TestInventoryQuery:
         sku_page.click_search()
         results = sku_page.get_search_results()
 
+        assert isinstance(results, list), f"搜索结果必须是列表，实际类型: {type(results).__name__}"
+        assert all(isinstance(row, dict) for row in results), "搜索结果每一行必须是对象"
         print("\n✅ 搜索结果格式验证:")
         print(f"   - 行数: {len(results)}")
         if len(results) > 0:
@@ -228,19 +226,13 @@ class TestInventoryExport:
         assert download_result["success"], f"导出下载失败: {download_result.get('error')}"
         assert download_result["file_size"] > 0, "导出文件为空"
 
-        if download_result["success"]:
-            print("\n✅ 导出下载成功")
-            print(f"   - 文件名: {download_result['filename']}")
-            print(f"   - 文件路径: {download_result['file_path']}")
-            print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
-
-            if download_result["file_path"] and os.path.exists(download_result["file_path"]):
-                print("\n📄 导出文件内容预览（前500字节）:")
-                with open(download_result["file_path"], "rb") as f:
-                    content = f.read(500).decode("utf-8", errors="replace")
-                    print(content)
-        else:
-            print(f"\n⚠️ 导出下载失败: {download_result['error']}")
+        print("\n✅ 导出下载成功")
+        print(f"   - 文件名: {download_result['filename']}")
+        print(f"   - 文件路径: {download_result['file_path']}")
+        print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
+        assert download_result["file_path"] and os.path.exists(download_result["file_path"]), (
+            f"导出文件不存在: {download_result['file_path']}"
+        )
 
     def test_export_with_empty_results_disabled(self, logged_in_page: Page) -> None:
         """Test that export is disabled when search returns no results."""
@@ -253,24 +245,18 @@ class TestInventoryExport:
 
         count = sku_page.get_result_count()
         print(f"\n搜索无结果测试 - 结果数: {count}")
+        assert count == 0, f"NONEXISTENT_SKU_12345应无结果，实际为{count}"
 
-        if count == 0:
-            sku_page.click_export()
-            sku_page.wait_for_search_results()
+        sku_page.click_export()
+        sku_page.wait_for_search_results()
 
-            export_menu_item = logged_in_page.locator('span:has-text("导出当前搜索结果")')
-            if export_menu_item.count() > 0:
-                is_disabled = export_menu_item.first.get_attribute("disabled")
-                is_gray = "disabled" in (export_menu_item.first.get_attribute("class") or "")
-
-                if is_disabled or is_gray:
-                    print("\n✅ 当搜索无结果时，导出当前搜索结果选项不可用（符合预期）")
-                else:
-                    print("\n⚠️ 当搜索无结果时，导出当前搜索结果选项仍可用（可能不符合预期）")
-            else:
-                print("\n⚠️ 未找到导出当前搜索结果菜单选项")
+        export_menu_item = logged_in_page.locator('span:has-text("导出当前搜索结果")')
+        if export_menu_item.count() > 0:
+            is_disabled = export_menu_item.first.get_attribute("disabled")
+            is_gray = "disabled" in (export_menu_item.first.get_attribute("class") or "")
+            assert is_disabled or is_gray, "无结果时导出当前搜索结果选项仍可用"
         else:
-            print("\n⚠️ 当前环境搜索NONEXISTENT_SKU_12345仍有结果，无法验证无结果场景")
+            print("\n✅ 无结果时导出当前搜索结果选项未展示")
 
 
 @pytest.mark.regression
@@ -288,7 +274,8 @@ class TestInventoryReset:
         sku_page.click_reset()
 
         sku_input = logged_in_page.locator('input[placeholder*="库存SKU编码"]')
-        input_value = sku_input.first.input_value() if sku_input.count() > 0 else ""
+        assert sku_input.count() > 0, "库存SKU编码输入框不存在"
+        input_value = sku_input.first.input_value()
 
         assert input_value == "", "重置后输入框应清空"
         print("\n✅ 重置功能正常，输入框已清空")

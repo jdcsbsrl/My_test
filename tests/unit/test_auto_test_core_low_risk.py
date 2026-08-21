@@ -1,4 +1,3 @@
-import json
 import time
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -202,7 +201,7 @@ class TestExecutionAuth:
         reset_singletons()
 
     def test_manager_reads_authorization_from_environment(self, monkeypatch):
-        monkeypatch.setenv(execution_auth.AUTHORIZATION_ENV_VAR, execution_auth.AUTHORIZATION_TOKEN)
+        monkeypatch.setenv(execution_auth.AUTHORIZATION_ENV_VAR, "approval-from-secure-environment")
         monkeypatch.setenv("AUTHORIZED_BY", "qa")
         monkeypatch.setenv("AUTHORIZED_AT", "2026-07-27T10:00:00")
 
@@ -218,8 +217,13 @@ class TestExecutionAuth:
     def test_check_authorization_raises_when_not_authorized(self, monkeypatch):
         monkeypatch.delenv(execution_auth.AUTHORIZATION_ENV_VAR, raising=False)
 
-        with pytest.raises(execution_auth.ExecutionAuthorizationError):
+        with pytest.raises(execution_auth.ExecutionAuthorizationError) as exc:
             execution_auth.check_authorization()
+
+        message = str(exc.value)
+        assert execution_auth.AUTHORIZATION_ENV_VAR in message
+        assert "未设置或为空" in message
+        assert "AUTHORIZED" not in message.replace(execution_auth.AUTHORIZATION_ENV_VAR, "")
 
     def test_report_sensitive_operation_raises_report_error(self):
         manager = execution_auth.ExecutionAuthManager()
@@ -324,35 +328,18 @@ class TestTokenManager:
     def teardown_method(self):
         reset_singletons()
 
-    def test_load_save_get_and_clear_tokens_use_configured_file(self, tmp_path):
+    def test_tokens_are_process_local_and_never_persisted(self, tmp_path):
         token_file = tmp_path / "tokens.json"
-        token_file.write_text(
-            json.dumps(
-                {
-                    "test": {
-                        "token": "old",
-                        "env": "test",
-                        "username": "alice",
-                        "obtained_at": datetime.now().isoformat(),
-                        "expires_in": 7200,
-                    }
-                }
-            ),
-            encoding="utf-8",
-        )
         manager = TokenManager()
         manager._token_file = token_file
-        manager._tokens = {}
+        manager.save_token("test", "new", "alice")
         manager._load_tokens()
 
-        assert manager.get_token("test") == "old"
-        manager.save_token("uat", "new", "bob", expires_in=60)
-        assert json.loads(token_file.read_text(encoding="utf-8"))["uat"]["token"] == "new"
-        assert manager.get_env_vars("uat")["UAT_USERNAME"] == "bob"
-        manager.clear_token("uat")
-        assert manager.get_token("uat") is None
-        manager.clear_all_tokens()
+        assert manager.get_token("test") == "new"
+        assert manager.get_env_vars("test")["TEST_USERNAME"] == "alice"
         assert not token_file.exists()
+        manager.clear_all_tokens()
+        assert manager.get_all_tokens() == {}
 
     def test_expired_or_invalid_token_is_not_returned(self):
         manager = TokenManager()
@@ -390,7 +377,7 @@ class TestTokenManager:
         assert token_file.exists()
         assert TokenManager() is not manager
 
-    def test_clear_token_only_removes_target_environment(self, tmp_path):
+    def test_clear_token_only_removes_target_environment_without_disk_write(self, tmp_path):
         token_file = tmp_path / "tokens.json"
         manager = TokenManager()
         manager._token_file = token_file
@@ -403,12 +390,11 @@ class TestTokenManager:
 
         assert manager.get_token("test") is None
         assert manager.get_token("uat") == "uat-token"
-        persisted = json.loads(token_file.read_text(encoding="utf-8"))
-        assert list(persisted) == ["uat"]
+        assert not token_file.exists()
 
-    def test_clear_all_tokens_removes_memory_and_persisted_state(self, tmp_path):
+    def test_clear_all_tokens_removes_memory_without_deleting_unrelated_file(self, tmp_path):
         token_file = tmp_path / "tokens.json"
-        token_file.write_text("{}", encoding="utf-8")
+        token_file.write_text("unrelated", encoding="utf-8")
         manager = TokenManager()
         manager._token_file = token_file
         manager._tokens = {"test": TokenInfo("token", "test", "alice", datetime.now().isoformat())}
@@ -416,7 +402,7 @@ class TestTokenManager:
         manager.clear_all_tokens()
 
         assert manager.get_all_tokens() == {}
-        assert not token_file.exists()
+        assert token_file.read_text(encoding="utf-8") == "unrelated"
 
 
 class TestLoginService:

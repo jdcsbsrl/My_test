@@ -3,26 +3,42 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
 
 from modules.auto_test.core.agent_feedback import append_auto_failure_record
-from modules.auto_test.core.agent_loader import bootstrap_agent_workspace, repo_root
+from modules.auto_test.core.agent_loader import bootstrap_agent_workspace
 from modules.auto_test.core.agent_phases import resolve_agent_phase
 from modules.auto_test.core.agent_specialization import resolve_agent_domain
 from modules.auto_test.core.api_client import APIClient
 from modules.auto_test.core.config_manager import ConfigManager, get_config
 from modules.auto_test.core.execution_auth import check_authorization, get_auth_manager, report_sensitive_operation
-from modules.auto_test.core.harness_metrics import HarnessMetricsRecorder, default_metrics_path, metrics_enabled
+from modules.auto_test.core.harness_metrics import HarnessMetricsRecorder, metrics_enabled
 from modules.auto_test.core.logger import get_logger, setup_logger
 from modules.auto_test.drivers.browser_driver import BrowserDriver
+from modules.trae_test.utils.runtime_paths import runtime_dir
 
 setup_logger()
 logger = get_logger()
 
 _metrics = None
+
+
+def _safe_runtime_component(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    return cleaned or "unknown"
+
+
+def _runtime_reports_dir() -> Path:
+    run_id = _safe_runtime_component(os.getenv("TEST_RUN_ID", "local"))
+    worker_id = _safe_runtime_component(os.getenv("PYTEST_XDIST_WORKER", "master"))
+    target = runtime_dir("reports") / "runs" / run_id / worker_id
+    target.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -54,7 +70,7 @@ def pytest_configure(config: pytest.Config) -> None:
 
     try:
         if metrics_enabled():
-            _metrics = HarnessMetricsRecorder(default_metrics_path(repo_root()))
+            _metrics = HarnessMetricsRecorder(_runtime_reports_dir() / "harness_metrics" / "events.jsonl")
             _metrics.session_start(pytest_version=pytest.__version__, cwd=os.getcwd())
     except Exception as exc:
         logger.debug("harness metrics init skipped: %s", exc)
@@ -112,7 +128,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--browser", action="store", default="chromium", help="Browser: chromium, firefox, webkit")
     parser.addoption("--headed", action="store_true", default=False, help="Run browser in headed mode")
     parser.addoption("--slow-mo", action="store", default="0", help="Slow motion delay in milliseconds")
-    parser.addoption("--skip-auth", action="store_true", default=False, help="Skip authorization check (for debugging)")
+    parser.addoption(
+        "--skip-auth",
+        action="store_true",
+        default=False,
+        help="Deprecated safety option; using it is rejected",
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -126,10 +147,13 @@ def load_config(request: pytest.FixtureRequest) -> None:
 
 @pytest.fixture(scope="session", autouse=True)
 def check_execution_authorization(request: pytest.FixtureRequest) -> None:
+    _require_execution_authorization(request)
+
+
+def _require_execution_authorization(request: pytest.FixtureRequest) -> None:
     skip_auth = request.config.getoption("--skip-auth")
     if skip_auth:
-        logger.warning("授权检查已通过 --skip-auth 跳过")
-        return
+        raise pytest.UsageError("--skip-auth is disabled; explicit execution authorization is mandatory")
 
     auth_manager = get_auth_manager()
     status = auth_manager.get_authorization_status()
@@ -138,7 +162,7 @@ def check_execution_authorization(request: pytest.FixtureRequest) -> None:
         check_authorization()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def api_client() -> APIClient:
     client = APIClient()
     yield client
@@ -163,9 +187,9 @@ def sales_order_facade(api_client: APIClient):
     return _create_sales_order_facade(api_client)
 
 
-@pytest.fixture(scope="class")
+@pytest.fixture(scope="function")
 def sales_order_facade_class(api_client: APIClient):
-    """Class-scoped authenticated facade (shared session client)."""
+    """Authenticated facade with a private client for each test."""
     yield _create_sales_order_facade(api_client)
 
 
@@ -190,7 +214,10 @@ def browser_page(request: pytest.FixtureRequest, browser_driver_session: Browser
 
     trace_path = None
     if request.node.rep_call.failed if hasattr(request.node, "rep_call") else False:
-        trace_path = f".runtime/reports/traces/trace-{request.node.name}.zip"
+        trace_dir = _runtime_reports_dir() / "traces"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        node_name = _safe_runtime_component(request.node.nodeid)
+        trace_path = str(trace_dir / f"trace-{node_name}.zip")
 
     browser_driver_session.close_context(context, trace_path=trace_path)
 

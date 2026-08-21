@@ -1,5 +1,6 @@
 import allure
 from playwright.sync_api import Page
+from urllib.parse import urlsplit
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -67,12 +68,12 @@ class LoginPage(BasePage):
             pass
         logger.info("导航到登录页面")
 
-    @allure.step("Enter username: {username}")
+    @allure.step("Enter username")
     def enter_username(self, username: str) -> None:
         """输入用户名"""
         if not self.try_fill(self._username_selectors, username):
             raise ValueError("无法找到用户名输入框")
-        logger.info(f"输入用户名: {username}")
+        logger.info("输入用户名（账号已填写）")
 
     @allure.step("Enter password")
     def enter_password(self, password: str) -> None:
@@ -111,7 +112,7 @@ class LoginPage(BasePage):
         logger.info("尝试按Enter键提交表单")
         self.page.keyboard.press("Enter")
 
-    @allure.step("Perform login with username: {username}")
+    @allure.step("Perform login")
     def login(self, username: str, password: str, timeout: int = 45000) -> bool:
         """执行完整登录流程，支持重试机制
 
@@ -198,7 +199,7 @@ class LoginPage(BasePage):
         url = self.current_url.lower()
 
         if "login" not in url and "auth" not in url:
-            logger.debug(f"登录成功检测: URL不包含login/auth - {url}")
+            logger.debug("登录成功检测: URL不包含login/auth")
             return True
 
         success_indicators = [
