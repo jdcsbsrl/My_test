@@ -122,6 +122,8 @@ jobs:
             ${{ runner.os }}-pip-
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py
       - name: Run unit tests
         run: |
           mkdir -p .runtime/reports/allure-results
@@ -168,6 +170,8 @@ jobs:
             ${{ runner.os }}-pip-
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py
       - name: Run integration tests
         run: |
           mkdir -p .runtime/reports/allure-results
@@ -234,6 +238,8 @@ jobs:
             ${{ runner.os }}-pip-
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
       - name: Cache Playwright browser
         uses: actions/cache@v4
         with:

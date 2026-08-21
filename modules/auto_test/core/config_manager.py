@@ -148,16 +148,28 @@ class ConfigManager:
     def _build_environment_config(env: str) -> dict[str, Any]:
         """Build a secrets-free CI configuration when private YAML is not checked in."""
         prefix = "UAT" if env == "uat" else "TEST"
-        origin = os.getenv(f"{prefix}_WEB_API_BASE_URL", "")
+        api_value = os.getenv(f"{prefix}_WEB_API_BASE_URL", "").strip()
         default_ui_path = "/oms-uat-ui" if env == "uat" else "/oms-ui"
         default_api_path = "/oms-uat-api" if env == "uat" else "/oms-api"
+        parsed_api = urlparse(api_value)
+        origin = ConfigManager._origin_from_url(api_value)
+        if api_value and not origin:
+            # Preserve the invalid value so the normal validator can return a
+            # safe, consistent configuration error without silently falling
+            # back to another endpoint.
+            origin = api_value
+        if origin and parsed_api.path not in {"", "/"} and not parsed_api.query and not parsed_api.fragment:
+            api_base_url = api_value.rstrip("/")
+        else:
+            api_base_url = f"{origin}{default_api_path}"
         return {
             "origin": origin,
             "ui_path": default_ui_path,
             "api_path": default_api_path,
             "base_url": os.getenv(f"{prefix}_WEB_BASE_URL") or f"{origin}{default_ui_path}",
+            "api_base_url": api_base_url,
             "api": {
-                "base_url": f"{origin}{default_api_path}",
+                "base_url": api_base_url,
                 "timeout": 30,
                 "retries": 3,
                 "verify_ssl": True,
@@ -219,9 +231,9 @@ class ConfigManager:
         origin = cls._origin_from_url(value)
         parsed = urlparse(value.strip())
         if not origin or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-            raise ValueError(f"Invalid {field}: {value!r}")
+            raise ValueError(f"Invalid {field}: expected an HTTP(S) origin without path, query, fragment, or credentials")
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise EnvironmentSecurityError(f"HTTPS is required for non-local {field}: {value!r}")
+            raise EnvironmentSecurityError(f"HTTPS is required for non-local {field}")
         return origin
 
     def _allowed_origins(self) -> set[str]:
