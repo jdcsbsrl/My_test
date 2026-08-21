@@ -28,3 +28,24 @@ def test_scanner_uses_configured_secret_values(tmp_path: Path, monkeypatch) -> N
     (tmp_path / "result.json").write_text('{"message": "local-password-value"}', encoding="utf-8")
 
     assert scan(tmp_path) == 1
+
+
+def test_scanner_ignores_short_secret_inside_timestamp(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TEST_PASSWORD", "123456")
+    (tmp_path / "container.json").write_text('{"start": 1234567890, "stop": 1234567999}', encoding="utf-8")
+
+    assert scan(tmp_path) == 0
+
+
+def test_scanner_blocks_short_secret_as_password_value(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TEST_PASSWORD", "123456")
+    (tmp_path / "result.json").write_text('{"password": "123456"}', encoding="utf-8")
+
+    assert scan(tmp_path) == 1
+
+
+def test_scanner_ignores_short_secret_in_ordinary_message(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TEST_PASSWORD", "123456")
+    (tmp_path / "result.json").write_text('{"message": "order-123456-created"}', encoding="utf-8")
+
+    assert scan(tmp_path) == 0

@@ -8,6 +8,7 @@ values are never written to stdout or stderr.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -81,6 +82,53 @@ def _environment_values() -> tuple[str, ...]:
     return tuple(value for value in values if len(value) >= 4)
 
 
+def _json_string_values(value: object) -> list[str]:
+    """Return only JSON string values, excluding numeric timestamps and IDs."""
+
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        values: list[str] = []
+        for child in value.values():
+            values.extend(_json_string_values(child))
+        return values
+    if isinstance(value, list):
+        values = []
+        for child in value:
+            values.extend(_json_string_values(child))
+        return values
+    return []
+
+
+def _configured_secret_found(path: Path, text: str, secrets: tuple[str, ...]) -> bool:
+    """Match configured secrets without treating IDs or timestamps as leaks."""
+
+    if not secrets:
+        return False
+
+    if path.suffix.lower() == ".json":
+        try:
+            candidates = _json_string_values(json.loads(text))
+        except (json.JSONDecodeError, TypeError):
+            candidates = []
+        for secret in secrets:
+            if any(candidate == secret or (len(secret) >= 8 and secret in candidate) for candidate in candidates):
+                return True
+        return False
+
+    # For plain text, short values are checked only in an explicit sensitive
+    # assignment. This avoids matching a short password inside a timestamp,
+    # UUID, order number, or other ordinary text.
+    sensitive_assignment = re.compile(
+        r"(?i)\b(?:password|passwd|secret|token|cookie|credential)\b\s*[:=]\s*[\"']?([^\s\"',}]+)"
+    )
+    assigned_values = sensitive_assignment.findall(text)
+    for secret in secrets:
+        if any(value == secret or (len(secret) >= 8 and secret in value) for value in assigned_values):
+            return True
+    return any(len(secret) >= 8 and secret in text for secret in secrets)
+
+
 def scan(root: Path) -> int:
     """Scan *root* recursively and return a process-style exit code."""
 
@@ -98,7 +146,7 @@ def scan(root: Path) -> int:
         if text is None:
             continue
         rules = {rule for rule, pattern in PATTERNS if pattern.search(text)}
-        if any(value in text for value in environment_values):
+        if _configured_secret_found(path, text, environment_values):
             rules.add("configured-secret-value")
         for rule in sorted(rules):
             findings.append((path, rule))
