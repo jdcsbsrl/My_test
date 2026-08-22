@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from .business_rule_parser import RawScenario
+from .runtime_quality import attach_runtime_quality, read_runtime_quality
 
 logger = logging.getLogger(__name__)
 
@@ -607,22 +608,26 @@ class TestCaseScoreEngine:
         }
 
     def record_score(self, case: dict[str, Any], stage: str) -> float:
-        """记录原始/优化后/最终评分，保留评分轨迹而不覆盖历史值。"""
+        """记录评分到 ``_runtime_quality``，不污染正式 15 字段。"""
         metadata = self.score_with_metadata(case)
         score = metadata["score"]
-        field_by_stage = {
-            "original": "原始评分",
-            "optimized": "优化后评分",
-            "final": "最终评分",
-        }
-        if stage not in field_by_stage:
+        if stage not in {"original", "optimized", "final"}:
             raise ValueError(f"不支持的评分阶段: {stage}")
-        case[field_by_stage[stage]] = score
-        case["评分置信度"] = metadata["confidence"]
-        case["是否冷启动评分"] = metadata["is_cold_start"]
-        case["评分门槛"] = self.FINAL_SCORE_THRESHOLD
+        runtime = read_runtime_quality(case)
+        if stage == "original":
+            runtime.original_score = score
+        elif stage == "optimized":
+            runtime.optimized_score = score
+        else:
+            runtime.final_score = score
+            runtime.final_audit_passed = False
+        runtime.score_threshold = self.FINAL_SCORE_THRESHOLD
+        runtime.is_cold_start = metadata["is_cold_start"]
+        runtime.confidence = metadata["confidence"]
         if stage == "final":
-            case["最终评分是否达标"] = metadata["is_final_score_qualified"]
+            runtime.needs_human_review = not metadata["is_final_score_qualified"]
+        runtime.score_history.append({"stage": stage, "score": score})
+        attach_runtime_quality(case, runtime)
         return score
 
     def score(self, case: dict[str, Any]) -> float:
@@ -913,16 +918,18 @@ class TestCaseRegenerationLoop:
         optimized_cases = []
         for case in cases:
             # 使用锁保护熔断检查和重生操作，防止并发问题
-            case_id = case.get("用例ID", str(id(case)))
+            case_id = str(id(case))
             self._acquire_lock(case_id)
 
             try:
                 # 检查是否已达到重生上限或处于冷却期
                 if self._is_circuit_broken(case):
                     case["用例状态"] = "正常"
-                    case["needs_human_review"] = True
+                    runtime = read_runtime_quality(case)
+                    runtime.needs_human_review = True
+                    attach_runtime_quality(case, runtime)
                     self.score_engine.record_score(case, "final")
-                    case["质量评分"] = case["最终评分"]
+                    case["质量评分"] = read_runtime_quality(case).final_score or 0.0
                     self._send_human_review_alert(case)
                     optimized_cases.append(case)
                     continue
@@ -952,32 +959,34 @@ class TestCaseRegenerationLoop:
         from .excel_generator import ExcelGenerator
 
         cases = self.generate_and_optimize(keyword, limit)
-        if any(
-            case.get("用例状态") != "正常"
-            or case.get("质量评分", 0) < self._min_score_threshold
-            for case in cases
-        ):
+        if any(case.get("用例状态") != "正常" or case.get("质量评分", 0) < self._min_score_threshold for case in cases):
             raise RuntimeError("存在未达到最终评分门槛的用例，禁止导出")
         return ExcelGenerator.generate(cases, output_path=output_path or "")
 
     def _regenerate_until_qualified(self, case: dict[str, Any]) -> dict[str, Any]:
         """循环优化直到达标或达到重生上限"""
-        regeneration_count = case.get("regeneration_count", 0)
-        if "原始评分" not in case:
+        regeneration = dict(case.get("_runtime_regeneration") or {})
+        regeneration_count = int(regeneration.get("count", 0) or 0)
+        runtime_quality = read_runtime_quality(case)
+        if runtime_quality.original_score is None:
             self.score_engine.record_score(case, "original")
 
         for _ in range(self._max_regeneration_attempts):
             score = self.score_engine.score(case)
             if score >= self._min_score_threshold:
                 self.score_engine.record_score(case, "final")
-                case["质量评分"] = case["最终评分"]
-                case["regeneration_count"] = regeneration_count
-                case["last_regenerated_at"] = datetime.now().isoformat()
+                case["质量评分"] = read_runtime_quality(case).final_score or 0.0
+                case["_runtime_regeneration"] = {
+                    "count": regeneration_count,
+                    "last_regenerated_at": datetime.now().isoformat(),
+                }
                 case["用例状态"] = "正常"
-                case["needs_human_review"] = False
+                runtime = read_runtime_quality(case)
+                runtime.needs_human_review = False
+                attach_runtime_quality(case, runtime)
                 return case
 
-            if "原始评分" not in case:
+            if read_runtime_quality(case).original_score is None:
                 self.score_engine.record_score(case, "original")
             case = self.optimizer.optimize(case, target_score=self._min_score_threshold)
             self.score_engine.record_score(case, "optimized")
@@ -985,25 +994,29 @@ class TestCaseRegenerationLoop:
 
         # 达到重生上限，触发熔断
         self.score_engine.record_score(case, "final")
-        case["质量评分"] = case["最终评分"]
-        case["regeneration_count"] = regeneration_count
-        case["last_regenerated_at"] = datetime.now().isoformat()
+        case["质量评分"] = read_runtime_quality(case).final_score or 0.0
+        case["_runtime_regeneration"] = {
+            "count": regeneration_count,
+            "last_regenerated_at": datetime.now().isoformat(),
+        }
         case["用例状态"] = "正常"
-        case["needs_human_review"] = True
+        runtime = read_runtime_quality(case)
+        runtime.needs_human_review = True
+        attach_runtime_quality(case, runtime)
         self._send_human_review_alert(case)
 
         return case
 
     def _is_circuit_broken(self, case: dict[str, Any]) -> bool:
         """检查是否触发熔断"""
-        regeneration_count = case.get("regeneration_count", 0)
+        regeneration_count = int((case.get("_runtime_regeneration") or {}).get("count", 0) or 0)
 
         # 检查重生次数是否达到上限
         if regeneration_count >= self._max_regeneration_attempts:
             return True
 
         # 检查是否处于冷却期
-        last_regenerated = case.get("last_regenerated_at")
+        last_regenerated = (case.get("_runtime_regeneration") or {}).get("last_regenerated_at")
         if last_regenerated:
             try:
                 last_time = datetime.fromisoformat(last_regenerated)
@@ -1019,7 +1032,7 @@ class TestCaseRegenerationLoop:
         logger.warning(
             f"用例触发人工审核: {case.get('用例名称', '未知')}, "
             f"评分: {case.get('质量评分', 0)}, "
-            f"重生次数: {case.get('regeneration_count', 0)}"
+            f"重生次数: {(case.get('_runtime_regeneration') or {}).get('count', 0)}"
         )
         # 可选：发送邮件/钉钉/企微告警
         # alert_service.send_alert(case)

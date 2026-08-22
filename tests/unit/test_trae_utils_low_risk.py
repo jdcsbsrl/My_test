@@ -230,28 +230,62 @@ class TestWorkspaceManager:
 
 
 class TestTemplateBuilderAndExcelGenerator:
-    def test_ensure_template_creates_workbook_with_expected_header(self, tmp_path):
+    def test_fixed_redacted_samples_cover_login_query_export_cleanup_and_schema(self):
+        samples_dir = Path(get_default_template_path()).parent / "samples"
+        expected = {"login_case.json", "query_case.json", "export_case.json", "cleanup_case.json", "schema_boundary_cases.json"}
+        assert {path.name for path in samples_dir.glob("*.json")} >= expected
+
+        for name in sorted(expected - {"schema_boundary_cases.json"}):
+            case = json.loads((samples_dir / name).read_text(encoding="utf-8"))
+            ExcelGenerator._validate_test_cases([case])
+            assert set(case).issuperset(ALL_FIELDS)
+            assert "REQ-FIXTURE-" in json.dumps(case, ensure_ascii=False)
+
+        schema = json.loads((samples_dir.parent / "schema" / "test_case_schema.json").read_text(encoding="utf-8"))
+        assert schema["additionalProperties"] is False
+        assert schema["required"] == ALL_FIELDS
+
+    def test_schema_boundary_samples_reject_flat_runtime_and_unknown_fields(self):
+        samples_path = Path(get_default_template_path()).parent / "samples" / "schema_boundary_cases.json"
+        samples = json.loads(samples_path.read_text(encoding="utf-8"))
+        valid = samples["valid_runtime_case"]
+        ExcelGenerator._validate_test_cases([valid])
+
+        flat_runtime = _case(**{"最终评分": 101})
+        with pytest.raises(ValueError, match="未定义字段"):
+            ExcelGenerator._validate_test_cases([flat_runtime])
+
+        unknown_runtime = dict(valid)
+        unknown_runtime["_runtime_unknown"] = True
+        with pytest.raises(ValueError, match="未定义字段"):
+            ExcelGenerator._validate_test_cases([unknown_runtime])
+
+    def test_export_refuses_to_write_under_fixtures(self):
+        fixture_output = Path(get_default_template_path()).parent / "samples" / "must-not-overwrite.xlsx"
+        with pytest.raises(ValueError, match="fixtures目录"):
+            ExcelGenerator.generate_excel([_case()], requirement_name="fixture", output_path=fixture_output)
+
+    def test_ensure_template_reads_fixed_workbook_without_creating_files(self, tmp_path):
         template_path = tmp_path / "template.xlsx"
 
-        result = ensure_template(str(template_path))
-
-        assert result == str(template_path)
-        assert template_path.exists()
+        with pytest.raises(ValueError, match="唯一来源"):
+            ensure_template(str(template_path))
+        assert not template_path.exists()
         from openpyxl import load_workbook
 
-        wb = load_workbook(template_path, read_only=True)
+        result = ensure_template()
+        wb = load_workbook(result, read_only=True)
         assert [cell.value for cell in wb["测试用例"][1]] == ALL_FIELDS
         wb.close()
-        assert ExcelGenerator.validate_excel(str(template_path)) == (False, "Excel文件没有数据行")
+        assert ExcelGenerator.validate_excel(result) == (False, "Excel文件没有数据行")
 
     def test_default_template_path_is_project_fixture(self):
         path = Path(get_default_template_path())
         assert path.parent.parent.name == "fixtures"
         assert path.name == "测试用例模板.xlsx"
 
-    def test_generate_new_writes_only_standard_fields_and_validation_passes(self, tmp_path, monkeypatch):
+    def test_generate_from_fixed_template_writes_only_standard_fields_and_validation_passes(self, tmp_path):
         output = tmp_path / "cases.xlsx"
-        monkeypatch.setattr(ExcelGenerator, "TEMPLATE_PATH", str(tmp_path / "missing-template.xlsx"))
         cases = [_case(**{"质量评分": 91})]
 
         path = ExcelGenerator.generate_excel(cases, requirement_name="demo", output_path=output)
@@ -262,7 +296,6 @@ class TestTemplateBuilderAndExcelGenerator:
         assert rows[0]["case_name"] == "case name"
 
     def test_generate_excel_defaults_to_date_directory(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(ExcelGenerator, "TEMPLATE_PATH", str(tmp_path / "missing-template.xlsx"))
         monkeypatch.setattr("modules.trae_test.utils.excel_generator.workspace_manager", WorkspaceManager(str(tmp_path)))
 
         path = Path(ExcelGenerator.generate_excel([_case()], requirement_name="demo", date_str="20260727"))
@@ -296,6 +329,23 @@ class TestTemplateBuilderAndExcelGenerator:
         wrong_score = _case(**{"质量评分": "91"})
         with pytest.raises(ValueError, match="质量评分"):
             ExcelGenerator._validate_test_cases([wrong_score])
+
+        legacy_runtime = _case(**{"最终评分": 91})
+        with pytest.raises(ValueError, match="未定义字段"):
+            ExcelGenerator._validate_test_cases([legacy_runtime])
+
+    def test_runtime_fields_are_nested_and_never_exported_as_columns(self):
+        case = _case(**{
+            "_runtime_quality": {
+                "final_score": 90,
+                "score_threshold": 85.0,
+                "needs_human_review": False,
+                "final_audit_passed": True,
+            },
+            "_runtime_quality_version": "1.0",
+        })
+        ExcelGenerator._validate_test_cases([case])
+        assert list(case)[:15] == ALL_FIELDS
 
     def test_validate_test_cases_rejects_empty_missing_field_and_empty_name(self):
         with pytest.raises(ValueError):

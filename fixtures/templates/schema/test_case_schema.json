@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/test-erp/test-case-schema-1.0.json",
+  "title": "Test ERP fixed test case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "用例目录", "用例名称", "需求ID", "前置条件", "用例步骤", "预期结果",
+    "用例类型", "用例状态", "用例等级", "创建人", "优先级", "是否可自动化",
+    "回归测试标识", "知识库关联", "质量评分"
+  ],
+  "properties": {
+    "用例目录": {"type": "string"},
+    "用例名称": {"type": "string", "minLength": 1},
+    "需求ID": {"type": "string"},
+    "前置条件": {"type": "string"},
+    "用例步骤": {"type": "string"},
+    "预期结果": {"type": "string"},
+    "用例类型": {"type": "string"},
+    "用例状态": {"type": "string"},
+    "用例等级": {"type": "string"},
+    "创建人": {"type": "string"},
+    "优先级": {"type": "string"},
+    "是否可自动化": {"type": "string"},
+    "回归测试标识": {"type": "string"},
+    "知识库关联": {"type": "string"},
+    "质量评分": {"type": "number", "minimum": 0, "maximum": 100},
+    "_runtime_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "original_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "optimized_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "final_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "score_history": {"type": "array", "items": {"type": "object"}},
+        "score_threshold": {"const": 85.0},
+        "is_cold_start": {"type": "boolean"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "optimization_attempts": {"type": "integer", "minimum": 0},
+        "needs_human_review": {"type": "boolean"},
+        "final_audit_passed": {"type": "boolean"}
+      }
+    },
+    "_runtime_quality_version": {"const": "1.0"},
+    "_runtime_coverage_matrix": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "business_rules": {"type": "array", "items": {"type": "string"}},
+        "business_objects": {"type": "array", "items": {"type": "string"}},
+        "normal_scenarios": {"type": "array", "items": {"type": "string"}},
+        "abnormal_scenarios": {"type": "array", "items": {"type": "string"}},
+        "boundary_scenarios": {"type": "array", "items": {"type": "string"}},
+        "rollback_scenarios": {"type": "array", "items": {"type": "string"}},
+        "exclusions": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "_runtime_coverage_matrix_version": {"const": "1.0"},
+    "_runtime_regeneration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "last_regenerated_at": {"type": "string"}
+      }
+    }
+  }
+}
