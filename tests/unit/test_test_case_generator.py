@@ -6,6 +6,7 @@ from modules.trae_test.utils.test_case_generator import (
     generate_cases,
 )
 from modules.trae_test.utils.template_builder import ALL_FIELDS
+from modules.trae_test.utils.runtime_quality import read_runtime_quality
 
 
 class TestTestCaseGenerator:
@@ -125,8 +126,14 @@ class TestTestCaseGenerator:
 
         cases = generator.generate_cases("测试")
         for case in cases:
-            case.update({"原始评分": 90, "优化后评分": 90, "最终评分": 90, "质量评分": 90,
-                         "最终审核通过": True, "用例状态": "正常"})
+            case["质量评分"] = 90
+            case["用例状态"] = "正常"
+            runtime = read_runtime_quality(case)
+            runtime.final_score = 90
+            runtime.final_audit_passed = True
+            runtime.needs_human_review = False
+            case["_runtime_quality"] = runtime.to_dict()
+            case["_runtime_quality_version"] = "1.0"
         output_path = generator.export_to_excel(cases, str(tmp_path / "output.xlsx"))
 
         mock_excel_generator.generate.assert_called_once()
