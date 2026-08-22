@@ -8,6 +8,7 @@ import requests
 
 
 class ReportSyncQueryAPI:
+    MAX_PAGES = 100
     REPORT = "/oms-admin/sales/order/reportSyncQuery"
     ORDER_LIST = "/oms-admin/sales/order/batchListNew"
     ORDER_ITEMS = "/oms-admin/sales/orderItem/queryAllList"
@@ -47,7 +48,7 @@ class ReportSyncQueryAPI:
     def query_all(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         cursor: Any | None = None
-        for _ in range(1000):
+        for _ in range(self.MAX_PAGES):
             request = dict(payload)
             if cursor not in (None, ""):
                 request["cursor"] = cursor
@@ -58,4 +59,4 @@ class ReportSyncQueryAPI:
             next_cursor = envelope["nextCursor"]
             assert next_cursor != cursor, "nextCursor must change"
             cursor = next_cursor
-        raise AssertionError("cursor pagination exceeded 1000 pages")
+        raise AssertionError(f"cursor pagination exceeded {self.MAX_PAGES} pages")

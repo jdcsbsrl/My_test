@@ -402,11 +402,18 @@ class InventoryExportPage(BasePage):
                 logger.info("宸查€夋嫨瀛楁: {} -> {}", field_name, result)
                 return True
             if _allow_group_activation:
-                activated = self._activate_field_group(field_name)
-                if activated and self.wait_for_field_visible(field_name, timeout=5000):
-                    return self.select_field(field_name, _allow_group_activation=False)
-                if self._activate_field_group_with_locators(field_name):
-                    return self.select_field(field_name, _allow_group_activation=False)
+                # The export page can expose the generic checkbox shell before
+                # its async field-group tree is mounted. Retry activation for a
+                # bounded period instead of treating that intermediate DOM as
+                # a permanent missing-field failure.
+                for _ in range(5):
+                    activated = self._activate_field_group(field_name)
+                    if activated and self.wait_for_field_visible(field_name, timeout=3000):
+                        return self.select_field(field_name, _allow_group_activation=False)
+                    if self._activate_field_group_with_locators(field_name):
+                        if self.wait_for_field_visible(field_name, timeout=3000):
+                            return self.select_field(field_name, _allow_group_activation=False)
+                    self.page.wait_for_timeout(500)
                 logger.warning("字段分组展开后目标字段仍未渲染: {}", field_name)
                 return False
             field_label = self.page.locator(f'.el-checkbox__label:has-text("{field_name}")').first

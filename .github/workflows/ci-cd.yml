@@ -194,11 +194,14 @@ jobs:
     needs: code-quality
     timeout-minutes: 90
     env:
-      TEST_ENV: test
-      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
-      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
-      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      # UI/API regression runs use the stable UAT deployment. The account is
+      # intentionally reused from the existing test credentials; no password
+      # rotation is performed by CI.
+      TEST_ENV: uat
+      UAT_USERNAME: ${{ secrets.TEST_USERNAME }}
+      UAT_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      UAT_WEB_BASE_URL: ${{ secrets.UAT_WEB_BASE_URL }}
+      UAT_WEB_API_BASE_URL: ${{ secrets.UAT_WEB_API_BASE_URL }}
     strategy:
       matrix:
         include:
@@ -259,11 +262,11 @@ jobs:
         if: always()
         run: python tools/scan_sensitive_artifacts.py .runtime/reports
         env:
-          TEST_ENV: test
-          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
-          TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
-          TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+          TEST_ENV: uat
+          UAT_USERNAME: ${{ secrets.TEST_USERNAME }}
+          UAT_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          UAT_WEB_BASE_URL: ${{ secrets.UAT_WEB_BASE_URL }}
+          UAT_WEB_API_BASE_URL: ${{ secrets.UAT_WEB_API_BASE_URL }}
       - name: Upload UI test results
         uses: actions/upload-artifact@v4
         if: always()
