@@ -40,10 +40,21 @@ def _safe_runtime_component(value: str) -> str:
     return cleaned or "unknown"
 
 
-def _cleanup_failure_path() -> Path:
-    run_id = _safe_runtime_component(os.getenv("TEST_RUN_ID", "local"))
-    worker_id = _safe_runtime_component(os.getenv("PYTEST_XDIST_WORKER", "master"))
-    report_dir = runtime_dir("reports") / "runs" / run_id / worker_id
+def _cleanup_failure_path(
+    run_id: str | None = None,
+    worker_id: str | None = None,
+    tenant_id: str | None = None,
+) -> Path:
+    run_id = _safe_runtime_component(run_id or os.getenv("TEST_RUN_ID", "local"))
+    worker_id = _safe_runtime_component(worker_id or os.getenv("PYTEST_XDIST_WORKER", "master"))
+    tenant_id = _safe_runtime_component(
+        tenant_id
+        or os.getenv("TEST_TENANT_ID")
+        or os.getenv("AUTO_TEST_TENANT_ID")
+        or os.getenv("TENANT_ID")
+        or "000000"
+    )
+    report_dir = runtime_dir("reports") / "runs" / run_id / worker_id / tenant_id
     report_dir.mkdir(parents=True, exist_ok=True)
     return report_dir / "cleanup-failures.jsonl"
 
@@ -60,10 +71,24 @@ class TestDataLifecycleManager:
         "sku": "oms_sku",
     }
 
-    def __init__(self, env: str = "test"):
-        self.env = env
-        self.run_id = os.getenv("TEST_RUN_ID") or uuid.uuid4().hex
-        self.db_helper = DBHelper()
+    def __init__(
+        self,
+        env: str = "test",
+        *,
+        run_id: str | None = None,
+        worker_id: str | None = None,
+        tenant_id: str | None = None,
+    ):
+        self.env = str(env or "").strip().lower()
+        self.run_id = run_id or os.getenv("TEST_RUN_ID") or uuid.uuid4().hex
+        self.worker_id = worker_id or os.getenv("PYTEST_XDIST_WORKER") or "master"
+        self.tenant_id = (
+            tenant_id
+            or os.getenv("TEST_TENANT_ID")
+            or os.getenv("AUTO_TEST_TENANT_ID")
+            or os.getenv("TENANT_ID")
+            or "000000"
+        )
         self._setup_tasks: list[tuple] = []
         self._cleanup_tasks: list[dict[str, Any]] = []
         self._retry_config = {
@@ -76,7 +101,8 @@ class TestDataLifecycleManager:
         self._created_data: list[dict[str, Any]] = []
         self._cleanup_failures: list[dict[str, Any]] = []
         # DB 兜底只允许项目认可的测试环境，未知环境默认关闭。
-        self._enable_db_fallback = env in {"test", "test_env", "uat"}
+        self._enable_db_fallback = self.env in {"test", "test_env", "uat"}
+        self.db_helper = DBHelper(env=self.env) if self._enable_db_fallback else None
 
     def register_setup_task(
         self,
@@ -109,6 +135,10 @@ class TestDataLifecycleManager:
         data_type: str | None = None,
         data_id: str | None = None,
         owner_run_id: str | None = None,
+        owner_worker_id: str | None = None,
+        owner_tenant_id: str | None = None,
+        worker_id: str | None = None,
+        tenant_id: str | None = None,
         **kwargs,
     ) -> None:
         """注册数据清理任务
@@ -121,10 +151,18 @@ class TestDataLifecycleManager:
             owner_run_id: 数据所属测试运行ID，必须与当前运行一致
         """
         target_run_id = self.run_id if owner_run_id is None else owner_run_id
+        target_worker_id = (
+            self.worker_id if owner_worker_id is None and worker_id is None else owner_worker_id or worker_id
+        )
+        target_tenant_id = (
+            self.tenant_id if owner_tenant_id is None and tenant_id is None else owner_tenant_id or tenant_id
+        )
         target = {
             "type": data_type,
             "id": data_id,
             "run_id": target_run_id,
+            "worker_id": target_worker_id,
+            "tenant_id": target_tenant_id,
         }
         if fallback is not None:
             self._validate_owned_target(target)
@@ -143,6 +181,13 @@ class TestDataLifecycleManager:
         data_type: str,
         data_id: str,
         cleanup_func: Callable,
+        *,
+        owner_run_id: str | None = None,
+        owner_worker_id: str | None = None,
+        owner_tenant_id: str | None = None,
+        run_id: str | None = None,
+        worker_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> None:
         """注册已创建的测试数据，便于后续清理
 
@@ -156,7 +201,9 @@ class TestDataLifecycleManager:
             "id": data_id,
             "cleanup": cleanup_func,
             "created_at": datetime.now(),
-            "run_id": self.run_id,
+            "run_id": owner_run_id or run_id or self.run_id,
+            "worker_id": owner_worker_id or worker_id or self.worker_id,
+            "tenant_id": owner_tenant_id or tenant_id or self.tenant_id,
         }
         self._validate_owned_target(data_item)
         self._created_data.append(data_item)
@@ -186,12 +233,18 @@ class TestDataLifecycleManager:
         cleanup_order = self._get_cleanup_order()
 
         for item in cleanup_order:
-            if isinstance(item, dict) and "task" in item:
-                # 执行普通清理任务
-                self._execute_cleanup_task(item)
-            else:
-                # 执行已创建数据的清理
-                self._execute_data_cleanup(item)
+            try:
+                if isinstance(item, dict) and "task" in item:
+                    # 执行普通清理任务
+                    self._execute_cleanup_task(item)
+                else:
+                    # 执行已创建数据的清理
+                    self._execute_data_cleanup(item)
+            except Exception as unexpected_error:
+                # A broken reporter or unexpected callback must not skip the
+                # remaining cleanup items; the final aggregate error still blocks.
+                self._record_cleanup_failure(item, unexpected_error, None)
+                logger.exception("Unexpected cleanup failure")
         if self._cleanup_failures:
             raise CleanupFailureError(
                 f"{len(self._cleanup_failures)} cleanup operation(s) were not confirmed successful"
@@ -239,7 +292,9 @@ class TestDataLifecycleManager:
     def _execute_data_cleanup(self, data_item: dict[str, Any]) -> None:
         """执行已创建数据的清理"""
         try:
-            data_item["cleanup"]()
+            result = data_item["cleanup"]()
+            if result is False:
+                raise RuntimeError("API cleanup returned False")
         except Exception as e:
             logger.warning(f"Data cleanup failed for {data_item['type']}:{data_item['id']}: {e}")
             # 尝试DB兜底清理
@@ -255,6 +310,8 @@ class TestDataLifecycleManager:
         """Persist a local fallback record even when the database is unavailable."""
         failure = {
             "run_id": self.run_id,
+            "worker_id": self.worker_id,
+            "tenant_id": self.tenant_id,
             "environment": self.env,
             "item": str(item),
             "api_error": str(api_error),
@@ -262,8 +319,13 @@ class TestDataLifecycleManager:
             "created_at": datetime.now().isoformat(),
         }
         self._cleanup_failures.append(failure)
-        with _cleanup_failure_path().open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(failure, ensure_ascii=False) + "\n")
+        try:
+            with _cleanup_failure_path(self.run_id, self.worker_id, self.tenant_id).open(
+                "a", encoding="utf-8"
+            ) as stream:
+                stream.write(json.dumps(failure, ensure_ascii=False) + "\n")
+        except Exception:
+            logger.exception("Failed to persist cleanup failure locally")
 
     @property
     def cleanup_failures(self) -> list[dict[str, Any]]:
@@ -275,6 +337,14 @@ class TestDataLifecycleManager:
             raise CleanupOwnershipError(
                 f"Cleanup target belongs to run {owner_run_id!r}, not current run {self.run_id!r}"
             )
+        for field, current_value in (
+            ("worker_id", self.worker_id),
+            ("tenant_id", self.tenant_id),
+        ):
+            if data_item.get(field) != current_value:
+                raise CleanupOwnershipError(
+                    f"Cleanup target {field} {data_item.get(field)!r} does not match current {current_value!r}"
+                )
         data_type = data_item.get("type")
         if data_type not in self.TABLE_MAP:
             raise CleanupOwnershipError(f"Unsupported cleanup data type: {data_type!r}")
@@ -286,9 +356,19 @@ class TestDataLifecycleManager:
         """DB直连兜底清理（仅限当前测试运行拥有的目标）。"""
         self._validate_owned_target(data_item)
         table_name = self.TABLE_MAP[data_item["type"]]
+        if self.db_helper is None:
+            raise CleanupOwnershipError(f"DB fallback is disabled for environment {self.env!r}")
         db = self.db_helper.connect()
         try:
-            db.execute(f"DELETE FROM {table_name} WHERE id = %s", (data_item["id"],))
+            db.execute(
+                f"DELETE FROM {table_name} WHERE id = %s AND tenant_id = %s",
+                (data_item["id"], data_item["tenant_id"]),
+            )
+            rowcount = getattr(getattr(db, "cursor", None), "rowcount", None)
+            if isinstance(rowcount, int) and rowcount > 1:
+                raise RuntimeError(f"DB fallback matched {rowcount} rows; refusing ambiguous cleanup")
+            if isinstance(rowcount, int) and rowcount == 0:
+                raise RuntimeError("DB fallback matched no owned rows")
             logger.info(f"DB fallback cleanup succeeded for " f"{data_item['type']}:{data_item['id']}")
         finally:
             db.close()

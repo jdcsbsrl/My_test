@@ -144,7 +144,7 @@ class TestInventoryExport:
 
         print("\n=== 搜索前页面状态 ===")
         body_text = logged_in_page.text_content("body")[:500]
-        print(f"页面文本片段: {body_text}")
+        print(f"页面文本已读取，长度: {len(body_text)}")
 
         sku_page.click_reset()
         sku_page.wait_for_search_results()
@@ -156,7 +156,7 @@ class TestInventoryExport:
         sku_page.wait_for_search_results()
 
         actual_value = sku_input.first.input_value() if sku_input.count() > 0 else ""
-        print(f"输入框实际值: '{actual_value}'")
+        print(f"输入框实际值长度: {len(actual_value)}")
 
         search_btns = logged_in_page.locator('button:has-text("搜索")').all()
         print(f"搜索按钮数量: {len(search_btns)}")
@@ -168,7 +168,7 @@ class TestInventoryExport:
         print(f"搜索结果数: {count}")
 
         body_text = logged_in_page.text_content("body")[:500]
-        print(f"搜索后页面文本片段: {body_text}")
+        print(f"搜索后页面文本已读取，长度: {len(body_text)}")
 
         assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         assert count > 0, f"搜索结果数应为正数，实际为: {count}"
@@ -212,13 +212,13 @@ class TestInventoryExport:
                 row_values = []
                 for header in headers[:5]:
                     row_values.append(str(row.get(header, "")).ljust(20))
-                print(f"{i+1:2d}. {' | '.join(row_values)}")
+                print(f"{i+1:2d}. <redacted row values, {len(row_values)} columns>")
 
         sku_page.select_export_current_search()
 
         exported = export_page.wait_for_export_page(timeout=30000)
         assert exported, "未成功跳转到导出页面"
-        print(f"\n✅ 已跳转到导出页面: {export_page.page.url}")
+        print("\n✅ 已跳转到同源导出页面")
 
         export_page.select_all_fields(fast_mode=True)
         print("\n✅ 已选择所有导出字段")

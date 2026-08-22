@@ -1,6 +1,8 @@
 import os
 import re
 import time
+import uuid
+from pathlib import Path
 from urllib.parse import unquote, urljoin
 
 import allure
@@ -34,7 +36,7 @@ class InventoryExportPage(BasePage):
             while time.time() - start_time < timeout / 1000:
                 if "exportPage" in self.page.url:
                     self._wait_for_export_content()
-                    logger.info(f"当前页面已跳转到导出页面: {self.page.url}")
+                    logger.info("当前页面已跳转到导出页面: {}", self._redact_url(self.page.url))
                     return True
 
                 pages = self.page.context.pages
@@ -42,12 +44,12 @@ class InventoryExportPage(BasePage):
                     if "exportPage" in pg.url:
                         self.page = pg
                         self._wait_for_export_content()
-                        logger.info(f"已切换到导出页面: {pg.url}")
+                        logger.info("已切换到导出页面: {}", self._redact_url(pg.url))
                         return True
 
                 self.wait_for_poll_interval(1000)
 
-            logger.warning(f"未找到导出页面，当前页面URL: {self.page.url}")
+            logger.warning("未找到导出页面，当前页面URL: {}", self._redact_url(self.page.url))
             return False
         except Exception as e:
             logger.warning(f"等待导出页面超时: {e}")
@@ -520,8 +522,7 @@ class InventoryExportPage(BasePage):
     @allure.step("点击实时导出按钮")
     def click_realtime_export(self) -> None:
         export_button = self.page.get_by_role("button", name="实时导出", exact=True)
-        if export_button.count() == 0:
-            raise ValueError("未找到可见的实时导出按钮")
+        export_button.first.wait_for(state="visible", timeout=30000)
         if not export_button.first.is_enabled():
             raise ValueError("实时导出按钮不可用，请检查导出字段是否已选择")
         export_button.first.click(timeout=10000)
@@ -560,30 +561,32 @@ class InventoryExportPage(BasePage):
                 self.click_realtime_export()
 
             download = download_info.value
-            filename = download.suggested_filename
-            file_path = f".runtime/downloads/{filename}"
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            download.save_as(file_path)
+            filename = self._safe_artifact_name(download.suggested_filename, default="inventory_export.xlsx")
+            file_path = self._runtime_artifact_path("downloads", f"{uuid.uuid4().hex[:10]}_{filename}")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            download.save_as(str(file_path))
 
-            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            file_size = file_path.stat().st_size if file_path.is_file() else 0
+            if file_size <= 0:
+                raise ValueError("下载文件为空")
 
             result = {
                 "success": True,
                 "filename": filename,
-                "file_path": file_path,
+                "file_path": str(file_path),
                 "file_size": file_size,
-                "url": download.url,
+                "url": self._redact_url(download.url),
             }
             logger.info(f"导出下载成功: {filename}, 大小: {file_size}字节")
             return result
         except Exception as e:
             logger.warning(f"导出下载超时或失败: {e}")
-            return {"success": False, "error": str(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            return {"success": False, "error": self._redact_text(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
 
-    @allure.step("下载到指定路径: {save_path}")
+    @allure.step("下载到指定路径")
     def download_to(self, save_path: str, timeout: int = 60000) -> dict:
-        download_dir = os.path.dirname(save_path)
-        os.makedirs(download_dir, exist_ok=True)
+        target_path = self._resolve_download_path(save_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         file_responses = []
         export_response_objects = []
         export_responses = []
@@ -599,7 +602,7 @@ class InventoryExportPage(BasePage):
             if "export" in response.url.lower():
                 export_response_objects.append(response)
                 export_responses.append(
-                    {"url": response.url, "status": response.status, "content_type": content_type}
+                    {"url": self._redact_url(response.url), "status": response.status, "content_type": content_type}
                 )
 
         self.page.on("response", capture_file_response)
@@ -615,35 +618,39 @@ class InventoryExportPage(BasePage):
                     self._js_click_realtime_export()
 
             download = download_info.value
-            filename = download.suggested_filename
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            download.save_as(save_path)
+            filename = self._safe_artifact_name(download.suggested_filename, default=target_path.name)
+            download.save_as(str(target_path))
 
-            file_size = os.path.getsize(save_path) if os.path.exists(save_path) else 0
+            file_size = target_path.stat().st_size if target_path.is_file() else 0
+            if file_size <= 0:
+                raise ValueError("下载文件为空")
 
             return {
                 "success": True,
                 "filename": filename,
-                "file_path": save_path,
+                "file_path": str(target_path),
                 "file_size": file_size,
-                "url": download.url,
+                "url": self._redact_url(download.url),
             }
         except Exception as e:
             if file_responses:
                 response = file_responses[-1]
                 disposition = response.headers.get("content-disposition", "")
                 filename_match = re.search(r"filename\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
-                filename = unquote(filename_match.group(1)) if filename_match else os.path.basename(save_path)
-                with open(save_path, "wb") as export_file:
+                filename = self._safe_artifact_name(
+                    unquote(filename_match.group(1)) if filename_match else target_path.name,
+                    default=target_path.name,
+                )
+                with target_path.open("wb") as export_file:
                     export_file.write(response.body())
-                file_size = os.path.getsize(save_path)
+                file_size = target_path.stat().st_size
                 logger.info("从实时导出响应保存文件: {}, 大小: {}字节", filename, file_size)
                 return {
                     "success": file_size > 0,
                     "filename": filename,
-                    "file_path": save_path,
+                    "file_path": str(target_path),
                     "file_size": file_size,
-                    "url": response.url,
+                    "url": self._redact_url(response.url),
                 }
 
             if export_response_objects:
@@ -656,24 +663,26 @@ class InventoryExportPage(BasePage):
                 download_url = self._find_download_url(payload.get("data") if isinstance(payload, dict) else payload)
                 if download_url:
                     absolute_url = urljoin(response.url, download_url)
+                    absolute_url = self._validate_same_origin_url(absolute_url, purpose="导出文件 URL")
                     api_response = self.page.context.request.get(absolute_url)
                     if api_response.ok:
                         disposition = api_response.headers.get("content-disposition", "")
                         filename_match = re.search(r"filename\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
-                        filename = (
+                        filename = self._safe_artifact_name(
                             unquote(filename_match.group(1))
                             if filename_match
-                            else os.path.basename(download_url.split("?", 1)[0]) or os.path.basename(save_path)
+                            else os.path.basename(download_url.split("?", 1)[0]) or target_path.name,
+                            default=target_path.name,
                         )
-                        with open(save_path, "wb") as export_file:
+                        with target_path.open("wb") as export_file:
                             export_file.write(api_response.body())
-                        file_size = os.path.getsize(save_path)
+                        file_size = target_path.stat().st_size
                         return {
                             "success": file_size > 0,
                             "filename": filename,
-                            "file_path": save_path,
+                            "file_path": str(target_path),
                             "file_size": file_size,
-                            "url": absolute_url,
+                            "url": self._redact_url(absolute_url),
                         }
 
             api_result = self._download_inventory_export_via_api(save_path, timeout)
@@ -688,7 +697,7 @@ class InventoryExportPage(BasePage):
             logger.warning("实时导出未产生文件，页面提示: {}，导出响应: {}", messages, export_responses[-10:])
             return {
                 "success": False,
-                "error": api_result.get("error") or str(e),
+                "error": api_result.get("error") or self._redact_text(e),
                 "filename": None,
                 "file_path": None,
                 "file_size": 0,
@@ -744,7 +753,7 @@ class InventoryExportPage(BasePage):
             origin_match = re.match(r"^https?://[^/]+", self.page.url)
             if not origin_match:
                 return {"success": False, "error": "无法识别导出页域名", "filename": None, "file_path": None, "file_size": 0, "url": None}
-            origin = origin_match.group(0)
+            origin = self._validate_same_origin_url(origin_match.group(0), purpose="导出页域名")
             api_base = self._get_inventory_api_base(origin)
             item_ids = self.page.evaluate(
                 """
@@ -780,7 +789,7 @@ class InventoryExportPage(BasePage):
             if not isinstance(columns_payload, dict):
                 return {
                     "success": False,
-                    "error": f"导出字段接口返回异常: status={columns_response.status}, body={columns_response.text()[:500]}",
+                    "error": f"导出字段接口返回异常: status={columns_response.status}",
                     "filename": None,
                     "file_path": None,
                     "file_size": 0,
@@ -790,7 +799,7 @@ class InventoryExportPage(BasePage):
             if not isinstance(data, dict):
                 return {
                     "success": False,
-                    "error": f"导出字段接口未返回字段数据: {columns_payload}",
+                    "error": "导出字段接口未返回字段数据",
                     "filename": None,
                     "file_path": None,
                     "file_size": 0,
@@ -844,13 +853,15 @@ class InventoryExportPage(BasePage):
                 if not download_url:
                     return {
                         "success": False,
-                        "error": f"实时导出接口未返回文件: {payload}",
+                        "error": "实时导出接口未返回文件",
                         "filename": None,
                         "file_path": None,
                         "file_size": 0,
                         "url": None,
                     }
-                source_url = urljoin(export_response.url, download_url)
+                source_url = self._validate_same_origin_url(
+                    urljoin(export_response.url, download_url), purpose="导出文件 URL"
+                )
                 file_response = self.page.context.request.get(source_url, headers=headers, timeout=timeout)
                 if not file_response.ok:
                     return {"success": False, "error": f"导出文件下载失败: {file_response.status}", "filename": None, "file_path": None, "file_size": 0, "url": source_url}
@@ -858,20 +869,30 @@ class InventoryExportPage(BasePage):
                 body = file_response.body()
 
             filename_match = re.search(r"filename\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
-            filename = unquote(filename_match.group(1)) if filename_match else os.path.basename(save_path)
-            with open(save_path, "wb") as export_file:
+            filename = self._safe_artifact_name(
+                unquote(filename_match.group(1)) if filename_match else os.path.basename(save_path),
+                default=Path(save_path).name,
+            )
+            # ``download_to`` validates its public target before invoking this
+            # helper. Keeping the helper usable with a temporary test path also
+            # makes the API fallback independently unit-testable.
+            target_path = Path(save_path).expanduser().resolve()
+            if target_path.name in {"", ".", ".."}:
+                raise ValueError("下载文件名无效")
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            with target_path.open("wb") as export_file:
                 export_file.write(body)
-            file_size = os.path.getsize(save_path)
+            file_size = target_path.stat().st_size
             return {
                 "success": file_size > 0,
                 "filename": filename,
-                "file_path": save_path,
+                "file_path": str(target_path),
                 "file_size": file_size,
-                "url": source_url,
+                "url": self._redact_url(source_url),
             }
         except Exception as api_error:
             logger.warning("实时导出接口兜底失败: {}", api_error)
-            return {"success": False, "error": str(api_error), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            return {"success": False, "error": self._redact_text(api_error), "filename": None, "file_path": None, "file_size": 0, "url": None}
 
     def _get_inventory_api_base(self, origin: str) -> str:
         api_urls = self.page.evaluate(
@@ -883,7 +904,7 @@ class InventoryExportPage(BasePage):
         )
         if api_urls:
             return api_urls[-1].split("/base/inventory/getExportColumnInfo", 1)[0]
-        return f"{origin}/oms-api/oms-admin"
+        return self._validate_same_origin_url(f"{origin}/oms-api/oms-admin", purpose="库存 API URL")
 
     def _find_download_url(self, value) -> str | None:
         if isinstance(value, str) and (value.startswith(("http://", "https://", "/")) or ".xlsx" in value.lower()):

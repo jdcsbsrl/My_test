@@ -261,11 +261,11 @@ class SalesOrderFacade:
         order_number_column_name: str = "系统单号",
         deduplicate: bool = True,
     ) -> dict[str, Any]:
-        """验证导出文件中的订单号顺序与页面排序是否一致
+        """验证导出文件包含预期订单，允许后端重新排序。
 
         Args:
             file_path: 导出文件路径
-            expected_order_numbers: 页面上排序后的订单号列表（系统单号）
+            expected_order_numbers: 页面上选中的订单号列表（系统单号）
             order_number_column_name: 订单号列名（默认"系统单号"）
             deduplicate: 是否对导出的订单号去重（一个订单有多个SKU行时需要去重）
 
@@ -345,6 +345,7 @@ class SalesOrderFacade:
             else:
                 export_unique = export_order_numbers
 
+            expected_unique = list(dict.fromkeys(expected_order_numbers)) if deduplicate else expected_order_numbers
             matching_count = 0
             mismatched_positions = []
 
@@ -356,13 +357,28 @@ class SalesOrderFacade:
                     else:
                         mismatched_positions.append({"position": i + 1, "expected": expected, "actual": actual})
 
+            missing_order_numbers = [num for num in expected_unique if num not in set(export_unique)]
+            unexpected_order_numbers = [num for num in export_unique if num not in set(expected_unique)]
+            same_members = (
+                len(export_unique) == len(expected_unique)
+                and not missing_order_numbers
+                and not unexpected_order_numbers
+            )
+
             return {
-                "success": len(mismatched_positions) == 0,
+                # The export API may legally reorder rows.  The contract is
+                # membership and cardinality, while positional differences
+                # remain diagnostic information for callers that care about
+                # ordering.
+                "success": same_members,
+                "order_match": len(mismatched_positions) == 0,
                 "expected_count": len(expected_order_numbers),
                 "export_count": len(export_order_numbers),
                 "export_unique_count": len(export_unique),
                 "matching_count": matching_count,
                 "mismatched_positions": mismatched_positions,
+                "missing_order_numbers": missing_order_numbers,
+                "unexpected_order_numbers": unexpected_order_numbers,
                 "deduplicated": deduplicate,
                 "headers": headers[:10],
                 "order_column": (

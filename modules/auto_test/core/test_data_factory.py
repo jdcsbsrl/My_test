@@ -55,16 +55,17 @@ class DataLoader:
 
     def _safe_path(self, file_path: str | os.PathLike[str]) -> Path:
         """Resolve a data path without allowing traversal outside an approved root."""
-        candidate = Path(file_path)
-        if not str(candidate).strip():
-            raise DataValidationError("Data file path must not be empty")
-        resolved = candidate.expanduser().resolve()
+        try:
+            candidate = Path(file_path)
+            if not str(candidate).strip():
+                raise DataValidationError("Data file path must not be empty")
+            resolved = candidate.expanduser().resolve()
+        except (TypeError, ValueError, OSError) as exc:
+            raise DataValidationError("Invalid data file path") from exc
         if not any(resolved == root or root in resolved.parents for root in self._allowed_roots):
-            if not resolved.exists():
-                # Preserve the historical FileNotFoundError contract without opening
-                # an out-of-scope path when it does exist.
-                return resolved
             raise DataValidationError("Data file path is outside the approved data directories")
+        if resolved.exists() and not resolved.is_file():
+            raise DataValidationError("Data file path must reference a regular file")
         return resolved
 
     def _check_ijson(self) -> bool:
@@ -247,7 +248,10 @@ class DynamicDataGenerator:
             "random_string": lambda: "".join(random.choices(string.ascii_letters + string.digits, k=10)),
             "random_email": lambda: f"test_{random.randint(1000, 9999)}@example.com",
             "random_phone": lambda: f"1{random.randint(3, 9)}{''.join(random.choices(string.digits, k=9))}",
-            "related_order_no": lambda: f"ORD{datetime.now().strftime('%Y%m%d')}{''.join(random.choices(string.digits, k=6))}",
+            "related_order_no": lambda: (
+                f"ORD{datetime.now().strftime('%Y%m%d')}"
+                f"{''.join(random.choices(string.digits, k=6))}"
+            ),
             "random_int": lambda: random.randint(0, 999999),
             "random_float": lambda: round(random.uniform(0, 1000), 2),
             "random_date": lambda: datetime.now().strftime("%Y-%m-%d"),
@@ -262,6 +266,11 @@ class DataVersionManager:
         self.data_dir = Path(data_dir).expanduser().resolve()
         self._loader = DataLoader(allowed_roots=[self.data_dir])
 
+    def _ensure_data_dir(self) -> None:
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        if self.data_dir.resolve() != self.data_dir or not self.data_dir.is_dir():
+            raise DataValidationError("Configured version directory is not a stable directory")
+
     @staticmethod
     def _validate_identifier(value: str, field_name: str) -> str:
         if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", value):
@@ -272,9 +281,20 @@ class DataVersionManager:
         safe_name = self._validate_identifier(data_name, "data name")
         safe_version = self._validate_identifier(version, "version")
         path = (self.data_dir / f"{safe_name}_v{safe_version}.json").resolve()
-        if path.parent != self.data_dir:
+        if path.parent != self.data_dir or not (path == self.data_dir / path.name):
             raise DataValidationError("Version path escaped the configured data directory")
         return path
+
+    def _version_files(self, data_name: str) -> list[Path]:
+        safe_name = self._validate_identifier(data_name, "data name")
+        files = []
+        for file_path in self.data_dir.glob(f"{safe_name}_v*.json"):
+            resolved = file_path.resolve()
+            if resolved.parent != self.data_dir:
+                raise DataValidationError("Version file escaped the configured data directory")
+            if resolved.is_file():
+                files.append(resolved)
+        return files
 
     def get_version(self, data_name: str, version: str = "latest") -> Any:
         """获取指定版本的测试数据"""
@@ -287,7 +307,7 @@ class DataVersionManager:
     def _get_latest_version(self, data_name: str) -> str:
         """获取最新版本号"""
         safe_name = self._validate_identifier(data_name, "data name")
-        files = [f for f in self.data_dir.glob(f"{safe_name}_v*.json") if f.is_file()]
+        files = self._version_files(safe_name)
         if not files:
             return "1.0"
 
@@ -296,7 +316,7 @@ class DataVersionManager:
 
     def save_version(self, data_name: str, data: Any, version: str) -> None:
         """保存测试数据版本"""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self._ensure_data_dir()
         file_path = self._version_path(data_name, version)
         with file_path.open("w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -304,7 +324,7 @@ class DataVersionManager:
     def list_versions(self, data_name: str) -> list[str]:
         """列出指定数据的所有版本"""
         safe_name = self._validate_identifier(data_name, "data name")
-        files = self.data_dir.glob(f"{safe_name}_v*.json")
+        files = self._version_files(safe_name)
         versions = []
         for f in files:
             if not f.is_file():
@@ -756,7 +776,9 @@ class DatabaseDataGenerator(BaseDataGenerator):
         self.db_helper = None
 
     def _ensure_connection(self):
-        if not self.db_helper:
+        if not self.db_helper or not getattr(self.db_helper, "connection", None) or not getattr(
+            self.db_helper, "cursor", None
+        ):
             self.db_helper = DBHelper().connect()
         return self.db_helper
 
@@ -781,10 +803,11 @@ class DatabaseDataGenerator(BaseDataGenerator):
         random_sample: bool = False,
         **kwargs,
     ) -> dict[str, Any] | list[dict[str, Any]]:
-        db = self._ensure_connection()
-
         # 表名白名单校验
         self._validate_table_name(table_name)
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
+            raise DataValidationError("Query limit must be an integer between 1 and 10000")
 
         if columns:
             # 字段名校验
@@ -795,6 +818,7 @@ class DatabaseDataGenerator(BaseDataGenerator):
             col_str = "*"
 
         # 安全的查询构建
+        db = self._ensure_connection()
         query = f"SELECT {col_str} FROM {table_name}"
 
         params = []

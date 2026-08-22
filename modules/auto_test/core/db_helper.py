@@ -22,7 +22,16 @@ class DBHelper:
         env: str | None = None,
     ) -> None:
         config = get_config(env) if env else get_config()
-        self.environment = str(getattr(config, "env", os.getenv("TEST_ENV", "test"))).strip().lower()
+        requested_environment = EnvironmentType.normalize(env) if env is not None else ""
+        configured_environment = EnvironmentType.normalize(
+            getattr(config, "env", os.getenv("TEST_ENV", "test"))
+        )
+        if requested_environment and requested_environment != configured_environment:
+            raise EnvironmentSecurityError(
+                f"Database environment mismatch: requested={requested_environment!r}, "
+                f"configured={configured_environment!r}"
+            )
+        self.environment = requested_environment or configured_environment
         if not EnvironmentType.is_allowed(self.environment):
             raise EnvironmentSecurityError(
                 f"Database access is disabled for environment {self.environment!r}; "
@@ -44,17 +53,31 @@ class DBHelper:
         }
         supplied_values = {"host": host, "port": port, "name": database, "user": user, "password": password}
         for name, value in supplied_values.items():
-            if value is not None and str(value) != str(configured_values[name]):
+            if value is not None and configured_values[name] not in (None, "") and str(value) != str(
+                configured_values[name]
+            ):
                 raise EnvironmentSecurityError(
                     f"Explicit database {name} does not match the configured {self.environment} database"
                 )
+            if value is not None and configured_values[name] in (None, ""):
+                configured_values[name] = value
         self.host = str(configured_values["host"])
-        self.port = int(configured_values["port"])
+        try:
+            self.port = int(configured_values["port"])
+        except (TypeError, ValueError) as exc:
+            raise EnvironmentSecurityError("Database port must be an integer") from exc
+        if not 1 <= self.port <= 65535:
+            raise EnvironmentSecurityError("Database port must be between 1 and 65535")
         self.database = str(configured_values["name"])
         self.user = str(configured_values["user"])
         self.password = str(configured_values["password"])
-        configured_env = config.get("database.environment") or os.getenv(f"{prefix}_DB_ENV") or os.getenv("DB_ENV") or self.environment
-        self.database_environment = str(configured_env).lower()
+        configured_env = (
+            config.get("database.environment")
+            or os.getenv(f"{prefix}_DB_ENV")
+            or os.getenv("DB_ENV")
+            or self.environment
+        )
+        self.database_environment = EnvironmentType.normalize(configured_env)
         self.connection = None
         self.cursor = None
 
@@ -64,6 +87,8 @@ class DBHelper:
                 f"Database environment binding mismatch: configured={self.database_environment!r}, "
                 f"runtime={self.environment!r}"
             )
+        if not self.host:
+            raise EnvironmentSecurityError("Database host must be configured before connecting")
         if not self.database:
             raise EnvironmentSecurityError("Database name must be configured before connecting")
         target = f"{self.host}/{self.database}".lower()
@@ -80,36 +105,66 @@ class DBHelper:
 
     def connect(self) -> "DBHelper":
         self._validate_target()
-        self.connection = psycopg2.connect(
-            host=self.host,
-            port=self.port,
-            database=self.database,
-            user=self.user,
-            password=self.password,
-            cursor_factory=RealDictCursor,
-        )
-        self.cursor = self.connection.cursor()
+        self.close()
+        try:
+            self.connection = psycopg2.connect(
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                user=self.user,
+                password=self.password,
+                cursor_factory=RealDictCursor,
+            )
+            self.cursor = self.connection.cursor()
+        except Exception:
+            self.close()
+            raise
         logger.info(f"Connected to database: {self.database}@{self.host}:{self.port}")
         return self
 
     def execute(self, sql: str, params: tuple[Any, ...] | None = None) -> list[dict[str, Any]]:
         if not self.cursor:
             raise RuntimeError("Database not connected. Call connect() first.")
-        self.cursor.execute(sql, params)
-        if self.cursor.description:
-            return self.cursor.fetchall()
-        self.connection.commit()
-        return []
+        try:
+            self.cursor.execute(sql, params)
+            if self.cursor.description:
+                return self.cursor.fetchall()
+            self.connection.commit()
+            return []
+        except Exception:
+            if self.connection:
+                self.connection.rollback()
+            raise
 
     def execute_many(self, sql: str, params_list: list[tuple[Any, ...]]) -> None:
         if not self.cursor:
             raise RuntimeError("Database not connected. Call connect() first.")
-        self.cursor.executemany(sql, params_list)
-        self.connection.commit()
+        try:
+            self.cursor.executemany(sql, params_list)
+            self.connection.commit()
+        except Exception:
+            if self.connection:
+                self.connection.rollback()
+            raise
 
     def close(self) -> None:
-        if self.cursor:
-            self.cursor.close()
-        if self.connection:
-            self.connection.close()
-            logger.info("Database connection closed")
+        cursor, connection = self.cursor, self.connection
+        self.cursor = None
+        self.connection = None
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                logger.exception("Failed to close database cursor")
+        if connection:
+            try:
+                connection.close()
+                logger.info("Database connection closed")
+            except Exception:
+                logger.exception("Failed to close database connection")
+
+    def __enter__(self) -> "DBHelper":
+        return self.connect()
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close()

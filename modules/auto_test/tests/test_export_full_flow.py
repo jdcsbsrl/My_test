@@ -27,7 +27,7 @@ class TestExportFullFlow:
         try:
             sales_order_page.click_tab("待处理")
         except Exception as exc:
-            print(f"\n⚠️ 未能切换到待处理标签，继续在当前订单列表取单: {exc}")
+            pytest.fail(f"无法切换到待处理标签: {type(exc).__name__}")
 
         order_numbers = []
         for attempt in range(3):
@@ -47,7 +47,7 @@ class TestExportFullFlow:
         assert export_page.wait_for_export_page(), "Export page failed to load"
         logged_in_page.locator(".el-select:visible").first.wait_for(state="visible", timeout=30000)
 
-        print(f"\n✅ 已导航到导出页面: {export_page.get_current_url()}")
+        print("\n✅ 已导航到同源导出页面")
 
         template_selected = export_page.select_export_template(EXPORT_TEMPLATE)
         print(f"\n模板选择结果: {template_selected}")

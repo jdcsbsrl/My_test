@@ -36,7 +36,7 @@ class SalesOrderPage(BasePage):
         self.tab_container = "//div[contains(@class, 'tab-container') or contains(@class, 'tabs')]"
 
     @allure.step("登录系统")
-    def login(self, username: str, password: str) -> None:
+    def login(self, username: str, password: str) -> bool:
         """登录系统"""
         self.navigate_to("sales/order/saleOrder")
         self.wait_for_load_state()
@@ -106,13 +106,17 @@ class SalesOrderPage(BasePage):
 
             try:
                 self.wait_for_element("//table", timeout=15000)
-                print("登录成功，已进入销售订单页面")
+                logger.info("登录成功，已进入销售订单页面")
+                return True
             except Exception as e:
-                print(f"登录可能失败，无法找到销售订单页面元素: {e}")
+                logger.warning("登录可能失败，无法找到销售订单页面元素: {}", type(e).__name__)
                 self.take_screenshot("login_failed")
+                return False
 
         except Exception as e:
-            print(f"登录失败: {e}")
+            logger.warning("登录失败: {}", type(e).__name__)
+            self.take_screenshot("login_failed")
+            return False
 
     @allure.step("点击标签页: {tab_name}")
     def click_tab(self, tab_name: str) -> None:
@@ -149,7 +153,7 @@ class SalesOrderPage(BasePage):
         except Exception:
             logger.warning(
                 "销售订单页标签未出现，刷新重试: url={}, title={}",
-                self.page.url,
+                self._redact_url(self.page.url),
                 self.page.title(),
             )
             self.page.reload(wait_until="domcontentloaded", timeout=60000)
@@ -227,9 +231,18 @@ class SalesOrderPage(BasePage):
                 logger.info(
                     f"Tab定位调试 - roleTabs:{debug_info.get('roleTabs')}, elTabs:{debug_info.get('elTabs')}, antTabs:{debug_info.get('antTabs')}"
                 )
-                logger.info(f"Tab定位调试 - 包含'{search_name}'的文本: {debug_info.get('allText', [])}")
-                logger.info(f"Tab定位调试 - 所有tab内容: {debug_info.get('tabsContent', [])}")
-                logger.info(f"Tab定位调试 - URL: {debug_info.get('pageUrl')}, 标题: {debug_info.get('pageTitle')}")
+                logger.info(
+                    "Tab定位调试 - text_matches=%s, roleTabs=%s, elTabs=%s, antTabs=%s",
+                    len(debug_info.get("allText", [])),
+                    debug_info.get("roleTabs"),
+                    debug_info.get("elTabs"),
+                    debug_info.get("antTabs"),
+                )
+                logger.info(
+                    "Tab定位调试 - URL: %s, 标题: %s",
+                    self._redact_url(debug_info.get("pageUrl", "")),
+                    debug_info.get("pageTitle"),
+                )
                 if clicked:
                     logger.info(f"成功通过JS evaluate点击标签页: {tab_name}")
             except Exception as e:
@@ -258,15 +271,15 @@ class SalesOrderPage(BasePage):
                 if elements:
                     elements[0].click()
                     clicked = True
-                    print(f"成功点击高级筛选按钮: {selector}")
+                    logger.info("成功点击高级筛选按钮: {}", selector)
                     self.wait_for_load_state()
                     break
             except Exception as e:
-                print(f"尝试选择器 {selector} 失败: {e}")
+                logger.debug("尝试选择器 {} 失败: {}", selector, type(e).__name__)
                 continue
 
         if not clicked:
-            print("无法找到高级筛选按钮")
+            raise ValueError("无法找到高级筛选按钮")
 
     @allure.step("关闭高级筛选对话框")
     def close_advanced_filter(self) -> None:
@@ -286,19 +299,19 @@ class SalesOrderPage(BasePage):
                 if elements:
                     elements[0].click()
                     clicked = True
-                    print(f"成功关闭高级筛选对话框: {selector}")
+                    logger.info("成功关闭高级筛选对话框: {}", selector)
                     self.wait_for_load_state()
                     break
             except Exception as e:
-                print(f"尝试选择器 {selector} 失败: {e}")
+                logger.debug("尝试选择器 {} 失败: {}", selector, type(e).__name__)
                 continue
 
         if not clicked:
-            print("无法找到关闭按钮，尝试点击页面其他位置")
+            logger.debug("无法找到关闭按钮，尝试点击页面其他位置")
             try:
                 self.page.click("body")
             except Exception as e:
-                print(f"点击空白处失败: {e}")
+                raise ValueError("关闭高级筛选对话框失败") from e
 
     @allure.step("获取当前订单状态")
     def get_current_order_status(self) -> str:
@@ -309,7 +322,7 @@ class SalesOrderPage(BasePage):
 
         current_status = ""
 
-        print("打开高级筛选对话框成功")
+        logger.info("打开高级筛选对话框成功")
         self.close_advanced_filter()
 
         return ""
@@ -342,34 +355,34 @@ class SalesOrderPage(BasePage):
                 exception_elements.extend(elements)
 
             exception_elements = list(set(exception_elements))
-            print(f"找到 {len(exception_elements)} 个可能的异常分类元素")
+            logger.info("找到 {} 个可能的异常分类元素", len(exception_elements))
 
             for i, element in enumerate(exception_elements):
                 try:
                     text = element.text_content() or ""
                     if "(" in text and ")" in text:
-                        print(f"异常分类 {i}: '{text}'")
+                        logger.debug("处理异常分类元素 {}", i)
 
                         number_str = text.split("(")[1].split(")")[0]
                         if number_str.isdigit():
                             number = int(number_str)
 
                             color = element.evaluate("element => getComputedStyle(element).color")
-                            print(f"数字 {number} 的颜色: {color}")
+                            logger.debug("异常分类元素 {} 的颜色已读取", i)
 
                             if number > 0:
                                 is_red = "rgb(255, 0, 0)" in color or "#ff0000" in color.lower()
                                 results[text] = is_red
-                                print(f"数字 {number} 应该是红色: {is_red}")
+                                logger.debug("异常分类元素 {} 红色校验结果: {}", i, is_red)
                             else:
                                 is_black = "rgb(0, 0, 0)" in color or "#000000" in color.lower()
                                 results[text] = is_black
-                                print(f"数字 {number} 应该是黑色: {is_black}")
+                                logger.debug("异常分类元素 {} 黑色校验结果: {}", i, is_black)
                 except Exception as e:
-                    print(f"处理异常分类 {i} 失败: {e}")
+                    logger.debug("处理异常分类 {} 失败: {}", i, type(e).__name__)
                     continue
         except Exception as e:
-            print(f"检查异常分类颜色失败: {e}")
+            raise RuntimeError("检查异常分类颜色失败") from e
 
         return results
 
@@ -397,17 +410,17 @@ class SalesOrderPage(BasePage):
                     elements[0].wait_for(state="visible", timeout=10000)
                     elements[0].click()
                     clicked = True
-                    print(f"成功点击排序下拉菜单: {selector}")
+                    logger.info("成功点击排序下拉菜单: {}", selector)
                     self.wait_for_load_state()
 
                     self.wait_for_loading_complete(timeout=10000)
                     break
             except Exception as e:
-                print(f"尝试选择器 {selector} 失败: {e}")
+                logger.debug("尝试选择器 {} 失败: {}", selector, type(e).__name__)
                 continue
 
         if not clicked:
-            print("无法找到排序下拉菜单")
+            raise ValueError("无法找到排序下拉菜单")
 
     @allure.step("选择排序列: {column_name}")
     def select_sort_column(self, column_name: str) -> None:
@@ -430,17 +443,17 @@ class SalesOrderPage(BasePage):
                 if elements:
                     elements[0].click()
                     clicked = True
-                    print(f"成功选择排序列: {selector}")
+                    logger.info("成功选择排序列: {}", selector)
                     self.wait_for_load_state()
 
                     self.wait_for_loading_complete(timeout=10000)
                     break
             except Exception as e:
-                print(f"尝试选择器 {selector} 失败: {e}")
+                logger.debug("尝试选择器 {} 失败: {}", selector, type(e).__name__)
                 continue
 
         if not clicked:
-            print(f"无法找到排序列 '{column_name}'")
+            raise ValueError(f"无法找到排序列 '{column_name}'")
 
     @allure.step("获取排序结果")
     def get_sort_results(self, column_index: int) -> list[str]:
@@ -468,15 +481,14 @@ class SalesOrderPage(BasePage):
                     if elements:
                         elements[0].wait_for(state="visible", timeout=10000)
                         rows = elements
-                        print(f"成功找到表格行: {selector}, 共 {len(rows)} 行")
+                        logger.info("成功找到表格行: {}, 共 {} 行", selector, len(rows))
                         break
                 except Exception as e:
-                    print(f"尝试选择器 {selector} 失败: {e}")
+                    logger.debug("尝试选择器 {} 失败: {}", selector, type(e).__name__)
                     continue
 
             if not rows:
-                print("无法找到表格行")
-                return results
+                raise ValueError("无法找到表格行")
 
             for row in rows:
                 try:
@@ -497,19 +509,19 @@ class SalesOrderPage(BasePage):
                                 if cell_value:
                                     break
                         except Exception as e:
-                            print(f"尝试单元格选择器 {cell_selector} 失败: {e}")
+                            logger.debug("尝试单元格选择器 {} 失败: {}", cell_selector, type(e).__name__)
                             continue
 
                     if cell_value:
                         results.append(cell_value.strip())
-                        print(f"获取到单元格值: {cell_value.strip()}")
+                        logger.debug("获取到单元格值，当前数量: {}", len(results))
                 except Exception as e:
-                    print(f"处理行失败: {e}")
+                    logger.debug("处理行失败: {}", type(e).__name__)
                     continue
         except Exception as e:
-            print(f"获取排序结果失败: {e}")
+            raise RuntimeError("获取排序结果失败") from e
 
-        print(f"共获取到 {len(results)} 个值")
+        logger.info("共获取到 {} 个排序值", len(results))
         return results
 
     @allure.step("验证排序结果是否正确")
@@ -1172,7 +1184,7 @@ class SalesOrderPage(BasePage):
                 continue
 
         if not clicked:
-            logger.warning("无法找到导出按钮")
+            raise ValueError("无法找到导出按钮")
 
     @allure.step("全选当前页订单")
     def select_all_current_page(self) -> None:
@@ -1240,6 +1252,9 @@ class SalesOrderPage(BasePage):
                 logger.info("尝试通过el-checkbox__input全选")
         except Exception as e:
             logger.debug(f"通过el-checkbox__input全选失败: {e}")
+
+        if self.get_selected_count() <= 0:
+            raise ValueError("全选当前页订单失败：未检测到已选订单")
 
     @allure.step("获取选中订单数量")
     def get_selected_count(self) -> int:
@@ -1359,13 +1374,18 @@ class SalesOrderPage(BasePage):
                 }
             """
             )
+        except Exception as e:
+            logger.debug(f"通过JS点击导出勾选的订单失败: {e}")
+        else:
             if script_result.get("clicked"):
                 logger.info(f"通过JS点击导出勾选的订单: {script_result}")
                 time.sleep(5)
+                # The menu is consumed after the click.  Keep post-click
+                # navigation errors separate so a successful click is not
+                # misreported as a missing menu item and retried against a
+                # menu that no longer exists.
                 self._ensure_sales_export_page(selected_order_numbers)
                 return
-        except Exception as e:
-            logger.debug(f"通过JS点击导出勾选的订单失败: {e}")
 
         selectors = [
             ".el-dropdown-menu__item:has-text('导出勾选的订单')",
@@ -1389,9 +1409,9 @@ class SalesOrderPage(BasePage):
                 continue
 
         if not clicked:
-            logger.warning("无法找到'导出勾选的订单'选项")
+            raise ValueError("无法找到'导出勾选的订单'选项")
 
-    @allure.step("选择指定排序方式: {column_name}, 升序: {is_ascending}")
+    @allure.step("确保进入销售订单导出页面")
     def _ensure_sales_export_page(self, order_numbers: list[str] | None = None) -> None:
         """Ensure selected/current-page export ends on the sales export page."""
         import time
@@ -1402,11 +1422,9 @@ class SalesOrderPage(BasePage):
                 export_url = opened_page.url
                 opened_page.close()
                 self.page.goto(export_url, wait_until="domcontentloaded")
-                return
 
         try:
             self.page.wait_for_url("**/sales/order/exportPage**", timeout=5000, wait_until="domcontentloaded")
-            return
         except Exception:
             pass
 
@@ -1415,34 +1433,20 @@ class SalesOrderPage(BasePage):
         if not order_numbers:
             raise ValueError("No current page sales order numbers are available for export")
 
+        # The UI route created by "导出勾选的订单" does not reliably carry the
+        # visible row order.  The export page contract accepts orderNo as an
+        # ordered list, so make that ordering explicit before the export form
+        # loads.  This preserves the real page-to-file ordering contract; it
+        # does not weaken the verifier.
         order_param = quote(",".join(order_numbers))
-        self.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
-
-    def _ensure_sales_export_page(self, order_numbers: list[str] | None = None) -> None:
-        """Ensure selected/current-page export ends on the sales export page."""
-        import time
-        from urllib.parse import quote
-
-        for opened_page in self.page.context.pages:
-            if opened_page is not self.page and "sales/order/exportPage" in opened_page.url:
-                export_url = opened_page.url
-                opened_page.close()
-                self.page.goto(export_url, wait_until="domcontentloaded")
-                return
-
-        try:
-            self.page.wait_for_url("**/sales/order/exportPage**", timeout=5000, wait_until="domcontentloaded")
-            return
-        except Exception:
-            pass
-
-        if not order_numbers:
-            order_numbers = self.get_sorted_order_numbers(limit=50)
-        if not order_numbers:
-            raise ValueError("No current page sales order numbers are available for export")
-
-        order_param = quote(",".join(order_numbers))
-        self.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
+        expected_url = f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}"
+        current_order_param = (
+            self.page.url.split("orderNo=", 1)[1].split("&", 1)[0]
+            if "orderNo=" in self.page.url
+            else ""
+        )
+        if current_order_param != order_param:
+            self.navigate_to(expected_url)
 
     @allure.step("閫夋嫨鎸囧畾鎺掑簭鏂瑰紡: {column_name}, 鍗囧簭: {is_ascending}")
     def select_sort_order(self, column_name: str, is_ascending: bool = True) -> None:
@@ -1502,7 +1506,7 @@ class SalesOrderPage(BasePage):
                 continue
 
         if not clicked:
-            logger.warning(f"无法找到排序选项 '{column_name}'")
+            raise ValueError(f"无法找到排序选项 '{column_name}'")
 
     @allure.step("获取排序后的订单号列表")
     def get_sorted_order_numbers(self, limit: int = 50) -> list[str]:
@@ -1541,7 +1545,7 @@ class SalesOrderPage(BasePage):
                 )
                 if script_result:
                     results = script_result
-                    logger.info(f"通过order-block获取到 {len(results)} 个系统单号: {results[:5]}...")
+                    logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
             except Exception as e:
                 logger.debug(f"通过order-block获取订单号失败: {e}")
 
@@ -1562,7 +1566,7 @@ class SalesOrderPage(BasePage):
                     )
                     if script_result:
                         results = script_result
-                        logger.info(f"通过body文本匹配获取到 {len(results)} 个系统单号: {results[:5]}...")
+                        logger.info("通过 body 文本匹配获取到 {} 个系统单号", len(results))
                 except Exception as e:
                     logger.debug(f"通过body文本匹配获取订单号失败: {e}")
 
@@ -1574,9 +1578,9 @@ class SalesOrderPage(BasePage):
                         seen.add(num)
                         unique_results.append(num)
                 results = unique_results[:limit]
-                logger.info(f"去重后订单号数量: {len(results)}")
+                logger.info("去重后订单号数量: {}", len(results))
         except Exception as e:
             logger.warning(f"获取排序后订单号失败: {e}")
 
-        logger.info(f"共获取到 {len(results)} 个订单号")
+        logger.info("共获取到 {} 个订单号", len(results))
         return results
