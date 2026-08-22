@@ -41,33 +41,31 @@ class BasePage:
                 raise
             logger.info(f"Self-healed click: {selector}")
 
-    @allure.step("Fill input {selector} with value")
     def fill(self, selector: str, value: str) -> None:
-        try:
-            self.page.locator(selector).fill(value)
-            logger.info(f"Filled {selector}")
-        except Exception:
-            if not self.self_healing.enabled:
-                raise
-            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
-            if not self.self_healing.execute(
-                "wait_for_element", context, lambda locator: locator.wait_for(timeout=timeout)
-            ):
-                raise
-            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
-            if not self.self_healing.execute("fill", context, lambda locator: locator.fill(value)):
-                raise
-            logger.info(f"Self-healed fill: {selector}")
+        # Allure records function arguments for decorated steps. Never record
+        # the value passed to an input because it may be a password or token.
+        with allure.step(f"Fill input {selector}"):
+            try:
+                self.page.locator(selector).fill(value)
+                logger.info(f"Filled {selector}")
+                return
+            except Exception:
+                if not self.self_healing.enabled:
+                    raise
+                context = LocatorContext(selector=selector, selectors=[selector], description=selector)
+                if not self.self_healing.execute("fill", context, lambda locator: locator.fill(value)):
+                    raise
+                logger.info(f"Self-healed fill: {selector}")
 
-    @allure.step("Type text into {selector}")
     def type_text(self, selector: str, value: str, delay: int = 0) -> None:
-        self.page.locator(selector).press_sequentially(value, delay=delay)
-        logger.info(f"Typed into {selector}")
+        with allure.step(f"Type text into {selector}"):
+            self.page.locator(selector).press_sequentially(value, delay=delay)
+            logger.info(f"Typed into {selector}")
 
-    @allure.step("Select option {value} from {selector}")
     def select_option(self, selector: str, value: str) -> None:
-        self.page.locator(selector).select_option(value)
-        logger.info(f"Selected {value} from {selector}")
+        with allure.step(f"Select option from {selector}"):
+            self.page.locator(selector).select_option(value)
+            logger.info("Selected option")
 
     @allure.step("Get element: {selector}")
     def get_element(self, selector: str) -> Locator:
@@ -209,7 +207,6 @@ class BasePage:
         logger.warning(f"无法找到任何选择器: {selectors}")
         return False
 
-    @allure.step("Try fill with multiple selectors")
     def try_fill(self, selectors: list[str], value: str, timeout: int = 10000) -> bool:
         """尝试多个选择器进行填充，直到成功
 
@@ -221,23 +218,24 @@ class BasePage:
         Returns:
             是否成功填充
         """
-        context = LocatorContext(selector=selectors[0] if selectors else None, selectors=selectors)
-        if len(selectors) > 1 and self.self_healing.enabled and self.self_healing.execute(
-            "try_fill", context, lambda locator: locator.fill(value), timeout=timeout
-        ):
-            return True
-
-        for selector in selectors:
-            try:
-                self.wait_for_element(selector, timeout)
-                self.fill(selector, value)
-                logger.info(f"成功填充 {selector}")
+        with allure.step("Try fill with multiple selectors"):
+            context = LocatorContext(selector=selectors[0] if selectors else None, selectors=selectors)
+            if len(selectors) > 1 and self.self_healing.enabled and self.self_healing.execute(
+                "try_fill", context, lambda locator: locator.fill(value), timeout=timeout
+            ):
                 return True
-            except Exception as e:
-                logger.debug(f"尝试选择器 {selector} 失败: {e}")
-                continue
-        logger.warning(f"无法找到任何选择器进行填充: {selectors}")
-        return False
+
+            for selector in selectors:
+                try:
+                    self.wait_for_element(selector, timeout)
+                    self.fill(selector, value)
+                    logger.info(f"成功填充 {selector}")
+                    return True
+                except Exception as e:
+                    logger.debug(f"尝试选择器 {selector} 失败: {e}")
+                    continue
+            logger.warning(f"无法找到任何选择器进行填充: {selectors}")
+            return False
 
     @allure.step("Try click by role with variants")
     def try_click_by_role(self, role: str, name_variants: list[str], timeout: int = 10000) -> bool:

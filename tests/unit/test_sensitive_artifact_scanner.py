@@ -63,3 +63,32 @@ def test_scanner_ignores_short_secret_in_ordinary_message(tmp_path: Path, monkey
     (tmp_path / "result.json").write_text('{"message": "order-123456-created"}', encoding="utf-8")
 
     assert scan(tmp_path) == 0
+
+
+def test_scanner_ignores_source_like_assignment_in_json_message(tmp_path: Path) -> None:
+    (tmp_path / "result.json").write_text(
+        '{"message": "assert password = \\\"example\\\" in source"}',
+        encoding="utf-8",
+    )
+
+    assert scan(tmp_path) == 0
+
+
+def test_scanner_ignores_coverage_source_html(tmp_path: Path) -> None:
+    coverage = tmp_path / "coverage" / "html"
+    coverage.mkdir(parents=True)
+    (coverage / "index.html").write_text(
+        '<code>password = "example-value"</code>',
+        encoding="utf-8",
+    )
+
+    assert scan(tmp_path) == 0
+
+
+def test_scanner_ignores_redacted_secret_assignment_in_text(tmp_path: Path) -> None:
+    (tmp_path / "log.txt").write_text(
+        "payload={'password': '[REDACTED]', 'token': '[REDACTED]'}",
+        encoding="utf-8",
+    )
+
+    assert scan(tmp_path) == 0

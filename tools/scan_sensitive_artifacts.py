@@ -30,6 +30,26 @@ TEXT_SUFFIXES = {
     ".properties",
 }
 
+# Coverage HTML embeds the application's source code.  It is not a runtime
+# data artifact, so assignments shown in highlighted source must not be
+# interpreted as leaked values.  Other report files remain fully scanned.
+IGNORED_PATH_PARTS = {"coverage"}
+
+SENSITIVE_KEYS = {
+    "password",
+    "passwd",
+    "secret",
+    "access_token",
+    "access-token",
+    "refresh_token",
+    "refresh-token",
+    "api_key",
+    "api-key",
+    "cookie",
+}
+
+SAFE_PLACEHOLDERS = {"", "***", "[redacted]", "<redacted>", "null", "none"}
+
 SECRET_ENV_NAMES = {
     "TEST_PASSWORD",
     "TEST_USERNAME",
@@ -55,6 +75,11 @@ PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"\s*[=:]\s*[\"']?[^\s\"',}]{4,}"
         ),
     ),
+)
+
+SECRET_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)[\"']?\b(?:password|passwd|secret|access[_-]?token|refresh[_-]?token|api[_-]?key|cookie)\b[\"']?"
+    r"\s*[=:]\s*[\"']?(?P<value>[^\s\"',}]+)"
 )
 
 
@@ -98,6 +123,48 @@ def _json_string_values(value: object) -> list[str]:
             values.extend(_json_string_values(child))
         return values
     return []
+
+
+def _json_sensitive_values(value: object) -> list[str]:
+    """Return values attached to sensitive JSON keys only.
+
+    Allure result files contain arbitrary test messages which may include
+    source-like text such as ``password = ...``.  Only an actual structured
+    sensitive field is evidence of a leak in JSON output.
+    """
+
+    if isinstance(value, dict):
+        values: list[str] = []
+        for key, child in value.items():
+            normalized_key = str(key).strip().lower().replace(" ", "_")
+            if normalized_key in SENSITIVE_KEYS and isinstance(child, str):
+                normalized_value = child.strip().lower()
+                if normalized_value not in SAFE_PLACEHOLDERS:
+                    values.append(child)
+            values.extend(_json_sensitive_values(child))
+        return values
+    if isinstance(value, list):
+        values: list[str] = []
+        for child in value:
+            values.extend(_json_sensitive_values(child))
+        return values
+    return []
+
+
+def _json_has_secret_assignment(text: str) -> bool:
+    try:
+        payload = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return bool(_json_sensitive_values(payload))
+
+
+def _text_has_secret_assignment(text: str) -> bool:
+    for match in SECRET_ASSIGNMENT_PATTERN.finditer(text):
+        value = match.group("value").strip().lower()
+        if value not in SAFE_PLACEHOLDERS:
+            return True
+    return False
 
 
 def _configured_secret_found(path: Path, text: str, secrets: tuple[str, ...]) -> bool:
@@ -148,10 +215,22 @@ def scan(root: Path) -> int:
     environment_values = _environment_values()
     findings: list[tuple[Path, str]] = []
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        if any(part.lower() in IGNORED_PATH_PARTS for part in path.relative_to(root).parts):
+            continue
         text = _read_text(path)
         if text is None:
             continue
-        rules = {rule for rule, pattern in PATTERNS if pattern.search(text)}
+        if path.suffix.lower() == ".json":
+            # JSON result fields are parsed structurally below.  Scanning the
+            # free-form message text produces false positives for Allure
+            # traces and captured source snippets.
+            rules = {rule for rule, pattern in PATTERNS[:-1] if pattern.search(text)}
+            if _json_has_secret_assignment(text):
+                rules.add("secret-assignment")
+        else:
+            rules = {rule for rule, pattern in PATTERNS[:-1] if pattern.search(text)}
+            if _text_has_secret_assignment(text):
+                rules.add("secret-assignment")
         if _configured_secret_found(path, text, environment_values):
             rules.add("configured-secret-value")
         for rule in sorted(rules):

@@ -68,19 +68,19 @@ class LoginPage(BasePage):
             pass
         logger.info("导航到登录页面")
 
-    @allure.step("Enter username")
     def enter_username(self, username: str) -> None:
         """输入用户名"""
-        if not self.try_fill(self._username_selectors, username):
-            raise ValueError("无法找到用户名输入框")
-        logger.info("输入用户名（账号已填写）")
+        with allure.step("Enter username"):
+            if not self.try_fill(self._username_selectors, username):
+                raise ValueError("无法找到用户名输入框")
+            logger.info("输入用户名（账号已填写）")
 
-    @allure.step("Enter password")
     def enter_password(self, password: str) -> None:
         """输入密码"""
-        if not self.try_fill(self._password_selectors, password):
-            raise ValueError("无法找到密码输入框")
-        logger.info("输入密码")
+        with allure.step("Enter password"):
+            if not self.try_fill(self._password_selectors, password):
+                raise ValueError("无法找到密码输入框")
+            logger.info("输入密码")
 
     @allure.step("Click login button")
     def click_login(self) -> None:
@@ -112,7 +112,6 @@ class LoginPage(BasePage):
         logger.info("尝试按Enter键提交表单")
         self.page.keyboard.press("Enter")
 
-    @allure.step("Perform login")
     def login(self, username: str, password: str, timeout: int = 45000) -> bool:
         """执行完整登录流程，支持重试机制
 
@@ -125,6 +124,13 @@ class LoginPage(BasePage):
             是否登录成功
         """
         import random
+
+        # Do not decorate this method: Allure would serialize username and
+        # password as step parameters. The nested step contains no values.
+        with allure.step("Perform login"):
+            return self._login_without_recording_credentials(username, password, timeout, random)
+
+    def _login_without_recording_credentials(self, username: str, password: str, timeout: int, random) -> bool:
 
         # One retry is sufficient for transient navigation issues. Failed
         # credentials should return promptly instead of polling for 45s three

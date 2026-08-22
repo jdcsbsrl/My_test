@@ -40,9 +40,18 @@ def _nav_json_path() -> str:
     )
 
 
+def _fallback_nav_json_path() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.normpath(
+        os.path.join(here, "..", "..", "..", "fixtures", "navigation", "module_hierarchy.json")
+    )
+
+
 @lru_cache(maxsize=1)
 def _load_module_hierarchy() -> dict[str, dict[str, list[str]]]:
     path = _nav_json_path()
+    if not os.path.exists(path):
+        path = _fallback_nav_json_path()
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as f:
