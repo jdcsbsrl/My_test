@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import uuid
 from urllib.parse import unquote, urljoin
 
 import allure
@@ -28,8 +29,8 @@ class SalesOrderExportPage(BasePage):
             while time.time() - start_time < timeout / 1000:
                 if self.export_url_pattern in self.page.url:
                     self.wait_for_page_settle(timeout=5000)
-                    if self.page.locator("body").inner_text().strip():
-                        logger.info("导出页面已跳转且页面内容已渲染")
+                    if self._export_controls_ready():
+                        logger.info("导出页面已跳转且业务控件已挂载")
                         return True
 
                 pages = self.page.context.pages
@@ -37,23 +38,44 @@ class SalesOrderExportPage(BasePage):
                     if self.export_url_pattern in pg.url:
                         self.page = pg
                         self.wait_for_page_settle(timeout=5000)
-                        if self.page.locator("body").inner_text().strip():
-                            logger.info("已切换到导出页面且页面内容已渲染")
+                        if self._export_controls_ready():
+                            logger.info("已切换到导出页面且业务控件已挂载")
                             return True
 
                 if int(time.time() - start_time) % 5 == 0:
                     pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
-                    logger.info(f"当前所有页面: {pages_info}")
-                    logger.info(f"当前页面URL: {self.page.url}, 标题: {self.page.title()}")
+                    logger.info(
+                        "当前所有页面: {}",
+                        [{**item, "url": self._redact_url(item["url"])} for item in pages_info],
+                    )
+                    logger.info("当前页面URL: {}, 标题: {}", self._redact_url(self.page.url), self.page.title())
 
                 self.wait_for_poll_interval(1000)
 
             pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
-            logger.warning(f"超时，所有页面: {pages_info}")
-            logger.warning(f"未找到导出页面，当前页面URL: {self.page.url}")
+            logger.warning(
+                "超时，所有页面: {}",
+                [{**item, "url": self._redact_url(item["url"])} for item in pages_info],
+            )
+            logger.warning("未找到导出页面，当前页面URL: {}", self._redact_url(self.page.url))
             return False
         except Exception as e:
             logger.warning(f"等待导出页面超时: {e}")
+            return False
+
+    def _export_controls_ready(self) -> bool:
+        """Return true only after the export SPA has mounted its real controls.
+
+        Checking body text is insufficient here: the route can be ready while
+        the Vue application is still loading its template/field data.
+        """
+        try:
+            template_select = self.page.locator(
+                '.el-select:visible, .ant-select:visible'
+            )
+            realtime_button = self.page.get_by_role("button", name="实时导出", exact=True)
+            return template_select.count() > 0 or realtime_button.count() > 0
+        except Exception:
             return False
 
     @allure.step("检查是否在导出页面")
@@ -482,8 +504,9 @@ class SalesOrderExportPage(BasePage):
     @allure.step("点击实时导出按钮")
     def click_realtime_export(self) -> None:
         export_button = self.page.get_by_role("button", name="实时导出", exact=True)
-        if export_button.count() == 0:
-            raise ValueError("未找到可见的实时导出按钮")
+        export_button.first.wait_for(state="visible", timeout=30000)
+        if not export_button.first.is_enabled():
+            raise ValueError("实时导出按钮不可用，请检查导出字段是否已选择")
         logger.info(
             "实时导出按钮: count={}, enabled={}",
             export_button.count(),
@@ -523,18 +546,21 @@ class SalesOrderExportPage(BasePage):
                 self.click_realtime_export()
 
             download = download_info.value
-            filename = download.suggested_filename
-            file_path = os.path.join(download_dir, filename)
-            download.save_as(file_path)
+            filename = self._safe_artifact_name(download.suggested_filename, default="sales_order_export.xlsx")
+            file_path = self._runtime_artifact_path("downloads", f"{uuid.uuid4().hex[:10]}_{filename}")
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            download.save_as(str(file_path))
 
-            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            file_size = file_path.stat().st_size if file_path.is_file() else 0
+            if file_size <= 0:
+                raise ValueError("下载文件为空")
 
             result = {
                 "success": True,
                 "filename": filename,
-                "file_path": file_path,
+                "file_path": str(file_path),
                 "file_size": file_size,
-                "url": download.url,
+                "url": self._redact_url(download.url),
             }
             logger.info("导出下载成功（浏览器事件）: {}, 大小: {}字节", filename, file_size)
             return result
@@ -543,18 +569,22 @@ class SalesOrderExportPage(BasePage):
                 response = file_responses[-1]
                 disposition = response.headers.get("content-disposition", "")
                 filename_match = re.search(r"filename\\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
-                filename = unquote(filename_match.group(1)) if filename_match else f"export_{int(time.time())}.xlsx"
-                file_path = os.path.join(download_dir, filename)
-                with open(file_path, "wb") as export_file:
+                filename = self._safe_artifact_name(
+                    unquote(filename_match.group(1)) if filename_match else f"export_{int(time.time())}.xlsx",
+                    default=f"export_{int(time.time())}.xlsx",
+                )
+                file_path = self._runtime_artifact_path("downloads", f"{uuid.uuid4().hex[:10]}_{filename}")
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                with file_path.open("wb") as export_file:
                     export_file.write(response.body())
-                file_size = os.path.getsize(file_path)
+                file_size = file_path.stat().st_size
                 logger.info("从实时导出响应保存文件: {}, 大小: {}字节", filename, file_size)
                 return {
                     "success": file_size > 0,
                     "filename": filename,
-                    "file_path": file_path,
+                    "file_path": str(file_path),
                     "file_size": file_size,
-                    "url": response.url,
+                    "url": self._redact_url(response.url),
                 }
             if export_response_objects:
                 response = export_response_objects[-1]
@@ -590,28 +620,33 @@ class SalesOrderExportPage(BasePage):
 
                     download_url = find_download_url(payload.get("data"))
                     if download_url:
-                        absolute_url = urljoin(response.url, download_url)
+                        absolute_url = self._validate_same_origin_url(
+                            urljoin(response.url, download_url), purpose="导出文件 URL"
+                        )
                         api_response = self.page.context.request.get(absolute_url)
                         if api_response.ok:
                             disposition = api_response.headers.get("content-disposition", "")
                             filename_match = re.search(
                                 r"filename\\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I
                             )
-                            filename = (
+                            filename = self._safe_artifact_name(
                                 unquote(filename_match.group(1))
                                 if filename_match
-                                else os.path.basename(download_url.split("?", 1)[0]) or f"export_{int(time.time())}.xlsx"
+                                else os.path.basename(download_url.split("?", 1)[0])
+                                or f"export_{int(time.time())}.xlsx",
+                                default=f"export_{int(time.time())}.xlsx",
                             )
-                            file_path = os.path.join(download_dir, filename)
-                            with open(file_path, "wb") as export_file:
+                            file_path = self._runtime_artifact_path("downloads", f"{uuid.uuid4().hex[:10]}_{filename}")
+                            file_path.parent.mkdir(parents=True, exist_ok=True)
+                            with file_path.open("wb") as export_file:
                                 export_file.write(api_response.body())
-                            file_size = os.path.getsize(file_path)
+                            file_size = file_path.stat().st_size
                             return {
                                 "success": file_size > 0,
                                 "filename": filename,
-                                "file_path": file_path,
+                                "file_path": str(file_path),
                                 "file_size": file_size,
-                                "url": absolute_url,
+                                "url": self._redact_url(absolute_url),
                             }
             messages = self.page.locator(
                 ".el-message:visible, .el-notification:visible, [role='alert']:visible"
@@ -623,7 +658,7 @@ class SalesOrderExportPage(BasePage):
             )
             return {
                 "success": False,
-                "error": str(e),
+                "error": self._redact_text(e),
                 "filename": None,
                 "file_path": None,
                 "file_size": 0,
@@ -632,27 +667,29 @@ class SalesOrderExportPage(BasePage):
         finally:
             self.page.remove_listener("response", capture_file_response)
 
-    @allure.step("下载到指定路径: {save_path}")
+    @allure.step("下载到指定路径")
     def download_to(self, save_path: str, timeout: int = 120000) -> dict:
+        target_path = self._resolve_download_path(save_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with self.page.expect_download(timeout=timeout) as download_info:
                 self.click_realtime_export()
                 self.wait_for_page_settle(timeout=30000)
 
             download = download_info.value
-            filename = download.suggested_filename
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            download.save_as(save_path)
+            filename = self._safe_artifact_name(download.suggested_filename, default=target_path.name)
+            download.save_as(str(target_path))
 
-            file_size = os.path.getsize(save_path) if os.path.exists(save_path) else 0
+            file_size = target_path.stat().st_size if target_path.is_file() else 0
+            if file_size <= 0:
+                raise ValueError("下载文件为空")
 
             return {
                 "success": True,
                 "filename": filename,
-                "file_path": save_path,
+                "file_path": str(target_path),
                 "file_size": file_size,
-                "url": download.url,
+                "url": self._redact_url(download.url),
             }
         except Exception as e:
             logger.warning(f"下载失败: {e}")
@@ -660,20 +697,22 @@ class SalesOrderExportPage(BasePage):
             try:
                 import glob
 
-                download_dir = os.path.dirname(save_path)
-                base_name = os.path.basename(save_path).replace(".xlsx", "")
+                download_dir = target_path.parent
+                base_name = target_path.stem
 
                 max_wait = 60
                 start_time = time.time()
                 while time.time() - start_time < max_wait:
-                    files = glob.glob(os.path.join(download_dir, f"*{base_name}*.xlsx"))
+                    files = glob.glob(os.path.join(str(download_dir), f"*{base_name}*.xlsx"))
                     if files:
-                        os.rename(files[0], save_path)
-                        file_size = os.path.getsize(save_path)
+                        os.replace(files[0], target_path)
+                        file_size = target_path.stat().st_size
+                        if file_size <= 0:
+                            raise ValueError("轮询到的下载文件为空")
                         return {
                             "success": True,
-                            "filename": os.path.basename(save_path),
-                            "file_path": save_path,
+                            "filename": target_path.name,
+                            "file_path": str(target_path),
                             "file_size": file_size,
                             "url": None,
                         }
@@ -683,7 +722,7 @@ class SalesOrderExportPage(BasePage):
             except Exception as poll_e:
                 logger.warning(f"轮询检测下载文件失败: {poll_e}")
 
-            return {"success": False, "error": str(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            return {"success": False, "error": self._redact_text(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
 
     @allure.step("获取导出页面标题")
     def get_page_title(self) -> str:

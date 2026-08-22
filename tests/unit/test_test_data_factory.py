@@ -66,7 +66,7 @@ class TestDataLoader:
     def test_load_json_file_not_found(self):
         """测试加载不存在的JSON文件"""
         with pytest.raises(FileNotFoundError):
-            self.loader.load("/nonexistent/file.json")
+            self.loader.load(os.path.join(tempfile.gettempdir(), "nonexistent", "file.json"))
 
     # ── CSV 加载测试 ───────────────────────────────────────
 
@@ -120,12 +120,12 @@ class TestDataLoader:
     def test_unsupported_format(self):
         """测试不支持的格式"""
         with pytest.raises(DataValidationError, match="Unsupported file format"):
-            self.loader.load("test.unsupported")
+            self.loader.load(os.path.join(self.temp_dir, "test.unsupported"))
 
     def test_unsupported_lazy_format(self):
         """测试不支持的懒加载格式"""
         with pytest.raises(DataValidationError, match="Unsupported lazy load format"):
-            self.loader.load("test.unsupported", lazy=True)
+            self.loader.load(os.path.join(self.temp_dir, "test.unsupported"), lazy=True)
 
 
 class TestDynamicDataGenerator:

@@ -36,7 +36,7 @@ class TestExportDownload:
         )
         assert export_page.wait_for_export_page(timeout=30000), "导出页面未完成加载"
 
-        print(f"URL: {export_page.current_url}")
+        print("URL: same-origin export route reached")
 
         print("\n=== Step 2: Check export page structure ===")
         page_html = logged_in_page.evaluate(
@@ -46,8 +46,7 @@ class TestExportDownload:
             }
         """
         )
-        print("Page HTML snippet (first 5000 chars):")
-        print(page_html[:2000])
+        print(f"Page HTML captured for structure check: {len(page_html)} characters")
 
         print("\n=== Step 3: Check all buttons ===")
         buttons = logged_in_page.evaluate(

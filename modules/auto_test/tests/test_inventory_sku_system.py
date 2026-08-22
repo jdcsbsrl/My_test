@@ -89,7 +89,8 @@ def _is_ci_environment_issue(result: dict) -> bool:
     if is_environment_issue:
         print(
             "[CI environment classification] preserving failure evidence: "
-            f"error={error!r}, messages={result.get('messages', [])!r}"
+            f"error_type={type(result.get('error', '')).__name__}, "
+            f"message_count={len(result.get('messages', []))}"
         )
     return is_environment_issue
 

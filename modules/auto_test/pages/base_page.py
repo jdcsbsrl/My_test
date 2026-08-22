@@ -1,10 +1,18 @@
-import allure
+from __future__ import annotations
+
+import os
+import re
+import uuid
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+import allure
 from playwright.sync_api import Locator, Page, expect
 
 from modules.auto_test.core.config_manager import get_config
-from modules.auto_test.core.logger import get_logger
+from modules.auto_test.core.logger import get_logger, redact_sensitive_data
 from modules.auto_test.core.self_healing import LocatorContext, SelfHealingLocator
+from modules.trae_test.utils.runtime_paths import project_root, runtime_dir
 
 logger = get_logger()
 
@@ -16,17 +24,114 @@ class BasePage:
         self.base_url = self.config.base_url
         self.self_healing = SelfHealingLocator(page, env=getattr(self.config, "env", "test"))
 
-    @allure.step("Navigate to {url}")
+    @staticmethod
+    def _safe_runtime_component(value: str, default: str = "unknown") -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "")).strip("._")
+        return cleaned[:100] or default
+
+    @classmethod
+    def _safe_artifact_name(cls, value: str, *, default: str = "artifact", suffix: str = "") -> str:
+        """Return a filename that cannot escape its runtime artifact directory."""
+        raw = str(value or "").replace("\\", "/")
+        name = raw.rsplit("/", 1)[-1].replace("\x00", "")
+        name = re.sub(r"[<>:\"|?*\r\n\t]+", "_", name).strip(" .")
+        if name in {"", ".", ".."}:
+            name = default
+        if suffix and not name.lower().endswith(suffix.lower()):
+            name = f"{name}{suffix}"
+        return name[:180]
+
+    @classmethod
+    def _runtime_scope(cls, kind: str) -> Path:
+        run_id = cls._safe_runtime_component(os.getenv("TEST_RUN_ID", "local"), "local")
+        worker_id = cls._safe_runtime_component(os.getenv("PYTEST_XDIST_WORKER", "master"), "master")
+        target = runtime_dir(kind) / "runs" / run_id / worker_id
+        target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    @classmethod
+    def _runtime_artifact_path(cls, kind: str, filename: str) -> Path:
+        return cls._runtime_scope(kind) / cls._safe_artifact_name(filename)
+
+    @classmethod
+    def _resolve_download_path(cls, save_path: str) -> Path:
+        """Resolve a caller-supplied download path strictly below runtime downloads."""
+        raw = str(save_path or "").strip()
+        if not raw:
+            raise ValueError("下载路径不能为空")
+        normalized = raw.replace("\\", "/")
+        if normalized.startswith(".runtime/downloads/") or normalized == ".runtime/downloads":
+            candidate = project_root() / normalized
+        elif Path(raw).is_absolute():
+            candidate = Path(raw)
+        else:
+            # Legacy callers pass ``downloads/...`` or a bare filename. Keep the
+            # API compatible while moving the actual output into .runtime.
+            relative = normalized.removeprefix("downloads/")
+            candidate = runtime_dir("downloads") / relative
+
+        downloads_root = runtime_dir("downloads").resolve()
+        resolved = candidate.resolve()
+        if resolved != downloads_root and downloads_root not in resolved.parents:
+            raise ValueError(f"下载路径必须位于 .runtime/downloads 内: {save_path!r}")
+        if resolved.name in {"", ".", ".."}:
+            raise ValueError(f"下载文件名无效: {save_path!r}")
+        return resolved
+
+    def _validate_same_origin_url(self, value: str, *, purpose: str = "URL") -> str:
+        parsed = urlsplit(str(value or "").strip())
+        base = urlsplit(str(self.base_url or "").strip())
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.fragment
+            or "\\" in parsed.path
+            or ".." in parsed.path.split("/")
+        ):
+            raise ValueError(f"{purpose} 格式不安全")
+        if (parsed.scheme.lower(), parsed.netloc.lower()) != (base.scheme.lower(), base.netloc.lower()):
+            raise ValueError(f"{purpose} 必须与当前测试环境同源")
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, ""))
+
+    @staticmethod
+    def _redact_url(value: str) -> str:
+        parsed = urlsplit(str(value or ""))
+        if not parsed.scheme or not parsed.netloc:
+            return "[REDACTED URL]" if "?" in str(value) else str(value)
+        safe_netloc = parsed.hostname or parsed.netloc
+        if parsed.port:
+            safe_netloc = f"{safe_netloc}:{parsed.port}"
+        query = "[REDACTED]" if parsed.query else ""
+        return urlunsplit((parsed.scheme, safe_netloc, parsed.path, query, ""))
+
+    @staticmethod
+    def _redact_text(value: object) -> str:
+        return str(redact_sensitive_data(str(value or "")))
+
+    @allure.step("Navigate to URL")
     def navigate_to(self, url: str) -> None:
-        if not url.startswith("http"):
+        raw_url = str(url or "").strip()
+        parsed = urlsplit(raw_url)
+        if raw_url.startswith("//"):
+            raise ValueError("不允许使用协议相对 URL")
+        if parsed.scheme or parsed.netloc:
+            url = self._validate_same_origin_url(raw_url, purpose="导航 URL")
+        else:
             if not self.base_url:
                 raise ValueError("base_url 为空，请检查环境变量 TEST_WEB_BASE_URL 或 TEST_WEB_API_BASE_URL 是否已设置")
+            if any(char in raw_url for char in ("\r", "\n", "\\")) or ".." in parsed.path.split("/"):
+                raise ValueError("导航路径不安全")
+            if parsed.fragment:
+                raise ValueError("导航 URL 不允许 fragment")
             base_url = self.base_url.rstrip("/")
             if url and base_url.endswith("/index"):
                 base_url = base_url[: -len("/index")]
-            url = f"{base_url}/{url.lstrip('/')}" if url else f"{base_url}/"
+            url = f"{base_url}/{raw_url.lstrip('/')}" if raw_url else f"{base_url}/"
+            url = self._validate_same_origin_url(url, purpose="导航 URL")
         self.page.goto(url)
-        logger.info(f"Navigated to: {url}")
+        logger.info("Navigated to: {}", self._redact_url(url))
 
     @allure.step("Click element: {selector}")
     def click(self, selector: str) -> None:
@@ -75,7 +180,7 @@ class BasePage:
     def get_by_role(self, role: str, name: str | None = None) -> Locator:
         return self.page.get_by_role(role, name=name)
 
-    @allure.step("Get element by text: {text}")
+    @allure.step("Get element by text")
     def get_by_text(self, text: str) -> Locator:
         return self.page.get_by_text(text)
 
@@ -134,25 +239,27 @@ class BasePage:
     def assert_visible(self, selector: str) -> None:
         expect(self.page.locator(selector)).to_be_visible()
 
-    @allure.step("Assert element contains text: {text}")
+    @allure.step("Assert element contains expected text")
     def assert_contains_text(self, selector: str, text: str) -> None:
         expect(self.page.locator(selector)).to_contain_text(text)
 
-    @allure.step("Assert page title contains: {title}")
+    @allure.step("Assert page title contains expected text")
     def assert_title_contains(self, title: str) -> None:
         expect(self.page).to_have_title(title)
 
-    @allure.step("Assert URL contains: {url}")
+    @allure.step("Assert URL matches expected pattern")
     def assert_url_contains(self, url: str) -> None:
         expect(self.page).to_have_url(url)
 
-    @allure.step("Take screenshot: {name}")
+    @allure.step("Take screenshot")
     def take_screenshot(self, name: str) -> None:
-        path = f".runtime/reports/screenshots/{name}.png"
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.page.screenshot(path=path, full_page=True)
-        allure.attach.file(path, name=name, attachment_type=allure.attachment_type.PNG)
-        logger.info(f"Screenshot: {path}")
+        safe_name = self._safe_artifact_name(name, default="screenshot", suffix=".png")
+        screenshot_name = f"{safe_name.rsplit('.', 1)[0]}_{uuid.uuid4().hex[:10]}.png"
+        path = self._runtime_scope("reports") / "screenshots" / screenshot_name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.page.screenshot(path=str(path), full_page=True)
+        allure.attach.file(str(path), name=safe_name, attachment_type=allure.attachment_type.PNG)
+        logger.info("Screenshot saved: {}", path)
 
     @allure.step("Get element text: {selector}")
     def get_text(self, selector: str) -> str:

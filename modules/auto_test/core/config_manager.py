@@ -19,11 +19,16 @@ class EnvironmentType(Enum):
 
     @classmethod
     def is_allowed(cls, env: str) -> bool:
-        return env.lower() in [cls.TEST.value, cls.TEST_ENV.value, cls.UAT.value]
+        return cls.normalize(env) in {cls.TEST.value, cls.TEST_ENV.value, cls.UAT.value}
 
     @classmethod
     def is_production(cls, env: str) -> bool:
-        return env.lower() == cls.PRODUCTION.value
+        return cls.normalize(env) == cls.PRODUCTION.value
+
+    @classmethod
+    def normalize(cls, env: str | None) -> str:
+        """Return the canonical, safely comparable environment name."""
+        return str(env or "").strip().lower()
 
 
 class EnvironmentSecurityError(Exception):
@@ -185,6 +190,7 @@ class ConfigManager:
         }
 
     def _validate_environment(self, env: str) -> None:
+        env = EnvironmentType.normalize(env)
         if not EnvironmentType.is_allowed(env):
             raise EnvironmentSecurityError(
                 f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"
@@ -230,8 +236,17 @@ class ConfigManager:
     def _normalize_origin(cls, value: str, *, field: str = "endpoint") -> str:
         origin = cls._origin_from_url(value)
         parsed = urlparse(value.strip())
-        if not origin or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-            raise ValueError(f"Invalid {field}: expected an HTTP(S) origin without path, query, fragment, or credentials")
+        if (
+            not origin
+            or parsed.username
+            or parsed.password
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                f"Invalid {field}: expected an HTTP(S) origin without path, query, fragment, or credentials"
+            )
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise EnvironmentSecurityError(f"HTTPS is required for non-local {field}")
         return origin
@@ -385,6 +400,7 @@ def get_config(env: str | None = None) -> ConfigManager:
 
 
 def validate_environment(env: str) -> None:
+    env = EnvironmentType.normalize(env)
     if not EnvironmentType.is_allowed(env):
         raise EnvironmentSecurityError(
             f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"

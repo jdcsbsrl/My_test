@@ -41,7 +41,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
         print(f"第 {attempt + 1} 次尝试获取订单数据，等待重试...")
         facade.order_page.wait_for_table_data()
 
-    print(f"Page system order numbers (first 5): {order_numbers}")
+    print(f"Page system order numbers: {len(order_numbers)} found")
 
     assert len(order_numbers) >= 1, f"Not enough orders found: {len(order_numbers)}"
 
@@ -72,7 +72,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     export_url = (
         f"{base}/sales/order/exportPage?t={int(time.time()*1000)}&orderNo={order_param}"
     )
-    print(f"Export URL: {export_url}")
+    print("Export URL: same-origin export route reached")
 
     export_page = SalesOrderExportPage(page)
     page.goto(export_url)
@@ -142,7 +142,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     save_path = f".runtime/downloads/regression/sales_order_sysno_{timestamp}.xlsx"
 
     download_result = export_page.download_to(save_path, timeout=120000)
-    print(f"Download result: {download_result}")
+    print(f"Download result: success={download_result.get('success')}, size={download_result.get('file_size', 0)}")
     assert download_result["success"], f"下载失败: {download_result.get('error')}"
     assert os.path.exists(save_path), f"下载文件不存在: {save_path}"
 
@@ -174,10 +174,10 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
             if val_str.endswith(".0"):
                 val_str = val_str[:-2]
             export_sys_nos.append(val_str)
-            print(f"  {val_str}")
+            print("  <redacted order number>")
 
-    print(f"\nPage system order numbers: {order_numbers[:3]}")
-    print(f"Export system order numbers: {export_sys_nos}")
+    print(f"\nPage system order numbers: {len(order_numbers[:3])} checked")
+    print(f"Export system order numbers: {len(export_sys_nos)} found")
     expected_set = set(order_numbers[:3])
     actual_set = set(export_sys_nos)
     assert actual_set == expected_set, (
