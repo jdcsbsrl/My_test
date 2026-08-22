@@ -1,3 +1,4 @@
+import os
 import re
 import time
 
@@ -11,6 +12,8 @@ logger = get_logger()
 
 
 class InventorySKUPage(BasePage):
+    SEARCH_TIMEOUT_SECONDS = float(os.getenv("SKU_QUERY_TIMEOUT_SECONDS", "90"))
+
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.search_url = "product/productCenter/inventoryInfo"
@@ -272,7 +275,8 @@ class InventorySKUPage(BasePage):
         return count == 0
 
     @allure.step("等待搜索结果加载")
-    def wait_for_search_results(self, timeout: int = 30000) -> None:
+    def wait_for_search_results(self, timeout: int | None = None) -> None:
+        timeout = int((timeout / 1000) if timeout is not None else self.SEARCH_TIMEOUT_SECONDS) * 1000
         try:
             self._wait_for_loading_finished(timeout)
             self.page.locator(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta
 
 import pytest
@@ -9,14 +10,27 @@ import pytest
 from modules.auto_test.api.report_sync_query_api import ReportSyncQueryAPI
 
 
-def _update_after() -> str:
-    return (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+def _lookback_hours() -> list[float]:
+    """Return the configured diagnostic window, preserving the 4-hour default."""
+    raw_minutes = os.getenv("REPORT_SYNC_LOOKBACK_MINUTES", "").strip()
+    if raw_minutes:
+        try:
+            minutes = float(raw_minutes)
+            if minutes > 0:
+                return [minutes / 60]
+        except ValueError:
+            pass
+    return [1, 2, 3, 4]
+
+
+def _update_after(hours: float = 1) -> str:
+    return (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _orders_or_skip(api: ReportSyncQueryAPI, payload: dict) -> tuple[list[dict], str]:
     attempts: list[str] = []
     now = datetime.now()
-    for hours in (1, 2, 3, 4):
+    for hours in _lookback_hours():
         update_after = (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
         orders = api.query_all({**payload, "updateAfter": update_after})
         attempts.append(f"{hours}h={len(orders)}")

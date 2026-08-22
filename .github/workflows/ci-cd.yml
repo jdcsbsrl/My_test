@@ -199,6 +199,8 @@ jobs:
       TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      # Keep reportSyncQuery focused on the recent, bounded test data window.
+      REPORT_SYNC_LOOKBACK_MINUTES: 10
     strategy:
       matrix:
         include:

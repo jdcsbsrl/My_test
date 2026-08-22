@@ -10,6 +10,9 @@ from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.inventory_sku_page import InventorySKUPage
 
 
+SEARCH_TIMEOUT_SECONDS = InventorySKUPage.SEARCH_TIMEOUT_SECONDS
+
+
 @pytest.mark.regression
 @pytest.mark.ui
 @pytest.mark.p1
@@ -41,7 +44,7 @@ class TestInventoryQuery:
         response_time = sku_page.click_search()
         count = sku_page.get_result_count()
 
-        assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         assert count > 0, "无条件搜索应返回至少一条库存SKU"
         print(f"\n✅ 无条件搜索成功 - 响应时间: {response_time:.2f}秒, 结果数: {count}")
 
@@ -54,7 +57,7 @@ class TestInventoryQuery:
         sku_page.fill_sku_code("TEST")
         response_time = sku_page.click_search()
 
-        assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         print(f"\n✅ SKU编码搜索成功 - 响应时间: {response_time:.2f}秒")
 
     def test_search_by_invalid_sku_code(self, logged_in_page: Page) -> None:
@@ -68,7 +71,7 @@ class TestInventoryQuery:
             sku_page.click_reset()
             sku_page.fill_sku_code(invalid_input)
             response_time = sku_page.click_search()
-            assert response_time < 30, f"无效输入'{invalid_input}'响应时间过长: {response_time}秒"
+            assert response_time < SEARCH_TIMEOUT_SECONDS, f"无效输入'{invalid_input}'响应时间过长: {response_time}秒"
             print(f"\n✅ 无效输入 '{invalid_input}' 处理成功")
 
     def test_search_edge_cases(self, logged_in_page: Page) -> None:
@@ -82,7 +85,7 @@ class TestInventoryQuery:
             sku_page.click_reset()
             sku_page.fill_sku_code(edge_case)
             response_time = sku_page.click_search()
-            assert response_time < 30, f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
+            assert response_time < SEARCH_TIMEOUT_SECONDS, f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
             print(f"\n✅ 边缘输入 '{edge_case[:20]}...' 处理成功")
 
     def test_search_result_count(self, logged_in_page: Page) -> None:
@@ -167,7 +170,7 @@ class TestInventoryExport:
         body_text = logged_in_page.text_content("body")[:500]
         print(f"搜索后页面文本片段: {body_text}")
 
-        assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         assert count > 0, f"搜索结果数应为正数，实际为: {count}"
 
         # 自定义表格组件缺少<thead>，改用页面文本内容检查
