@@ -7,19 +7,18 @@ AUTHORIZATION_ENV_VAR = "AUTO_TEST_AUTHORIZED"
 
 @dataclass
 class ExecutionAuthorization:
-    pass
-    # authorized: bool = False
-    # authorized_by: str | None = None
-    # authorized_at: str | None = None
+    authorized: bool = False
+    authorized_by: str | None = None
+    authorized_at: str | None = None
 
-    # def require_authorization(self) -> None:
-    #     if not self.authorized:
-    #         raise ExecutionAuthorizationError(
-    #             f"执行授权异常: 当前测试执行未经授权。\n"
-    #             f"根据项目规范，任何自动化测试的执行必须获得项目负责人的明确许可。\n"
-    #             f"如需执行测试，请联系项目负责人获取授权。\n"
-    #             f"授权变量 {AUTHORIZATION_ENV_VAR} 状态: 未设置或为空。"
-    #         )
+    def require_authorization(self) -> None:
+        if not self.authorized:
+            raise ExecutionAuthorizationError(
+                f"执行授权异常: 当前测试执行未经授权。\n"
+                f"根据项目规范，任何自动化测试的执行必须获得项目负责人的明确许可。\n"
+                f"如需执行测试，请联系项目负责人获取授权。\n"
+                f"授权变量 {AUTHORIZATION_ENV_VAR} 状态: 未设置或为空。"
+            )
 
 
 @dataclass
