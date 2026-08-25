@@ -60,9 +60,17 @@ class InventoryExportPage(BasePage):
         self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
         self.page.wait_for_function(
             """
-            () => Array.from(document.querySelectorAll('button')).some(button =>
-                (button.textContent || '').includes('\\u5b9e\\u65f6\\u5bfc\\u51fa')
-            ) || document.querySelectorAll('.el-checkbox, input[type="checkbox"], .tag_item').length > 0
+            () => {
+                const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                        && style.visibility !== 'hidden' && style.display !== 'none';
+                };
+                return Array.from(document.querySelectorAll('button')).some(button =>
+                    visible(button) && (button.textContent || '').trim() === '\\u5b9e\\u65f6\\u5bfc\\u51fa'
+                );
+            }
             """,
             timeout=timeout,
         )
@@ -72,15 +80,27 @@ class InventoryExportPage(BasePage):
         """Wait until visible export field options are rendered."""
         try:
             self.page.wait_for_function(
-                """() => Array.from(document.querySelectorAll(
-                    '.el-checkbox, .el-checkbox__label, .tag_item, [role="checkbox"]'
-                )).some(element => {
+                """() => {
+                    const visible = element => {
+                        const rect = element.getBoundingClientRect();
+                        const style = window.getComputedStyle(element);
+                        return rect.width > 0 && rect.height > 0
+                            && style.visibility !== 'hidden' && style.display !== 'none';
+                    };
+                    const exportPageReady = Array.from(document.querySelectorAll('button'))
+                        .some(button => visible(button)
+                            && (button.textContent || '').trim() === '\u5b9e\u65f6\u5bfc\u51fa');
+                    if (!exportPageReady) return false;
+                    return Array.from(document.querySelectorAll(
+                        '.el-checkbox, .el-checkbox__label, .tag_item, [role="checkbox"]'
+                    )).some(element => {
                     const rect = element.getBoundingClientRect();
                     const style = window.getComputedStyle(element);
                     return rect.width > 0 && rect.height > 0
                         && style.visibility !== 'hidden'
                         && style.display !== 'none';
-                })""",
+                    });
+                }""",
                 timeout=timeout,
             )
             return True
@@ -313,11 +333,13 @@ class InventoryExportPage(BasePage):
         self.wait_for_loading_complete(timeout=10000)
         clear_selectors = ['button:has-text("清空")', 'button:has-text("全选/清空")']
         for attempt in range(4):
+            action_count = 0
             for selector in clear_selectors:
                 try:
                     btn = self.page.locator(selector).first
                     if btn.is_visible():
                         btn.click()
+                        action_count += 1
                         logger.info("点击清空字段控件: {} (attempt={})", selector, attempt + 1)
                         break
                 except Exception:
@@ -352,14 +374,25 @@ class InventoryExportPage(BasePage):
                     }
                     """)
                 logger.info("清空字段操作结果: {}", result)
+                if isinstance(result, dict):
+                    action_count += int(result.get("clicked", 0))
+                elif result is True:
+                    # Keep compatibility with lightweight page doubles while
+                    # still treating a false/empty result as no action.
+                    action_count += 1
             except Exception as exc:
                 logger.warning("清空字段脚本执行失败: {}", exc)
 
             self.wait_for_loading_complete(timeout=10000)
-            count = self.get_selected_field_count()
-            if count <= max_required_fields:
-                logger.info("已验证导出字段清空完成: {}", count)
-                return count
+            counts = [self.get_selected_field_count()]
+            for _ in range(2):
+                self.page.wait_for_timeout(300)
+                counts.append(self.get_selected_field_count())
+            if max(counts) <= max_required_fields:
+                logger.info("已稳定验证导出字段清空完成: {}", counts)
+                return counts[-1]
+            if action_count == 0:
+                raise AssertionError(f"清空导出字段未找到可执行的清空操作，当前仍有 {counts[-1]} 个字段被选中")
 
         count = self.get_selected_field_count()
         raise AssertionError(f"清空导出字段后仍有 {count} 个字段被选中，期望不超过 {max_required_fields} 个")

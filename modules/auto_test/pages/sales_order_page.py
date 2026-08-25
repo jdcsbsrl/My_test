@@ -477,38 +477,25 @@ class SalesOrderPage(BasePage):
     @allure.step("点击排序下拉菜单")
     def click_sort_dropdown(self) -> None:
         """点击排序下拉菜单"""
-        selectors = [
-            "//button[contains(text(), '排序')]",
-            "//button[contains(@class, 'el-dropdown')]",
-            "//button[contains(@class, 'sort')]",
-            "//button[contains(@class, 'dropdown')]",
-            "//i[contains(@class, 'el-icon-caret-bottom')]",
-            "//div[contains(@class, 'sort')]//button",
-            "//div[contains(@class, 'dropdown')]//button",
-            "//div[contains(@class, 'el-dropdown')]//button",
-            "//span[contains(text(), '排序')]",
-            "//div[contains(text(), '排序')]",
-        ]
-
-        clicked = False
-        for selector in selectors:
+        # The page also has a batch-operation dropdown.  Generic dropdown
+        # selectors can click that menu and make the later sort assertion fail
+        # with a misleading "订单金额 not found" error.  Select only a visible
+        # control whose rendered label is the actual sort control.
+        candidates = self.page.locator("button:visible, [role='button']:visible").all()
+        for candidate in candidates:
             try:
-                elements = self.page.locator(selector).all()
-                if elements:
-                    elements[0].wait_for(state="visible", timeout=10000)
-                    elements[0].click()
-                    clicked = True
-                    logger.info("成功点击排序下拉菜单: {}", selector)
-                    self.wait_for_load_state()
-
-                    self.wait_for_loading_complete(timeout=10000)
-                    break
+                label = " ".join((candidate.text_content() or "").split())
+                if not (label.startswith("排序：") or label.startswith("排序:")):
+                    continue
+                candidate.click()
+                logger.info("成功点击排序下拉菜单: {}", label)
+                self.wait_for_load_state()
+                self.wait_for_loading_complete(timeout=10000)
+                return
             except Exception as e:
-                logger.debug("尝试选择器 {} 失败: {}", selector, type(e).__name__)
-                continue
+                logger.debug("尝试排序控件失败: {}", type(e).__name__)
 
-        if not clicked:
-            raise ValueError("无法找到排序下拉菜单")
+        raise ValueError("无法找到带有排序标签的排序下拉菜单")
 
     @allure.step("选择排序列: {column_name}")
     def select_sort_column(self, column_name: str) -> None:

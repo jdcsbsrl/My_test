@@ -132,12 +132,14 @@ class LoginPage(BasePage):
 
     def _login_without_recording_credentials(self, username: str, password: str, timeout: int, random) -> bool:
 
-        # One retry is sufficient for transient navigation issues. Failed
-        # credentials should return promptly instead of polling for 45s three
-        # times and then being rerun by pytest again.
+        # One retry is sufficient for transient navigation issues. Invalid
+        # credentials remain bounded, while valid credentials keep the caller's
+        # timeout so a slow CI backend is not mistaken for a failed login.
         max_retries = 1
-        effective_timeout = min(timeout, 15000) if (not username or not password) else min(timeout, 20000)
+        effective_timeout = min(timeout, 15000) if (not username or not password) else max(20000, timeout)
         for attempt in range(max_retries + 1):
+            login_responses = []
+            response_handler = None
             try:
                 self.navigate_to_login()
                 self.wait_for_load_state("networkidle")
@@ -152,6 +154,26 @@ class LoginPage(BasePage):
 
                 self._handle_checkbox()
 
+                def capture_login_response(response) -> None:
+                    if "/auth/login" not in response.url:
+                        return
+                    summary = {"status": response.status}
+                    try:
+                        payload = response.json()
+                        if isinstance(payload, dict):
+                            summary["code"] = payload.get("code")
+                            summary["message"] = payload.get("message") or payload.get("msg")
+                            summary["has_token"] = bool(
+                                payload.get("token")
+                                or payload.get("accessToken")
+                                or (isinstance(payload.get("data"), dict) and payload["data"].get("token"))
+                            )
+                    except Exception:
+                        summary["body"] = "unreadable"
+                    login_responses.append(summary)
+
+                response_handler = capture_login_response
+                self.page.on("response", response_handler)
                 self.click_login()
 
                 login_success = False
@@ -169,10 +191,21 @@ class LoginPage(BasePage):
                     logger.info("登录成功")
                     return True
 
-                logger.warning(f"登录失败（尝试 {attempt + 1}）：URL仍包含login或未检测到登录成功标识")
+                logger.warning(
+                    "登录失败（尝试 {}）：URL仍包含login或未检测到登录成功标识，接口摘要={}，当前URL={}",
+                    attempt + 1,
+                    login_responses[-3:],
+                    self.current_url,
+                )
 
             except Exception as e:
                 logger.error(f"登录异常（尝试 {attempt + 1}）: {e}")
+            finally:
+                if response_handler is not None:
+                    try:
+                        self.page.remove_listener("response", response_handler)
+                    except Exception:
+                        pass
 
             if attempt < max_retries:
                 logger.info(f"准备重试登录，第 {attempt + 2} 次尝试")
