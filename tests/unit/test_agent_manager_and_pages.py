@@ -155,8 +155,8 @@ class FakeLocator:
     def select_option(self, value):
         self.calls.append(("select", value))
 
-    def wait_for(self, timeout=0):
-        self.calls.append(("wait", timeout))
+    def wait_for(self, timeout=0, state=None):
+        self.calls.append(("wait", timeout, state))
 
     def text_content(self):
         return "text"
@@ -218,6 +218,9 @@ class FakePage:
     def title(self):
         return "Page Title"
 
+    def reload(self, wait_until="load", timeout=0):
+        self.calls.append(("reload", wait_until, timeout))
+
 
 class FakeEvaluatePage(FakePage):
     def __init__(self):
@@ -234,6 +237,36 @@ class FakeEvaluatePage(FakePage):
 
 
 class TestBaseAndExportPage:
+    def test_wait_for_business_ready_uses_business_selector(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        base = BasePage(page)
+
+        base.wait_for_business_ready(['button:visible:has-text("搜索")'], page_name="库存SKU页面")
+
+        assert any(call[0] == "locator" and "搜索" in call[1] for call in page.calls)
+        assert ("reload", "domcontentloaded", 60000) not in page.calls
+
+    def test_wait_for_business_ready_reloads_once_after_timeout(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        locator = FakeLocator()
+        calls = {"count": 0}
+
+        def wait_for(timeout=0, state=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise base_page_module.PlaywrightTimeoutError("not ready")
+
+        locator.wait_for = wait_for
+        page.locators['button:visible:has-text("搜索")'] = locator
+        base = BasePage(page)
+
+        base.wait_for_business_ready(['button:visible:has-text("搜索")'], page_name="库存SKU页面")
+
+        assert calls["count"] == 2
+        assert ("reload", "domcontentloaded", 60000) in page.calls
+
     def test_sales_export_payload_business_error_includes_trace_id(self):
         result = SalesOrderExportPage._business_error_from_export_payload(
             {"code": 500, "message": "未知异常，请联系IT。tlogtraceid = abc-123", "data": None},

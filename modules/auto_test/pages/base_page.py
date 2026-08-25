@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import allure
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from modules.auto_test.core.config_manager import get_config
 from modules.auto_test.core.logger import get_logger, redact_sensitive_data
@@ -132,6 +132,50 @@ class BasePage:
             url = self._validate_same_origin_url(url, purpose="导航 URL")
         self.page.goto(url)
         logger.info("Navigated to: {}", self._redact_url(url))
+
+    def wait_for_business_ready(
+        self,
+        selectors: list[str],
+        *,
+        page_name: str,
+        initial_timeout: int = 30000,
+        retry_timeout: int = 45000,
+    ) -> None:
+        """Wait for a route's business controls and retry one failed bootstrap.
+
+        DOMContentLoaded only proves that the application shell arrived. SPA
+        routes can still be waiting for their component bundle or data request,
+        so callers must provide controls that are unique to the business page.
+        """
+        selector = ", ".join(item.strip() for item in selectors if item.strip())
+        if not selector:
+            raise ValueError(f"{page_name} business-ready selectors cannot be empty")
+        ready_locator = self.page.locator(selector).first
+        self.wait_for_load_state("domcontentloaded")
+        try:
+            ready_locator.wait_for(state="visible", timeout=initial_timeout)
+        except PlaywrightTimeoutError:
+            logger.warning(
+                "{} business controls not ready after {}s; retrying route: url={}, title={}",
+                page_name,
+                initial_timeout // 1000,
+                self._redact_url(self.page.url),
+                self._redact_text(self.page.title()),
+            )
+            try:
+                self.take_screenshot(f"{page_name}_bootstrap_timeout")
+            except Exception as screenshot_error:
+                logger.debug("Unable to capture {} bootstrap screenshot: {}", page_name, screenshot_error)
+            try:
+                self.page.reload(wait_until="domcontentloaded", timeout=60000)
+                ready_locator.wait_for(state="visible", timeout=retry_timeout)
+            except Exception as retry_error:
+                raise PlaywrightTimeoutError(
+                    f"{page_name} business controls were not ready after initial wait and one reload"
+                ) from retry_error
+            logger.info("{} business controls became ready after one route retry", page_name)
+            return
+        logger.info("{} business controls are ready", page_name)
 
     @allure.step("Click element: {selector}")
     def click(self, selector: str) -> None:

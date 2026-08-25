@@ -18,8 +18,13 @@ class SKUSearchPage(BasePage):
     @allure.step("导航到SKU搜索页面")
     def navigate_to_search_page(self) -> None:
         self.navigate_to(self.search_url)
-        self.wait_for_load_state("domcontentloaded")
-        self.page.locator("input, button, table, [role='table']").first.wait_for(state="attached", timeout=30000)
+        self.wait_for_business_ready(
+            [
+                'button:visible:has-text("搜索")',
+                'input[placeholder*="SKU"]:visible',
+            ],
+            page_name="SKU搜索页面",
+        )
         logger.info("导航到SKU搜索页面")
 
     @allure.step("设置产品品类: {category}")
