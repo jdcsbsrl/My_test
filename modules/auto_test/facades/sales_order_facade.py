@@ -93,13 +93,14 @@ class SalesOrderFacade:
                 }}
             }}"""
             )
-            self.page.wait_for_load_state("networkidle")
+            self.order_page.wait_for_loading_complete(timeout=30000)
+            self.order_page.wait_for_order_rows_ready(timeout=30000)
             elapsed = time.time() - start_time
             logger.info(f"设置分页{page_size}/页，耗时{elapsed:.2f}秒")
             return elapsed
         except Exception as e:
-            logger.warning(f"设置分页大小失败: {e}")
-            return 0.0
+            logger.error(f"设置分页大小失败，订单列表未达到可操作状态: {e}")
+            raise
 
     @allure.step("完整流程：全选当前页订单")
     def select_all_current_page(self) -> int:

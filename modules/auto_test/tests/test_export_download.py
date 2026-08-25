@@ -36,7 +36,7 @@ class TestExportDownload:
 
         print(f"\n=== Step 1: Filter store {store_name} ({store_id}) ===")
         sales_order_page.navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_load_state("networkidle")
+        sales_order_page.wait_for_order_page_ready()
         order_numbers = sales_order_page.search_by_store(store_name, store_id)
         print(f"Filtered order: {order_numbers[0]}")
 

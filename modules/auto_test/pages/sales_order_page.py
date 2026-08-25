@@ -415,6 +415,14 @@ class SalesOrderPage(BasePage):
         )
         return order_numbers
 
+    @allure.step("等待销售订单页面业务控件就绪")
+    def wait_for_order_page_ready(self, timeout: int = 30000) -> None:
+        """Wait for SPA business controls without requiring network idle."""
+        self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
+        self.wait_for_loading_complete(timeout=timeout)
+        self.page.get_by_role("button", name="搜索", exact=True).wait_for(state="visible", timeout=timeout)
+        self.page.locator(".store-select-trigger:visible").first.wait_for(state="visible", timeout=timeout)
+
     @allure.step("获取所有标签页")
     def get_all_tabs(self) -> list[str]:
         """获取所有标签页名称"""
@@ -1175,11 +1183,38 @@ class SalesOrderPage(BasePage):
         except Exception:
             pass
 
+    @allure.step("等待订单行和复选框稳定")
+    def wait_for_order_rows_ready(self, timeout: int = 30000) -> None:
+        """Wait until refreshed order rows expose selectable checkboxes."""
+        self.page.wait_for_function(
+            """
+            () => {
+                const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                        && style.visibility !== 'hidden' && style.display !== 'none';
+                };
+                const masks = Array.from(document.querySelectorAll(
+                    '.el-loading-mask, .el-loading-spinner, [aria-busy="true"]'
+                )).filter(visible);
+                if (masks.length > 0) return false;
+                const rows = Array.from(document.querySelectorAll(
+                    '.order-block, tbody tr, .el-table__body-wrapper tr'
+                )).filter(visible);
+                return rows.some(row => visible(row)
+                    && Boolean(row.querySelector('input[type="checkbox"]')));
+            }
+            """,
+            timeout=timeout,
+        )
+
     @allure.step("等待排序完成")
     def wait_for_sort_complete(self, timeout: int = 10000) -> None:
-        """等待排序完成（等待网络空闲 + 表格数据刷新）"""
-        self.page.wait_for_load_state("networkidle")
-        self.wait_for_table_data(timeout)
+        """等待排序完成（等待业务加载结束 + 订单行刷新）"""
+        self.page.wait_for_load_state("domcontentloaded")
+        self.wait_for_loading_complete(timeout=timeout)
+        self.wait_for_order_rows_ready(timeout=max(timeout, 30000))
 
     @allure.step("等待选中数量更新")
     def verify_selected_count(self, timeout: int = 5000) -> int:
@@ -1255,6 +1290,7 @@ class SalesOrderPage(BasePage):
 
     @allure.step("全选当前页订单")
     def select_all_current_page(self) -> None:
+        self.wait_for_order_rows_ready(timeout=30000)
         try:
             script_result = self.page.evaluate("""
                 () => {
