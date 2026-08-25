@@ -242,9 +242,9 @@ jobs:
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
       # Keep UI shards parallel, but cap shared TEST environment pressure.
-      # Eleven simultaneous browsers overload the shared route/API and causes
-      # unrelated page bootstrap failures; three is controlled parallelism.
-      max-parallel: 3
+      # The shared route/API remains unstable with three simultaneous browser
+      # sessions, so two is the safe parallelism boundary observed in CI.
+      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
