@@ -246,10 +246,9 @@ jobs:
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
-      # The UI suite currently targets one shared test environment. Running
-      # shards concurrently lets them mutate the same templates and data.
-      # Restore parallelism only after the environment is isolated per run.
-      max-parallel: 1
+      # Preserve the historical parallel matrix execution. Each shard owns
+      # its own test scope and must not be serialized by the workflow.
+      max-parallel: 11
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
