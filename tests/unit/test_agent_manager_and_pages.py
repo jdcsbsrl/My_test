@@ -10,8 +10,8 @@ from modules.auto_test.pages.base_page import BasePage
 from modules.auto_test.pages.export_page import ExportPage
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.login_page import LoginPage
+from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.trae_test.orchestrator.agent_manager import AgentContext, AgentManager, DomainMetadata
-
 
 pytestmark = pytest.mark.unit
 
@@ -234,8 +234,28 @@ class FakeEvaluatePage(FakePage):
 
 
 class TestBaseAndExportPage:
+    def test_sales_export_payload_business_error_includes_trace_id(self):
+        result = SalesOrderExportPage._business_error_from_export_payload(
+            {"code": 500, "message": "未知异常，请联系IT。tlogtraceid = abc-123", "data": None},
+            http_status=200,
+        )
+
+        assert result == {
+            "error": "导出接口业务失败: code=500, message=未知异常，请联系IT。tlogtraceid = abc-123",
+            "trace_id": "abc-123",
+        }
+
+    def test_sales_export_payload_success_and_http_error(self):
+        assert SalesOrderExportPage._business_error_from_export_payload({"code": 200}) is None
+        assert SalesOrderExportPage._business_error_from_export_payload({}, http_status=503) == {
+            "error": "导出接口 HTTP 503",
+            "trace_id": None,
+        }
+
     def test_base_page_wrappers_and_navigation(self, monkeypatch):
-        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test/index"))
+        monkeypatch.setattr(
+            base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test/index")
+        )
         monkeypatch.setattr(base_page_module.allure.attach, "file", lambda *args, **kwargs: None)
         page = FakePage()
         base = BasePage(page)
@@ -309,6 +329,15 @@ class TestBaseAndExportPage:
 
         assert export_page.select_field("产品名称") is False
         assert any("fieldName" in script for script, _ in page.evaluated_scripts)
+
+    def test_inventory_deselect_verifies_selected_field_state(self, monkeypatch):
+        page = FakeEvaluatePage()
+        export_page = InventoryExportPage(page)
+        monkeypatch.setattr(export_page, "wait_for_field_options", lambda timeout=30000: True)
+        monkeypatch.setattr(export_page, "wait_for_loading_complete", lambda timeout=10000: None)
+
+        assert export_page.deselect_all_fields() == 1
+        assert any('input[type="checkbox"]:checked' in script for script, _ in page.evaluated_scripts)
 
     def test_inventory_field_group_locator_fallback_uses_expansion_candidates(self, monkeypatch):
         page = FakePage()

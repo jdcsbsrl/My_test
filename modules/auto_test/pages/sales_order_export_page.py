@@ -70,9 +70,7 @@ class SalesOrderExportPage(BasePage):
         the Vue application is still loading its template/field data.
         """
         try:
-            template_select = self.page.locator(
-                '.el-select:visible, .ant-select:visible'
-            )
+            template_select = self.page.locator(".el-select:visible, .ant-select:visible")
             realtime_button = self.page.get_by_role("button", name="实时导出", exact=True)
             return template_select.count() > 0 or realtime_button.count() > 0
         except Exception:
@@ -92,8 +90,7 @@ class SalesOrderExportPage(BasePage):
 
         if fast_mode:
             try:
-                result = self.page.evaluate(
-                    """
+                result = self.page.evaluate("""
                     () => {
                         const boxes = document.querySelectorAll('.el-checkbox:not(.is-checked)');
                         let count = 0;
@@ -105,8 +102,7 @@ class SalesOrderExportPage(BasePage):
                         }
                         return { success: true, selected: count, total: boxes.length };
                     }
-                """
-                )
+                """)
                 logger.info("fast_mode 批量选择字段: {}", result)
                 return
             except Exception as e:
@@ -199,8 +195,7 @@ class SalesOrderExportPage(BasePage):
 
         # JS回退：通过文本查找并点击复选框标签
         try:
-            result = self.page.evaluate(
-                f"""
+            result = self.page.evaluate(f"""
                 () => {{
                     const target = '{field_name}';
                     const labels = document.querySelectorAll('label, span, .el-checkbox__label, .ant-checkbox-wrapper > span');
@@ -231,8 +226,7 @@ class SalesOrderExportPage(BasePage):
                     }}
                     return false;
                 }}
-            """
-            )
+            """)
             if result:
                 self.wait_for_loading_complete(timeout=10000)
                 logger.info(f"已选择字段: {field_name} (通过JS回退)")
@@ -332,8 +326,7 @@ class SalesOrderExportPage(BasePage):
             # 回退方案：通过 JavaScript 直接查找并点击模板选择器
             if not clicked:
                 try:
-                    result = self.page.evaluate(
-                        """
+                    result = self.page.evaluate("""
                         () => {
                             const debug = {};
                             debug.selectCount = document.querySelectorAll('.el-select').length;
@@ -360,8 +353,7 @@ class SalesOrderExportPage(BasePage):
                             }
                             return { success: false, debug: debug };
                         }
-                    """
-                    )
+                    """)
                     clicked = result.get("success", False)
                     debug_info = result.get("debug", {})
                     logger.info(f"模板选择器调试 - select数量: {debug_info.get('selectCount')}")
@@ -515,6 +507,32 @@ class SalesOrderExportPage(BasePage):
         export_button.first.click(timeout=10000)
         logger.info("已点击实时导出按钮")
 
+    @staticmethod
+    def _business_error_from_export_payload(payload, http_status: int | None = None) -> dict | None:
+        """Normalize an export API business failure for actionable test output."""
+        if not isinstance(payload, dict):
+            if http_status is not None and http_status >= 400:
+                return {"error": f"导出接口 HTTP {http_status}", "trace_id": None}
+            return None
+
+        code = payload.get("code")
+        if code is None:
+            if http_status is not None and http_status >= 400:
+                return {"error": f"导出接口 HTTP {http_status}", "trace_id": None}
+            return None
+        if code in (0, 200, "0", "200"):
+            return None
+
+        message = payload.get("message") or payload.get("msg") or "导出接口返回失败"
+        trace_id = None
+        match = re.search(r"(?:tlogtraceid|trace[_ -]?id)\s*[=:]\s*([A-Za-z0-9-]+)", str(message), re.I)
+        if match:
+            trace_id = match.group(1)
+        return {
+            "error": f"导出接口业务失败: code={code}, message={message}",
+            "trace_id": trace_id,
+        }
+
     @allure.step("等待导出下载")
     def wait_for_download(self, timeout: int = 120000) -> dict:
         """监听实时导出直接触发的浏览器下载事件。"""
@@ -534,9 +552,7 @@ class SalesOrderExportPage(BasePage):
                 file_responses.append(response)
             if "export" in response.url.lower():
                 export_response_objects.append(response)
-                export_responses.append(
-                    {"url": response.url, "status": response.status, "content_type": content_type}
-                )
+                export_responses.append({"url": response.url, "status": response.status, "content_type": content_type})
 
         self.page.on("response", capture_file_response)
         try:
@@ -599,6 +615,19 @@ class SalesOrderExportPage(BasePage):
                         payload.get("message") or payload.get("msg"),
                         type(payload.get("data")).__name__,
                     )
+                    business_error = self._business_error_from_export_payload(payload, response.status)
+                    if business_error:
+                        if business_error.get("trace_id"):
+                            logger.error("实时导出业务失败 trace_id={}", business_error["trace_id"])
+                        return {
+                            "success": False,
+                            "error": self._redact_text(business_error["error"]),
+                            "trace_id": business_error.get("trace_id"),
+                            "filename": None,
+                            "file_path": None,
+                            "file_size": 0,
+                            "url": self._redact_url(response.url),
+                        }
 
                     def find_download_url(value):
                         if isinstance(value, str) and (
@@ -626,14 +655,14 @@ class SalesOrderExportPage(BasePage):
                         api_response = self.page.context.request.get(absolute_url)
                         if api_response.ok:
                             disposition = api_response.headers.get("content-disposition", "")
-                            filename_match = re.search(
-                                r"filename\\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I
-                            )
+                            filename_match = re.search(r"filename\\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
                             filename = self._safe_artifact_name(
-                                unquote(filename_match.group(1))
-                                if filename_match
-                                else os.path.basename(download_url.split("?", 1)[0])
-                                or f"export_{int(time.time())}.xlsx",
+                                (
+                                    unquote(filename_match.group(1))
+                                    if filename_match
+                                    else os.path.basename(download_url.split("?", 1)[0])
+                                    or f"export_{int(time.time())}.xlsx"
+                                ),
                                 default=f"export_{int(time.time())}.xlsx",
                             )
                             file_path = self._runtime_artifact_path("downloads", f"{uuid.uuid4().hex[:10]}_{filename}")
@@ -671,58 +700,98 @@ class SalesOrderExportPage(BasePage):
     def download_to(self, save_path: str, timeout: int = 120000) -> dict:
         target_path = self._resolve_download_path(save_path)
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        export_responses = []
+
+        def capture_export_response(response) -> None:
+            if "export" in response.url.lower():
+                export_responses.append(response)
+
+        self.page.on("response", capture_export_response)
         try:
-            with self.page.expect_download(timeout=timeout) as download_info:
-                self.click_realtime_export()
-                self.wait_for_page_settle(timeout=30000)
-
-            download = download_info.value
-            filename = self._safe_artifact_name(download.suggested_filename, default=target_path.name)
-            download.save_as(str(target_path))
-
-            file_size = target_path.stat().st_size if target_path.is_file() else 0
-            if file_size <= 0:
-                raise ValueError("下载文件为空")
-
-            return {
-                "success": True,
-                "filename": filename,
-                "file_path": str(target_path),
-                "file_size": file_size,
-                "url": self._redact_url(download.url),
-            }
-        except Exception as e:
-            logger.warning(f"下载失败: {e}")
-
             try:
-                import glob
+                with self.page.expect_download(timeout=timeout) as download_info:
+                    self.click_realtime_export()
+                    self.wait_for_page_settle(timeout=30000)
 
-                download_dir = target_path.parent
-                base_name = target_path.stem
+                download = download_info.value
+                filename = self._safe_artifact_name(download.suggested_filename, default=target_path.name)
+                download.save_as(str(target_path))
 
-                max_wait = 60
-                start_time = time.time()
-                while time.time() - start_time < max_wait:
-                    files = glob.glob(os.path.join(str(download_dir), f"*{base_name}*.xlsx"))
-                    if files:
-                        os.replace(files[0], target_path)
-                        file_size = target_path.stat().st_size
-                        if file_size <= 0:
-                            raise ValueError("轮询到的下载文件为空")
-                        return {
-                            "success": True,
-                            "filename": target_path.name,
-                            "file_path": str(target_path),
-                            "file_size": file_size,
-                            "url": None,
-                        }
-                    self.wait_for_poll_interval(2000)
+                file_size = target_path.stat().st_size if target_path.is_file() else 0
+                if file_size <= 0:
+                    raise ValueError("下载文件为空")
 
-                logger.warning("轮询检测下载文件超时")
-            except Exception as poll_e:
-                logger.warning(f"轮询检测下载文件失败: {poll_e}")
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "file_path": str(target_path),
+                    "file_size": file_size,
+                    "url": self._redact_url(download.url),
+                }
+            except Exception as e:
+                business_error = None
+                response_url = None
+                if export_responses:
+                    response = export_responses[-1]
+                    response_url = response.url
+                    try:
+                        payload = response.json()
+                    except Exception:
+                        payload = None
+                    business_error = self._business_error_from_export_payload(payload, response.status)
+                if business_error:
+                    if business_error.get("trace_id"):
+                        logger.error("下载导出业务失败 trace_id={}", business_error["trace_id"])
+                    return {
+                        "success": False,
+                        "error": self._redact_text(business_error["error"]),
+                        "trace_id": business_error.get("trace_id"),
+                        "filename": None,
+                        "file_path": None,
+                        "file_size": 0,
+                        "url": self._redact_url(response_url),
+                    }
 
-            return {"success": False, "error": self._redact_text(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
+                logger.warning(f"下载失败: {e}")
+
+                try:
+                    import glob
+
+                    download_dir = target_path.parent
+                    base_name = target_path.stem
+
+                    max_wait = 60
+                    start_time = time.time()
+                    while time.time() - start_time < max_wait:
+                        files = glob.glob(os.path.join(str(download_dir), f"*{base_name}*.xlsx"))
+                        if files:
+                            os.replace(files[0], target_path)
+                            file_size = target_path.stat().st_size
+                            if file_size <= 0:
+                                raise ValueError("轮询到的下载文件为空")
+                            return {
+                                "success": True,
+                                "filename": target_path.name,
+                                "file_path": str(target_path),
+                                "file_size": file_size,
+                                "url": None,
+                            }
+                        self.wait_for_poll_interval(2000)
+
+                    logger.warning("轮询检测下载文件超时")
+                except Exception as poll_e:
+                    logger.warning(f"轮询检测下载文件失败: {poll_e}")
+
+                return {
+                    "success": False,
+                    "error": self._redact_text(e),
+                    "filename": None,
+                    "file_path": None,
+                    "file_size": 0,
+                    "url": None,
+                }
+        finally:
+            self.page.remove_listener("response", capture_export_response)
 
     @allure.step("获取导出页面标题")
     def get_page_title(self) -> str:

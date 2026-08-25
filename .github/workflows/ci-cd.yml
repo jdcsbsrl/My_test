@@ -9,8 +9,11 @@ on:
     - cron: '0 2 * * *'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A new push supersedes an older run on the same branch. Including the SHA
+  # here creates a new concurrency group for every push and lets stale runs
+  # continue against the shared test environment.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   structure-audit:
@@ -130,10 +133,18 @@ jobs:
         run: |
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
+          # Unit coverage is measured on unit-testable layers. Browser page
+          # objects are covered by the UI matrix below and are intentionally
+          # not mixed into this gate.
           pytest tests/unit/ -v --tb=short -n auto \
             --alluredir .runtime/reports/allure-results \
-            --cov=modules/auto_test \
-            --cov=modules/trae_test \
+            --cov=modules/auto_test/core \
+            --cov=modules/auto_test/api \
+            --cov=modules/auto_test/drivers \
+            --cov=modules/auto_test/facades \
+            --cov=modules/auto_test/reporting \
+            --cov=modules/trae_test/orchestrator \
+            --cov=modules/trae_test/utils \
             --cov-report=html:.runtime/reports/coverage/html \
             --cov-report=xml:.runtime/reports/coverage/coverage.xml \
             --cov-report=term \
@@ -233,6 +244,10 @@ jobs:
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
+      # The UI suite currently targets one shared test environment. Running
+      # shards concurrently lets them mutate the same templates and data.
+      # Restore parallelism only after the environment is isolated per run.
+      max-parallel: 1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

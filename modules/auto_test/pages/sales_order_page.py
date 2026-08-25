@@ -10,6 +10,12 @@ logger = get_logger()
 
 
 class SalesOrderPage(BasePage):
+    SALES_EXPORT_STORE_CASES = (
+        ("yxl_payment-Velora", "2000509327097937921"),
+        ("yxl_kehu_zuzhang-test_yxl", "2067069306596454401"),
+        ("yxl_kehu_zuzhang-test_yxl_new1", "2083105892576489473"),
+    )
+
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         # 标签页选择器 - 更详细的定位
@@ -198,8 +204,7 @@ class SalesOrderPage(BasePage):
         if not clicked:
             try:
                 search_name = tab_name.split("(")[0]
-                result = self.page.evaluate(
-                    f"""
+                result = self.page.evaluate(f"""
                     () => {{
                         const debug = {{}};
                         debug.roleTabs = document.querySelectorAll('[role="tab"]').length;
@@ -224,8 +229,7 @@ class SalesOrderPage(BasePage):
                         }}
                         return {{ success: false, debug: debug }};
                     }}
-                """
-                )
+                """)
                 clicked = result.get("success", False)
                 debug_info = result.get("debug", {})
                 logger.info(
@@ -326,6 +330,90 @@ class SalesOrderPage(BasePage):
         self.close_advanced_filter()
 
         return ""
+
+    @allure.step("按销售店铺筛选订单: {store_name}")
+    def search_by_store(self, store_name: str, store_id: str) -> list[str]:
+        """Select one store, submit the search, and return only filtered orders.
+
+        The store picker is a custom checkbox component.  Besides checking the
+        visible store name, verify the order-list request carries the expected
+        backend store ID; otherwise the page may still be showing unfiltered
+        data.
+        """
+        store_name = str(store_name).strip()
+        store_id = str(store_id).strip()
+        if not store_name or not store_id:
+            raise ValueError("店铺名称和店铺 ID 不能为空")
+
+        self.wait_for_page_settle(timeout=30000)
+        trigger = self.page.locator(".store-select-trigger:visible").first
+        trigger.wait_for(state="visible", timeout=30000)
+        trigger.click()
+
+        store_search = self.page.locator('input[placeholder="输入店铺搜索"]:visible').first
+        store_search.wait_for(state="visible", timeout=10000)
+        store_search.fill(store_name)
+        self.page.wait_for_timeout(500)
+
+        selected = self.page.evaluate(
+            """
+            (expectedName) => {
+              const items = Array.from(document.querySelectorAll('.store-item'));
+              const item = items.find((candidate) => {
+                const name = candidate.querySelector('.store-name')?.innerText?.trim();
+                return name === expectedName;
+              });
+              if (!item) return {found: false, checked: false, name: ''};
+              const checkbox = item.querySelector('input[type="checkbox"]');
+              if (checkbox && !checkbox.checked) checkbox.click();
+              return {
+                found: true,
+                checked: Boolean(checkbox?.checked),
+                name: item.querySelector('.store-name')?.innerText?.trim() || ''
+              };
+            }
+            """,
+            store_name,
+        )
+        if not selected.get("found"):
+            raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
+        if not selected.get("checked"):
+            raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
+
+        trigger.click()
+        search_button = self.page.get_by_role("button", name="搜索", exact=True)
+        search_button.wait_for(state="visible", timeout=10000)
+        search_requests: list[str] = []
+
+        def record_order_request(request: Any) -> None:
+            if request.method == "POST" and "batchListNew" in request.url:
+                search_requests.append(request.post_data or "")
+
+        self.page.on("request", record_order_request)
+        try:
+            search_button.click()
+            self.wait_for_loading_complete(timeout=60000)
+            self.page.wait_for_timeout(500)
+        finally:
+            self.page.remove_listener("request", record_order_request)
+
+        matching_requests = [payload for payload in search_requests if store_id in payload]
+        if not matching_requests:
+            payload = search_requests[-1] if search_requests else "<未捕获 batchListNew 请求>"
+            raise AssertionError(
+                "销售订单店铺筛选未传递期望的 storeId: " f"name={store_name}, expected_id={store_id}, request={payload}"
+            )
+
+        order_numbers = self.get_sorted_order_numbers(limit=1)
+        if not order_numbers:
+            raise AssertionError(f"店铺筛选后没有订单: name={store_name}, id={store_id}")
+        logger.info(
+            "销售订单店铺筛选成功: name={}, id={}, first_order={}",
+            store_name,
+            store_id,
+            order_numbers[0],
+        )
+        return order_numbers
 
     @allure.step("获取所有标签页")
     def get_all_tabs(self) -> list[str]:
@@ -830,8 +918,7 @@ class SalesOrderPage(BasePage):
             "step_times_ms": [],
         }
 
-        self.page.evaluate(
-            """
+        self.page.evaluate("""
             window.__scrollMetrics = { frames: [], startTime: 0, rafId: null };
             window.__scrollMetrics.startTime = performance.now();
             let lastTime = performance.now();
@@ -842,8 +929,7 @@ class SalesOrderPage(BasePage):
                 window.__scrollMetrics.rafId = requestAnimationFrame(recordFrame);
             }
             window.__scrollMetrics.rafId = requestAnimationFrame(recordFrame);
-        """
-        )
+        """)
         time.sleep(0.3)
 
         total_scroll_time = 0.0
@@ -857,8 +943,7 @@ class SalesOrderPage(BasePage):
 
         time.sleep(0.5)
 
-        frame_data = self.page.evaluate(
-            """
+        frame_data = self.page.evaluate("""
             () => {
                 if (!window.__scrollMetrics) return [];
                 cancelAnimationFrame(window.__scrollMetrics.rafId);
@@ -866,8 +951,7 @@ class SalesOrderPage(BasePage):
                 const totalTime = performance.now() - window.__scrollMetrics.startTime;
                 return { frames, totalTime };
             }
-        """
-        )
+        """)
 
         results["total_time_ms"] = round(total_scroll_time, 1)
         results["avg_step_time_ms"] = round(total_scroll_time / scroll_steps, 1)
@@ -1071,16 +1155,14 @@ class SalesOrderPage(BasePage):
 
         time.sleep(0.5)
         try:
-            timing = self.page.evaluate(
-                """
+            timing = self.page.evaluate("""
                 () => {
                     const pt = performance.timing;
                     const nt = performance.getEntriesByType('navigation')[0];
                     if (nt) return nt.domComplete - nt.fetchStart;
                     return pt.domComplete - pt.fetchStart;
                 }
-            """
-            )
+            """)
             return round(timing / 1000, 3)
         except Exception:
             return 0.0
@@ -1127,8 +1209,7 @@ class SalesOrderPage(BasePage):
     def click_export_button(self) -> None:
         """点击页面上的导出按钮"""
         try:
-            script_result = self.page.evaluate(
-                """
+            script_result = self.page.evaluate("""
                 () => {
                     const buttons = document.querySelectorAll('button');
                     const exportButtons = [];
@@ -1144,8 +1225,7 @@ class SalesOrderPage(BasePage):
                     }
                     return exportButtons;
                 }
-            """
-            )
+            """)
             logger.info(f"找到导出按钮信息: {script_result}")
         except Exception as e:
             logger.debug(f"查找导出按钮信息失败: {e}")
@@ -1189,8 +1269,7 @@ class SalesOrderPage(BasePage):
     @allure.step("全选当前页订单")
     def select_all_current_page(self) -> None:
         try:
-            script_result = self.page.evaluate(
-                """
+            script_result = self.page.evaluate("""
                 () => {
                     const checkbox = document.querySelector('thead input[type="checkbox"]');
                     if (checkbox && !checkbox.checked) {
@@ -1199,18 +1278,15 @@ class SalesOrderPage(BasePage):
                     }
                     return { success: false, message: 'checkbox not found or already checked' };
                 }
-            """
-            )
+            """)
             logger.info(f"全选当前页订单: {script_result}")
             import time
 
             time.sleep(1)
 
-            selected_count = self.page.evaluate(
-                """
+            selected_count = self.page.evaluate("""
                 () => document.querySelectorAll('table tbody input[type="checkbox"]:checked').length
-            """
-            )
+            """)
             if selected_count > 0:
                 logger.info(f"成功勾选 {selected_count} 个订单")
                 return
@@ -1219,8 +1295,7 @@ class SalesOrderPage(BasePage):
             logger.debug(f"全选失败: {e}")
 
         try:
-            script_result = self.page.evaluate(
-                """
+            script_result = self.page.evaluate("""
                 () => {
                     const orderBlocks = document.querySelectorAll('.order-block');
                     let checkedCount = 0;
@@ -1233,8 +1308,7 @@ class SalesOrderPage(BasePage):
                     }
                     return { success: checkedCount > 0, count: checkedCount, message: 'clicked order-block checkboxes' };
                 }
-            """
-            )
+            """)
             logger.info(f"通过order-block勾选订单: {script_result}")
             import time
 
@@ -1259,8 +1333,7 @@ class SalesOrderPage(BasePage):
     @allure.step("获取选中订单数量")
     def get_selected_count(self) -> int:
         try:
-            count = self.page.evaluate(
-                """
+            count = self.page.evaluate("""
                 () => {
                     const tableChecked = Array.from(
                         document.querySelectorAll('table tbody input[type="checkbox"]:checked')
@@ -1278,8 +1351,7 @@ class SalesOrderPage(BasePage):
                     }
                     return checked;
                 }
-            """
-            )
+            """)
             return count or 0
         except Exception:
             return 0
@@ -1333,9 +1405,7 @@ class SalesOrderPage(BasePage):
                 self.page.goto(export_url, wait_until="domcontentloaded")
                 break
         try:
-            self.page.wait_for_url(
-                "**/sales/order/exportPage**", timeout=3000, wait_until="domcontentloaded"
-            )
+            self.page.wait_for_url("**/sales/order/exportPage**", timeout=3000, wait_until="domcontentloaded")
         except Exception:
             import time
             from urllib.parse import quote
@@ -1344,9 +1414,7 @@ class SalesOrderPage(BasePage):
             if not order_numbers:
                 raise ValueError("当前搜索结果没有可用于实时导出的订单")
             order_param = quote(",".join(order_numbers))
-            self.navigate_to(
-                f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}"
-            )
+            self.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
         logger.info("已进入当前搜索订单导出页面")
 
     @allure.step("选择导出勾选的订单")
@@ -1359,8 +1427,7 @@ class SalesOrderPage(BasePage):
         time.sleep(2)
 
         try:
-            script_result = self.page.evaluate(
-                """
+            script_result = self.page.evaluate("""
                 () => {
                     const items = document.querySelectorAll('.el-dropdown-menu__item');
                     for (let i = 0; i < items.length; i++) {
@@ -1372,8 +1439,7 @@ class SalesOrderPage(BasePage):
                     }
                     return { clicked: false };
                 }
-            """
-            )
+            """)
         except Exception as e:
             logger.debug(f"通过JS点击导出勾选的订单失败: {e}")
         else:
@@ -1441,9 +1507,7 @@ class SalesOrderPage(BasePage):
         order_param = quote(",".join(order_numbers))
         expected_url = f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}"
         current_order_param = (
-            self.page.url.split("orderNo=", 1)[1].split("&", 1)[0]
-            if "orderNo=" in self.page.url
-            else ""
+            self.page.url.split("orderNo=", 1)[1].split("&", 1)[0] if "orderNo=" in self.page.url else ""
         )
         if current_order_param != order_param:
             self.navigate_to(expected_url)
@@ -1523,8 +1587,7 @@ class SalesOrderPage(BasePage):
             time.sleep(5)
 
             try:
-                script_result = self.page.evaluate(
-                    f"""
+                script_result = self.page.evaluate(f"""
                     () => {{
                         const orderBlocks = document.querySelectorAll('.order-block');
                         const orderNumbers = [];
@@ -1541,8 +1604,7 @@ class SalesOrderPage(BasePage):
                         }}
                         return orderNumbers;
                     }}
-                """
-                )
+                """)
                 if script_result:
                     results = script_result
                     logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
@@ -1551,8 +1613,7 @@ class SalesOrderPage(BasePage):
 
             if not results:
                 try:
-                    script_result = self.page.evaluate(
-                        f"""
+                    script_result = self.page.evaluate(f"""
                         () => {{
                             const text = document.body.innerText;
                             const matches = text.match(/SO\\d{{14,}}/g);
@@ -1562,8 +1623,7 @@ class SalesOrderPage(BasePage):
                             }}
                             return [];
                         }}
-                    """
-                    )
+                    """)
                     if script_result:
                         results = script_result
                         logger.info("通过 body 文本匹配获取到 {} 个系统单号", len(results))

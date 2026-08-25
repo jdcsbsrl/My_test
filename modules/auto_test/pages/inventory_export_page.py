@@ -177,11 +177,11 @@ class InventoryExportPage(BasePage):
             return False
         selectors = [
             '[aria-expanded="false"]',
-            '.el-collapse-item__header',
-            '.el-tree-node__content',
+            ".el-collapse-item__header",
+            ".el-tree-node__content",
             '[role="tab"]',
             '[role="treeitem"]',
-            'button',
+            "button",
         ]
         for selector in selectors:
             try:
@@ -224,8 +224,7 @@ class InventoryExportPage(BasePage):
                 logger.warning("fast_mode 页面全选控件触发失败，继续尝试逐项选择: {}", e)
 
             try:
-                result = self.page.evaluate(
-                    """
+                result = self.page.evaluate("""
                     () => {
                         const boxes = document.querySelectorAll('.el-checkbox:not(.is-checked)');
                         let count = 0;
@@ -237,8 +236,7 @@ class InventoryExportPage(BasePage):
                         }
                         return { success: true, selected: count, total: boxes.length };
                     }
-                """
-                )
+                """)
                 logger.info("fast_mode 批量选择字段: {}", result)
                 if self.get_selected_field_count() > 0:
                     return
@@ -285,8 +283,7 @@ class InventoryExportPage(BasePage):
     @allure.step("清空已选导出字段")
     def _click_select_all_checkbox(self) -> dict:
         """通过导出页自身的“全选/清空”复选框选择字段，确保 Vue 状态同步。"""
-        return self.page.evaluate(
-            """
+        return self.page.evaluate("""
             () => {
                 const isVisible = el => {
                     const style = window.getComputedStyle(el);
@@ -307,52 +304,65 @@ class InventoryExportPage(BasePage):
                 selectAll.click();
                 return { clicked: true, already_checked: false, text: selectAll.textContent.trim(), visible_boxes: boxes.length };
             }
-            """
-        )
+            """)
 
     @allure.step("清空已选导出字段")
-    def deselect_all_fields(self) -> None:
+    def deselect_all_fields(self, max_required_fields: int = 1) -> int:
         if not self.wait_for_field_options():
             raise AssertionError("导出字段列表未加载，无法清空导出字段")
         self.wait_for_loading_complete(timeout=10000)
         clear_selectors = ['button:has-text("清空")', 'button:has-text("全选/清空")']
-        for selector in clear_selectors:
+        for attempt in range(4):
+            for selector in clear_selectors:
+                try:
+                    btn = self.page.locator(selector).first
+                    if btn.is_visible():
+                        btn.click()
+                        logger.info("点击清空字段控件: {} (attempt={})", selector, attempt + 1)
+                        break
+                except Exception:
+                    continue
+
             try:
-                btn = self.page.locator(selector).first
-                if btn.is_visible():
-                    btn.click()
-                    self.wait_for_loading_complete(timeout=10000)
-                    logger.info(f"点击{selector}清空按钮")
-                    return
-            except Exception:
-                continue
-        try:
-            result = self.page.evaluate(
-                """
-                () => {
-                    const checked = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
-                        .filter(input => !input.disabled);
-                    let count = 0;
-                    for (const input of checked) {
-                        const label = input.closest('label') || input;
-                        label.click();
-                        count++;
+                result = self.page.evaluate("""
+                    () => {
+                        const visible = element => {
+                            const rect = element.getBoundingClientRect();
+                            const style = window.getComputedStyle(element);
+                            return rect.width > 0 && rect.height > 0
+                                && style.visibility !== 'hidden' && style.display !== 'none';
+                        };
+                        let clicked = 0;
+                        for (const input of document.querySelectorAll('input[type="checkbox"]:checked')) {
+                            if (input.disabled || !visible(input)) continue;
+                            const control = input.closest('.el-checkbox')?.querySelector('.el-checkbox__input')
+                                || input.closest('label') || input;
+                            control.click();
+                            clicked++;
+                        }
+                        for (const tag of document.querySelectorAll('.tag_item')) {
+                            if (!visible(tag)) continue;
+                            const close = tag.querySelector('[class*="close"], [class*="delete"], button');
+                            if (close && visible(close)) {
+                                close.click();
+                                clicked++;
+                            }
+                        }
+                        return {clicked};
                     }
-                    return { cleared: count, remaining: document.querySelectorAll('input[type="checkbox"]:checked').length };
-                }
-                """
-            )
-            logger.info("已清空可取消的导出字段: {}", result)
-            return
-        except Exception:
-            pass
-        try:
-            checked = self.page.locator('input[type="checkbox"]:checked').all()
-            for cb in checked:
-                cb.click(force=True)
-            logger.info("已清空所有字段")
-        except Exception as e:
-            logger.warning(f"清空字段失败: {e}")
+                    """)
+                logger.info("清空字段操作结果: {}", result)
+            except Exception as exc:
+                logger.warning("清空字段脚本执行失败: {}", exc)
+
+            self.wait_for_loading_complete(timeout=10000)
+            count = self.get_selected_field_count()
+            if count <= max_required_fields:
+                logger.info("已验证导出字段清空完成: {}", count)
+                return count
+
+        count = self.get_selected_field_count()
+        raise AssertionError(f"清空导出字段后仍有 {count} 个字段被选中，期望不超过 {max_required_fields} 个")
 
     @allure.step("选择指定字段: {field_name}")
     def select_field(self, field_name: str, _allow_group_activation: bool = True) -> bool:
@@ -447,8 +457,7 @@ class InventoryExportPage(BasePage):
     @allure.step("选择首个可用导出模板")
     def select_first_template_if_available(self) -> bool:
         try:
-            clicked = self.page.evaluate(
-                """() => {
+            clicked = self.page.evaluate("""() => {
                     const selects = Array.from(document.querySelectorAll('.el-select, .ant-select'));
                     const target = selects.find(select => {
                         const text = (select.textContent || '').trim();
@@ -459,14 +468,12 @@ class InventoryExportPage(BasePage):
                     if (!target) return false;
                     target.click();
                     return true;
-                }"""
-            )
+                }""")
             if not clicked:
                 return False
 
             self.wait_for_loading_complete(timeout=10000)
-            selected = self.page.evaluate(
-                """() => {
+            selected = self.page.evaluate("""() => {
                     const ignored = new Set(['calibri', '微软雅黑', 'arial', 'times new roman', '宋体']);
                     const items = Array.from(document.querySelectorAll('.el-select-dropdown__item, .ant-select-item-option'))
                         .filter(item => item.offsetParent !== null);
@@ -477,8 +484,7 @@ class InventoryExportPage(BasePage):
                     if (!item) return false;
                     item.click();
                     return true;
-                }"""
-            )
+                }""")
             logger.info("选择首个可用导出模板: {}", selected)
             return bool(selected)
         except Exception as e:
@@ -529,16 +535,14 @@ class InventoryExportPage(BasePage):
         logger.info("点击实时导出按钮")
 
     def _js_click_realtime_export(self) -> None:
-        clicked = self.page.evaluate(
-            """() => {
+        clicked = self.page.evaluate("""() => {
                 const buttons = Array.from(document.querySelectorAll('button'));
                 const button = buttons.find(btn => (btn.textContent || '').trim() === '实时导出'
                     && !btn.disabled && btn.offsetParent !== null);
                 if (!button) return false;
                 button.click();
                 return true;
-            }"""
-        )
+            }""")
         if not clicked:
             raise ValueError("未找到可用的实时导出按钮")
         logger.info("通过JS点击实时导出按钮")
@@ -581,7 +585,14 @@ class InventoryExportPage(BasePage):
             return result
         except Exception as e:
             logger.warning(f"导出下载超时或失败: {e}")
-            return {"success": False, "error": self._redact_text(e), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            return {
+                "success": False,
+                "error": self._redact_text(e),
+                "filename": None,
+                "file_path": None,
+                "file_size": 0,
+                "url": None,
+            }
 
     @allure.step("下载到指定路径")
     def download_to(self, save_path: str, timeout: int = 60000) -> dict:
@@ -669,9 +680,11 @@ class InventoryExportPage(BasePage):
                         disposition = api_response.headers.get("content-disposition", "")
                         filename_match = re.search(r"filename\*?=(?:UTF-8''|[\"']?)([^;\"']+)", disposition, re.I)
                         filename = self._safe_artifact_name(
-                            unquote(filename_match.group(1))
-                            if filename_match
-                            else os.path.basename(download_url.split("?", 1)[0]) or target_path.name,
+                            (
+                                unquote(filename_match.group(1))
+                                if filename_match
+                                else os.path.basename(download_url.split("?", 1)[0]) or target_path.name
+                            ),
                             default=target_path.name,
                         )
                         with target_path.open("wb") as export_file:
@@ -709,8 +722,7 @@ class InventoryExportPage(BasePage):
             self.page.remove_listener("response", capture_file_response)
 
     def _get_export_page_state(self) -> dict:
-        return self.page.evaluate(
-            """
+        return self.page.evaluate("""
             () => ({
                 url: location.href,
                 sku_count: document.querySelectorAll('.text.item').length,
@@ -744,26 +756,37 @@ class InventoryExportPage(BasePage):
                     return null;
                 })()
             })
-            """
-        )
+            """)
 
     def _download_inventory_export_via_api(self, save_path: str, timeout: int) -> dict:
         """使用当前登录态调用库存 SKU 实时导出接口，兜底验证真实导出链路。"""
         try:
             origin_match = re.match(r"^https?://[^/]+", self.page.url)
             if not origin_match:
-                return {"success": False, "error": "无法识别导出页域名", "filename": None, "file_path": None, "file_size": 0, "url": None}
+                return {
+                    "success": False,
+                    "error": "无法识别导出页域名",
+                    "filename": None,
+                    "file_path": None,
+                    "file_size": 0,
+                    "url": None,
+                }
             origin = self._validate_same_origin_url(origin_match.group(0), purpose="导出页域名")
             api_base = self._get_inventory_api_base(origin)
-            item_ids = self.page.evaluate(
-                """
+            item_ids = self.page.evaluate("""
                 () => Array.from(document.querySelectorAll('.el-col-5 .text.item'))
                     .map(item => (item.textContent || '').trim())
                     .filter(Boolean)
-                """
-            )
+                """)
             if not item_ids:
-                return {"success": False, "error": "导出页未读取到 SKU 列表", "filename": None, "file_path": None, "file_size": 0, "url": None}
+                return {
+                    "success": False,
+                    "error": "导出页未读取到 SKU 列表",
+                    "filename": None,
+                    "file_path": None,
+                    "file_size": 0,
+                    "url": None,
+                }
             if len(item_ids) > 20:
                 logger.info("实时导出接口兜底按当前页验证，SKU 数量由 {} 缩小到 20", len(item_ids))
                 item_ids = item_ids[:20]
@@ -809,13 +832,11 @@ class InventoryExportPage(BasePage):
             for group_name in ("OmsInventory", "OmsLocation"):
                 for column in data.get(group_name, []) or []:
                     check_columns.append(column)
-            selected_labels = self.page.evaluate(
-                """
+            selected_labels = self.page.evaluate("""
                 () => Array.from(document.querySelectorAll('.tag_item'))
                     .map(tag => (tag.textContent || '').replace(/^\\s*\\d+\\s*/, '').trim())
                     .filter(Boolean)
-                """
-            )
+                """)
             if selected_labels and len(selected_labels) < len(check_columns):
                 selected_text = "\n".join(selected_labels)
                 filtered_columns = [
@@ -824,7 +845,14 @@ class InventoryExportPage(BasePage):
                 if filtered_columns:
                     check_columns = filtered_columns
             if not check_columns:
-                return {"success": False, "error": "导出字段接口未返回字段", "filename": None, "file_path": None, "file_size": 0, "url": None}
+                return {
+                    "success": False,
+                    "error": "导出字段接口未返回字段",
+                    "filename": None,
+                    "file_path": None,
+                    "file_size": 0,
+                    "url": None,
+                }
 
             export_response = self.page.context.request.post(
                 f"{api_base}/base/inventory/inventoryExport",
@@ -864,7 +892,14 @@ class InventoryExportPage(BasePage):
                 )
                 file_response = self.page.context.request.get(source_url, headers=headers, timeout=timeout)
                 if not file_response.ok:
-                    return {"success": False, "error": f"导出文件下载失败: {file_response.status}", "filename": None, "file_path": None, "file_size": 0, "url": source_url}
+                    return {
+                        "success": False,
+                        "error": f"导出文件下载失败: {file_response.status}",
+                        "filename": None,
+                        "file_path": None,
+                        "file_size": 0,
+                        "url": source_url,
+                    }
                 disposition = file_response.headers.get("content-disposition", "")
                 body = file_response.body()
 
@@ -892,16 +927,21 @@ class InventoryExportPage(BasePage):
             }
         except Exception as api_error:
             logger.warning("实时导出接口兜底失败: {}", api_error)
-            return {"success": False, "error": self._redact_text(api_error), "filename": None, "file_path": None, "file_size": 0, "url": None}
+            return {
+                "success": False,
+                "error": self._redact_text(api_error),
+                "filename": None,
+                "file_path": None,
+                "file_size": 0,
+                "url": None,
+            }
 
     def _get_inventory_api_base(self, origin: str) -> str:
-        api_urls = self.page.evaluate(
-            """
+        api_urls = self.page.evaluate("""
             () => Array.from(performance.getEntriesByType('resource'))
                 .map(entry => entry.name)
                 .filter(name => name.includes('/oms-admin/base/inventory/getExportColumnInfo'))
-            """
-        )
+            """)
         if api_urls:
             return api_urls[-1].split("/base/inventory/getExportColumnInfo", 1)[0]
         return self._validate_same_origin_url(f"{origin}/oms-api/oms-admin", purpose="库存 API URL")
