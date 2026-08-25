@@ -217,9 +217,9 @@ jobs:
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
       # Keep reportSyncQuery focused on the recent, bounded test data window.
-      # Query a broad recent window first, then let the regression test narrow
-      # to 15 minutes when the cursor/page budget is too dense to converge.
-      REPORT_SYNC_LOOKBACK_MINUTES: "60,15"
+      # Query a broad recent window first, then narrow to 15 minutes and use a
+      # five-minute safety window only when the test data is still too dense.
+      REPORT_SYNC_LOOKBACK_MINUTES: "60,15,5"
     strategy:
       matrix:
         include:

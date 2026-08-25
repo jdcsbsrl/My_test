@@ -14,7 +14,7 @@ from modules.auto_test.api.report_sync_query_api import (
 
 
 def _lookback_minutes() -> list[int]:
-    """Return adaptive windows, defaulting from one hour down to 15 minutes."""
+    """Return adaptive windows, defaulting from one hour down to five minutes."""
     raw_minutes = os.getenv("REPORT_SYNC_LOOKBACK_MINUTES", "").strip()
     if raw_minutes:
         values = []
@@ -27,7 +27,7 @@ def _lookback_minutes() -> list[int]:
                 continue
         if values:
             return values
-    return [60, 15]
+    return [60, 15, 5]
 
 
 def _update_after(minutes: int = 60) -> str:
