@@ -207,11 +207,6 @@ jobs:
     name: UI测试 (分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: code-quality
-    concurrency:
-      # Inventory shards share one backend data scope and must not overlap;
-      # unrelated sales/report shards keep running in parallel.
-      group: ui-test-${{ matrix.lane }}
-      cancel-in-progress: false
     timeout-minutes: 90
     env:
       TEST_ENV: test
@@ -229,37 +224,21 @@ jobs:
       matrix:
         include:
           - shard: 1
-            lane: sales-1
             test_files: "modules/auto_test/tests/test_login_regression.py modules/auto_test/tests/test_sku_search_regression.py"
           - shard: 2
-            lane: sales-2
             test_files: "modules/auto_test/tests/test_sales_export_simple.py modules/auto_test/tests/test_sales_order_export_sort.py"
           - shard: 3
-            lane: sales-3
             test_files: "modules/auto_test/tests/test_export_download.py modules/auto_test/tests/test_export_flow_precise.py"
           - shard: 4
-            lane: sales-4
             test_files: "modules/auto_test/tests/test_export_full_flow.py modules/auto_test/tests/test_export_system_order_no.py"
           - shard: 5
-            lane: inventory
-            test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py"
-          - shard: 6
-            lane: inventory
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k TestInventorySKUSearch"
-          - shard: 7
-            lane: inventory
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination\""
-          - shard: 8
-            lane: inventory
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
-          - shard: 9
-            lane: inventory
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
+            # Inventory pages share one backend data scope. Keep the complete
+            # inventory suite in one job so no matrix queue item is discarded
+            # by GitHub's one-running/one-pending concurrency semantics.
+            test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py modules/auto_test/tests/test_inventory_sku_system.py"
           - shard: 10
-            lane: sales-10
             test_files: "modules/auto_test/tests/test_sales_report_regression.py"
           - shard: 11
-            lane: report
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
       # Keep UI shards parallel, but cap shared TEST environment pressure.
