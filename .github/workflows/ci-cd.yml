@@ -231,20 +231,15 @@ jobs:
             test_files: "modules/auto_test/tests/test_export_download.py modules/auto_test/tests/test_export_flow_precise.py"
           - shard: 4
             test_files: "modules/auto_test/tests/test_export_full_flow.py modules/auto_test/tests/test_export_system_order_no.py"
-          - shard: 5
-            # Inventory pages share one backend data scope. Keep the complete
-            # inventory suite in one job so no matrix queue item is discarded
-            # by GitHub's one-running/one-pending concurrency semantics.
-            test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py modules/auto_test/tests/test_inventory_sku_system.py"
           - shard: 10
             test_files: "modules/auto_test/tests/test_sales_report_regression.py"
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
-      # Keep UI shards parallel, but cap shared TEST environment pressure.
-      # The shared route/API remains unstable with three simultaneous browser
-      # sessions, so two is the safe parallelism boundary observed in CI.
-      max-parallel: 2
+      # The test environment shares one login account and one backend data
+      # scope. Keep this lane single-threaded; two browsers can still race
+      # during login even when the matrix itself is otherwise healthy.
+      max-parallel: 1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -291,10 +286,80 @@ jobs:
           name: allure-results-ui-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
+
+  inventory-tests:
+    name: UI测试 (库存分片${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    # A separate job-level max-parallel is not a global lock. Start the
+    # inventory lane only after the sales/report UI lane has fully finished,
+    # so shared-account browser sessions never overlap across jobs.
+    needs: ui-tests
+    timeout-minutes: 90
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: "true"
+      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+    strategy:
+      matrix:
+        include:
+          - shard: 5
+            test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py"
+          - shard: 6
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k TestInventorySKUSearch"
+          - shard: 7
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination\""
+          - shard: 8
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
+          - shard: 9
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
+      fail-fast: false
+      # Inventory shards share one backend data scope. Run them one at a time
+      # without a concurrency group, so GitHub does not discard queued shards.
+      max-parallel: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('pyproject.toml') }}
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+      - name: Run inventory UI tests (shard ${{ matrix.shard }})
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
+          pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Scan inventory UI test artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+      - name: Upload inventory UI test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-ui-shard-${{ matrix.shard }}
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
   report:
     name: 生成测试报告
     runs-on: ubuntu-latest
-    needs: [security-scan, unit-tests, integration-tests, ui-tests]
+    needs: [security-scan, unit-tests, integration-tests, ui-tests, inventory-tests]
     if: always()
     timeout-minutes: 15
     steps:

@@ -3,6 +3,7 @@ import pytest
 from modules.auto_test.api.report_sync_query_api import (
     CursorPaginationLimitExceeded,
     CursorPaginationStalled,
+    ReportSyncQueryBusinessError,
     ReportSyncQueryAPI,
 )
 
@@ -64,3 +65,10 @@ def test_query_all_rejects_repeated_page_even_when_cursor_changes():
 
     with pytest.raises(CursorPaginationStalled, match="duplicate page"):
         ReportSyncQueryAPI(session, "https://example.test").query_all({})
+
+
+def test_query_page_exposes_business_error_for_adaptive_window_fallback():
+    session = FakeSession([{"code": 500, "msg": "内部服务器错误", "data": None}])
+
+    with pytest.raises(ReportSyncQueryBusinessError, match="内部服务器错误"):
+        ReportSyncQueryAPI(session, "https://example.test").query_page({"updateAfter": "x"})

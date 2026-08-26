@@ -383,23 +383,35 @@ class SalesOrderPage(BasePage):
         trigger.click()
         search_button = self.page.get_by_role("button", name="搜索", exact=True)
         search_button.wait_for(state="visible", timeout=10000)
-        search_requests: list[str] = []
+        search_requests: list[dict[str, str]] = []
 
         def record_order_request(request: Any) -> None:
-            if request.method == "POST" and "batchListNew" in request.url:
-                search_requests.append(request.post_data or "")
+            url = str(request.url or "")
+            if "batchListNew" in url or "/sales/order/" in url:
+                search_requests.append(
+                    {
+                        "method": str(request.method or ""),
+                        "url": url,
+                        "payload": str(request.post_data or ""),
+                    }
+                )
 
         self.page.on("request", record_order_request)
         try:
             search_button.click()
             self.wait_for_loading_complete(timeout=60000)
+            self.wait_for_table_data(timeout=60000)
             self.page.wait_for_timeout(500)
         finally:
             self.page.remove_listener("request", record_order_request)
 
-        matching_requests = [payload for payload in search_requests if store_id in payload]
+        matching_requests = [
+            request
+            for request in search_requests
+            if store_id in request["payload"] or store_id in request["url"]
+        ]
         if not matching_requests:
-            payload = search_requests[-1] if search_requests else "<未捕获 batchListNew 请求>"
+            payload = search_requests[-1] if search_requests else "<未捕获销售订单列表请求>"
             raise AssertionError(
                 "销售订单店铺筛选未传递期望的 storeId: " f"name={store_name}, expected_id={store_id}, request={payload}"
             )

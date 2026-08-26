@@ -140,16 +140,21 @@ class BasePage:
         page_name: str,
         initial_timeout: int = 30000,
         retry_timeout: int = 45000,
+        max_route_retries: int = 1,
     ) -> None:
-        """Wait for a route's business controls and retry one failed bootstrap.
+        """Wait for a route's business controls with bounded route retries.
 
         DOMContentLoaded only proves that the application shell arrived. SPA
         routes can still be waiting for their component bundle or data request,
         so callers must provide controls that are unique to the business page.
+        Retries are deliberately bounded and only repeat the route bootstrap;
+        they never turn a final timeout into a passing test.
         """
         selector = ", ".join(item.strip() for item in selectors if item.strip())
         if not selector:
             raise ValueError(f"{page_name} business-ready selectors cannot be empty")
+        if max_route_retries < 0:
+            raise ValueError("max_route_retries cannot be negative")
         ready_locator = self.page.locator(selector).first
         self.wait_for_load_state("domcontentloaded")
         try:
@@ -166,15 +171,34 @@ class BasePage:
                 self.take_screenshot(f"{page_name}_bootstrap_timeout")
             except Exception as screenshot_error:
                 logger.debug("Unable to capture {} bootstrap screenshot: {}", page_name, screenshot_error)
-            try:
-                self.page.reload(wait_until="domcontentloaded", timeout=60000)
-                ready_locator.wait_for(state="visible", timeout=retry_timeout)
-            except Exception as retry_error:
-                raise PlaywrightTimeoutError(
-                    f"{page_name} business controls were not ready after initial wait and one reload"
-                ) from retry_error
-            logger.info("{} business controls became ready after one route retry", page_name)
-            return
+            last_error: Exception | None = None
+            for retry_index in range(1, max_route_retries + 1):
+                try:
+                    self.page.reload(wait_until="domcontentloaded", timeout=60000)
+                    ready_locator.wait_for(state="visible", timeout=retry_timeout)
+                    logger.info(
+                        "{} business controls became ready after route retry {}/{}",
+                        page_name,
+                        retry_index,
+                        max_route_retries,
+                    )
+                    return
+                except Exception as retry_error:
+                    last_error = retry_error
+                    if retry_index < max_route_retries:
+                        logger.warning(
+                            "{} business controls still unavailable after route retry {}/{}; "
+                            "retrying once more: url={}, title={}",
+                            page_name,
+                            retry_index,
+                            max_route_retries,
+                            self._redact_url(self.page.url),
+                            self._redact_text(self.page.title()),
+                        )
+            raise PlaywrightTimeoutError(
+                f"{page_name} business controls were not ready after initial wait and "
+                f"{max_route_retries} route retries"
+            ) from last_error
         logger.info("{} business controls are ready", page_name)
 
     @allure.step("Click element: {selector}")

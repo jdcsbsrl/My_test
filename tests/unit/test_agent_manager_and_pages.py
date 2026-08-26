@@ -267,6 +267,30 @@ class TestBaseAndExportPage:
         assert calls["count"] == 2
         assert ("reload", "domcontentloaded", 60000) in page.calls
 
+    def test_wait_for_business_ready_supports_bounded_second_route_retry(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        locator = FakeLocator()
+        calls = {"count": 0}
+
+        def wait_for(timeout=0, state=None):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise base_page_module.PlaywrightTimeoutError("not ready")
+
+        locator.wait_for = wait_for
+        page.locators['button:visible:has-text("搜索")'] = locator
+        base = BasePage(page)
+
+        base.wait_for_business_ready(
+            ['button:visible:has-text("搜索")'],
+            page_name="库存SKU页面",
+            max_route_retries=2,
+        )
+
+        assert calls["count"] == 3
+        assert page.calls.count(("reload", "domcontentloaded", 60000)) == 2
+
     def test_sales_export_payload_business_error_includes_trace_id(self):
         result = SalesOrderExportPage._business_error_from_export_payload(
             {"code": 500, "message": "未知异常，请联系IT。tlogtraceid = abc-123", "data": None},

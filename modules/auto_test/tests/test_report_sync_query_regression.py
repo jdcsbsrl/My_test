@@ -9,6 +9,7 @@ import pytest
 
 from modules.auto_test.api.report_sync_query_api import (
     CursorPaginationError,
+    ReportSyncQueryBusinessError,
     ReportSyncQueryAPI,
 )
 
@@ -45,6 +46,9 @@ def _orders_with_adaptive_window(api: ReportSyncQueryAPI, payload: dict) -> tupl
             orders = api.query_all({**payload, "updateAfter": update_after}, max_pages=page_budget)
         except CursorPaginationError as exc:
             attempts.append(f"{minutes}m=分页未收敛({exc})")
+            continue
+        except ReportSyncQueryBusinessError as exc:
+            attempts.append(f"{minutes}m=接口业务失败({exc})")
             continue
         attempts.append(f"{minutes}m={len(orders)}")
         if orders:

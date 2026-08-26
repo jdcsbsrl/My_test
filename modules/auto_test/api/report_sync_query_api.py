@@ -19,6 +19,10 @@ class CursorPaginationStalled(CursorPaginationError):
     """Raised when cursor pagination repeats or returns no forward progress."""
 
 
+class ReportSyncQueryBusinessError(AssertionError):
+    """Raised when reportSyncQuery returns a business-level error response."""
+
+
 class ReportSyncQueryAPI:
     MAX_PAGES = 100
     REPORT = "/oms-admin/sales/order/reportSyncQuery"
@@ -48,7 +52,7 @@ class ReportSyncQueryAPI:
         body = self.post(self.REPORT, payload)
         code = body.get("code")
         if code not in (None, 0, "0", 200, "200"):
-            raise AssertionError(f"reportSyncQuery business error: {body}")
+            raise ReportSyncQueryBusinessError(f"reportSyncQuery business error: {body}")
         envelope = self.envelope(body)
         data = envelope.get("data")
         assert isinstance(data, list), f"response data must be a list: {body}"

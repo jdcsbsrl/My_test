@@ -28,6 +28,10 @@ class InventorySKUPage(BasePage):
                 'input[placeholder*="产品名称"]:visible',
             ],
             page_name="库存SKU页面",
+            # The inventory route intermittently mounts after its first
+            # reload in the shared test environment. Keep recovery bounded;
+            # a persistent outage still fails the test with the final error.
+            max_route_retries=2,
         )
         logger.info("导航到库存SKU页面")
 
