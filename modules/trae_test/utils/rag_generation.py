@@ -49,8 +49,7 @@ class GenerationEvalResult:
 class RAGCaseGenerator(Protocol):
     provider_name: str
 
-    def generate_case(self, query: str) -> dict[str, Any]:
-        ...
+    def generate_case(self, query: str) -> dict[str, Any]: ...
 
 
 class RAGGenerationProvider(str, Enum):
@@ -208,7 +207,8 @@ class SelfHostedLLMRAGCaseGenerator:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            # 构造器已拒绝无主机和非本地/内网端点，因此 file: 等方案无法到达此处。
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # nosec B310
                 raw = response.read().decode("utf-8")
         except urllib.error.URLError as exc:
             raise RuntimeError(f"self-hosted LLM request failed: {exc}") from exc
@@ -295,9 +295,7 @@ class RAGGenerationEvaluator:
         score_threshold: float = QUALITY_SCORE_GATE,
     ) -> None:
         self.generator = generator or LocalRuleRAGCaseGenerator()
-        self.audit_gateway = audit_gateway or AuditGateway(
-            AuditConfig(interactive_mode=False, auto_approve=True)
-        )
+        self.audit_gateway = audit_gateway or AuditGateway(AuditConfig(interactive_mode=False, auto_approve=True))
         self.score_engine = score_engine or TestCaseScoreEngine()
         self.point_threshold = point_threshold
         # 允许调用方传入更高门槛，但不得降低项目最终交付门槛。
@@ -315,6 +313,7 @@ class RAGGenerationEvaluator:
         optimized_score = original_score
         optimization_attempts = 0
         from .test_case_strategy import TestCaseOptimizer
+
         optimizer = TestCaseOptimizer(self.score_engine)
         while optimized_score < self.score_threshold and optimization_attempts < 3:
             optimizer.optimize(case, target_score=self.score_threshold)
@@ -338,11 +337,7 @@ class RAGGenerationEvaluator:
             audit_errors = [{"code": "AUDIT_BLOCKED", "message": str(exc)}]
             audit_warnings = []
         matched, point_hit_rate = case_contains_points(case, expected_points)
-        passed = (
-            audit_passed
-            and final_score >= self.score_threshold
-            and point_hit_rate >= self.point_threshold
-        )
+        passed = audit_passed and final_score >= self.score_threshold and point_hit_rate >= self.point_threshold
         case["最终审核通过"] = passed
         case["用例状态"] = "正常"
         case["needs_human_review"] = not passed

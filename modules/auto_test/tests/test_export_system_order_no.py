@@ -51,9 +51,9 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
 
     selected_count = facade.order_page.select_first_orders(3)
     print(f"Selected {selected_count} orders")
-    assert selected_count == min(3, len(order_numbers)), (
-        f"实际选中{selected_count}条，期望选中{min(3, len(order_numbers))}条"
-    )
+    assert selected_count == min(
+        3, len(order_numbers)
+    ), f"实际选中{selected_count}条，期望选中{min(3, len(order_numbers))}条"
 
     print("\n" + "=" * 80)
     print("Step 4: Navigate to export page directly")
@@ -69,9 +69,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     base = base.rstrip("/")
     if not base:
         raise RuntimeError("当前环境 UI base_url 未设置，请检查 configs/uat.yaml 或对应环境变量")
-    export_url = (
-        f"{base}/sales/order/exportPage?t={int(time.time()*1000)}&orderNo={order_param}"
-    )
+    export_url = f"{base}/sales/order/exportPage?t={int(time.time()*1000)}&orderNo={order_param}"
     print("Export URL: same-origin export route reached")
 
     export_page = SalesOrderExportPage(page)
@@ -91,8 +89,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     print("Step 6: Check current field selection and ensure 系统单号 is checked")
     print("=" * 80)
 
-    field_status = page.evaluate(
-        """
+    field_status = page.evaluate("""
         () => {
             const labels = document.querySelectorAll('.el-checkbox__label');
             const result = [];
@@ -109,8 +106,7 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
             }
             return result;
         }
-    """
-    )
+    """)
 
     print(f"\nTotal fields: {len(field_status)}")
     print("\nFirst 15 fields:")
@@ -180,9 +176,9 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
     print(f"Export system order numbers: {len(export_sys_nos)} found")
     expected_set = set(order_numbers[:3])
     actual_set = set(export_sys_nos)
-    assert actual_set == expected_set, (
-        f"导出系统单号集合不一致: expected={sorted(expected_set)}, actual={sorted(actual_set)}"
-    )
+    assert (
+        actual_set == expected_set
+    ), f"导出系统单号集合不一致: expected={sorted(expected_set)}, actual={sorted(actual_set)}"
     wb.close()
     print("\n" + "=" * 80)
     print("Test completed")

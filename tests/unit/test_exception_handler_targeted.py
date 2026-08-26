@@ -18,7 +18,6 @@ from modules.trae_test.orchestrator.exception_handler import (
     WorkflowExecutionException,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -39,7 +38,9 @@ def test_agent_exception_to_dict_and_specialized_details():
 def test_context_rich_exception_constructors():
     audit_result = SimpleNamespace(to_dict=lambda: {"passed": False})
     audit = AuditFailedException("audit failed", audit_result=audit_result)
-    retries = MaxRetriesExceededException("retry failed", max_retries=2, total_attempts=3, last_exception=ValueError("x"))
+    retries = MaxRetriesExceededException(
+        "retry failed", max_retries=2, total_attempts=3, last_exception=ValueError("x")
+    )
     workflow = WorkflowExecutionException("workflow failed", workflow_id="wf-1")
     missing = AgentNotFoundException("case-agent")
     validation = ValidationException("invalid", field="name")

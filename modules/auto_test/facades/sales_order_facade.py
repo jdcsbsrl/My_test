@@ -43,8 +43,7 @@ class SalesOrderFacade:
     @allure.step("完整流程：点击搜索按钮")
     def click_search(self) -> None:
         """点击搜索按钮获取订单列表"""
-        self.page.evaluate(
-            """
+        self.page.evaluate("""
             () => {
                 const buttons = document.querySelectorAll('button');
                 for (const btn of buttons) {
@@ -55,8 +54,7 @@ class SalesOrderFacade:
                 }
                 return null;
             }
-        """
-        )
+        """)
         self.order_page.wait_for_table_data()
         logger.info("搜索完成")
 
@@ -72,8 +70,7 @@ class SalesOrderFacade:
         """设置分页大小"""
         start_time = time.time()
         try:
-            self.page.evaluate(
-                f"""() => {{
+            self.page.evaluate(f"""() => {{
                 const selects = document.querySelectorAll('.el-select');
                 for (let i = 0; i < selects.length; i++) {{
                     const text = selects[i].innerText.trim();
@@ -91,8 +88,7 @@ class SalesOrderFacade:
                         break;
                     }}
                 }}
-            }}"""
-            )
+            }}""")
             self.order_page.wait_for_loading_complete(timeout=30000)
             self.order_page.wait_for_order_rows_ready(timeout=30000)
             elapsed = time.time() - start_time

@@ -452,9 +452,7 @@ class KnowledgeBaseManager:
                 for fr in verification_result.get("file_results", [])
             ],
             "errors": [
-                fr.get("error", "")
-                for fr in verification_result.get("file_results", [])
-                if not fr.get("passed", True)
+                fr.get("error", "") for fr in verification_result.get("file_results", []) if not fr.get("passed", True)
             ],
         }
 
@@ -793,7 +791,14 @@ def main():
             print_index_result(result["index"])
         if result.get("vector"):
             print_vector_result(result["vector"])
-        exit_code = 0 if all(not item or item.get("success", True) for item in (result.get("split"), result.get("index"), result.get("vector"))) else 1
+        exit_code = (
+            0
+            if all(
+                not item or item.get("success", True)
+                for item in (result.get("split"), result.get("index"), result.get("vector"))
+            )
+            else 1
+        )
     elif args.command == "verify":
         result = manager.verify_file(args.title)
         print_verify_result(result)

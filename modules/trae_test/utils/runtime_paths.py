@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 _PROJECT_MARKERS = ("AGENTS.md", ".git")
 RUNTIME_KINDS = frozenset({"cache", "downloads", "logs", "reports", "scripts", "sheet_build", "uploads"})
 

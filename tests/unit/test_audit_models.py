@@ -19,9 +19,7 @@ class TestAuditIssue:
         assert issue.confidence == 0.95
 
     def test_create_warning_issue(self):
-        issue = AuditIssue(
-            severity="warning", rule_id="WARN_001", category="style", message="建议优化"
-        )
+        issue = AuditIssue(severity="warning", rule_id="WARN_001", category="style", message="建议优化")
         assert issue.severity == "warning"
         assert issue.location == ""
         assert issue.fix_hint is None
@@ -48,11 +46,7 @@ class TestAuditResult:
 
     def test_errors_property_from_issues(self):
         result = AuditResult()
-        result.issues.append(
-            AuditIssue(
-                severity="error", rule_id="ERR1", category="test", message="错误1"
-            )
-        )
+        result.issues.append(AuditIssue(severity="error", rule_id="ERR1", category="test", message="错误1"))
         result.issues.append(
             AuditIssue(
                 severity="warning",
@@ -71,11 +65,7 @@ class TestAuditResult:
     def test_passed_false_when_errors_exist(self):
         result = AuditResult()
         assert result.passed is True
-        result.issues.append(
-            AuditIssue(
-                severity="error", rule_id="ERR1", category="test", message="错误"
-            )
-        )
+        result.issues.append(AuditIssue(severity="error", rule_id="ERR1", category="test", message="错误"))
         # passed 自动从 issues 计算
         assert result.passed is False
 

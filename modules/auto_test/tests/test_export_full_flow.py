@@ -10,7 +10,6 @@ from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE, Sal
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
-
 @pytest.mark.regression
 @pytest.mark.ui
 class TestExportFullFlow:
@@ -41,9 +40,7 @@ class TestExportFullFlow:
             pytest.skip("当前销售订单页没有可用于实时导出的订单，跳过依赖 UAT 数据的导出全流程")
 
         order_param = quote(",".join(order_numbers))
-        export_page.navigate_to(
-            f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}"
-        )
+        export_page.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
         assert export_page.wait_for_export_page(), "Export page failed to load"
         logged_in_page.locator(".el-select:visible").first.wait_for(state="visible", timeout=30000)
 

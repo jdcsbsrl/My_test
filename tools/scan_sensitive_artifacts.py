@@ -14,7 +14,6 @@ import re
 import sys
 from pathlib import Path
 
-
 MAX_FILE_SIZE = 10 * 1024 * 1024
 TEXT_SUFFIXES = {
     ".json",
@@ -99,11 +98,7 @@ def _read_text(path: Path) -> str | None:
 
 
 def _environment_values() -> tuple[str, ...]:
-    values = {
-        value.strip()
-        for name, value in os.environ.items()
-        if name.upper() in SECRET_ENV_NAMES and value.strip()
-    }
+    values = {value.strip() for name, value in os.environ.items() if name.upper() in SECRET_ENV_NAMES and value.strip()}
     return tuple(value for value in values if len(value) >= 4)
 
 

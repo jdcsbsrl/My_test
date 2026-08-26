@@ -406,9 +406,7 @@ class SalesOrderPage(BasePage):
             self.page.remove_listener("request", record_order_request)
 
         matching_requests = [
-            request
-            for request in search_requests
-            if store_id in request["payload"] or store_id in request["url"]
+            request for request in search_requests if store_id in request["payload"] or store_id in request["url"]
         ]
         if not matching_requests:
             payload = search_requests[-1] if search_requests else "<未捕获销售订单列表请求>"

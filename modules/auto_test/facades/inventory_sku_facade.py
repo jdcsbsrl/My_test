@@ -205,7 +205,9 @@ class InventorySKUFacade:
         result_count = self.sku_page.get_result_count()
         selected_count = min(result_count, page_size) if result_count > 0 else 0
 
-        result = self.export_current_search(select_all_fields=select_all_fields, fields=fields, download_dir=download_dir)
+        result = self.export_current_search(
+            select_all_fields=select_all_fields, fields=fields, download_dir=download_dir
+        )
         result["page_size"] = page_size
         result["page_set_elapsed"] = page_set_time
         result["result_count"] = result_count

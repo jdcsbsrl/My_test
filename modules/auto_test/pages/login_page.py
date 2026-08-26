@@ -1,6 +1,5 @@
 import allure
 from playwright.sync_api import Page
-from urllib.parse import urlsplit
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -31,15 +30,31 @@ class LoginPage(BasePage):
             'input[id*="password"]',
         ]
         self._login_button_selectors = [
-            'button:has-text("鐧?褰?)', ".el-button--primary", ".el-button.el-button--primary",
-            "button.el-button--primary", '//button[contains(text(), "鐧?)]',
-            '//button[contains(text(), "褰?)]', 'button[type="button"].el-button--primary',
-            'button[type="button"]', 'button:has-text("鐧诲綍")',
-            '//button[contains(text(), "鐧诲綍")]', 'button[type="submit"]',
-            'input[type="submit"]', ".ant-btn-primary", ".login-btn", ".login-button",
-            '[data-testid="login-btn"]', '[data-test-id="login-btn"]', "#login-btn",
-            "#submit-btn", "form button", "form > button", ".btn-primary", ".submit-btn",
-            "button.submit", "button.primary",
+            'button:has-text("鐧?褰?)',
+            ".el-button--primary",
+            ".el-button.el-button--primary",
+            "button.el-button--primary",
+            '//button[contains(text(), "鐧?)]',
+            '//button[contains(text(), "褰?)]',
+            'button[type="button"].el-button--primary',
+            'button[type="button"]',
+            'button:has-text("鐧诲綍")',
+            '//button[contains(text(), "鐧诲綍")]',
+            'button[type="submit"]',
+            'input[type="submit"]',
+            ".ant-btn-primary",
+            ".login-btn",
+            ".login-button",
+            '[data-testid="login-btn"]',
+            '[data-test-id="login-btn"]',
+            "#login-btn",
+            "#submit-btn",
+            "form button",
+            "form > button",
+            ".btn-primary",
+            ".submit-btn",
+            "button.submit",
+            "button.primary",
         ]
 
     def has_username_input(self, timeout: int = 5000) -> bool:

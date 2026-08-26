@@ -11,7 +11,6 @@ from urllib.parse import urlsplit, urlunsplit
 import allure
 import requests
 
-
 _SENSITIVE_KEY_PATTERN = (
     r"password|passwd|token|secret|authorization|cookie|clientid|encrypt[-_]key|"
     r"app[-_]?(?:key|secret)|api[-_]?key|credential|username|phone|email|address|"
@@ -38,9 +37,7 @@ def _redact_url(value: str) -> str:
 def _redact_value(value):
     if isinstance(value, dict):
         return {
-            key: "[REDACTED]"
-            if re.search(_SENSITIVE_KEY_PATTERN, str(key), re.IGNORECASE)
-            else _redact_value(item)
+            key: "[REDACTED]" if re.search(_SENSITIVE_KEY_PATTERN, str(key), re.IGNORECASE) else _redact_value(item)
             for key, item in value.items()
         }
     if isinstance(value, list):

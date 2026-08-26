@@ -15,6 +15,7 @@ def write_core_docs(root: Path) -> None:
         "CODING_RULES.md",
         "PROJECT_ARTIFACT_PLACEMENT.md",
         "AGENT_RULES.md",
+        "VIRTUAL_ENV.md",
     ):
         (root / "docs" / relative_path).write_text(
             "---\ntitle: test\npurpose: test\nversion: 1.0.0\nupdated: 2026-08-18\nauthority: test\n---\n",
@@ -91,9 +92,7 @@ def test_checker_rejects_missing_frontmatter(tmp_path):
 def test_checker_rejects_incomplete_frontmatter(tmp_path):
     write_core_docs(tmp_path)
     (tmp_path / "AGENTS.md").write_text(valid_agents(), encoding="utf-8")
-    (tmp_path / "docs" / "AGENT_RULES.md").write_text(
-        "---\ntitle: rules\n---\n", encoding="utf-8"
-    )
+    (tmp_path / "docs" / "AGENT_RULES.md").write_text("---\ntitle: rules\n---\n", encoding="utf-8")
 
     result = DocConsistencyChecker(tmp_path).run()
 

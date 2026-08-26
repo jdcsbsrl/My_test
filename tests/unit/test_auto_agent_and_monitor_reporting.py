@@ -8,7 +8,6 @@ from modules.trae_test.orchestrator.config import OutputMode
 from modules.trae_test.orchestrator.monitor import LogLevel, WorkflowMonitor, WorkflowReporter
 from modules.trae_test.orchestrator.workflow_manager import StepStatus, StepType, Workflow, WorkflowStatus, WorkflowStep
 
-
 pytestmark = pytest.mark.unit
 
 

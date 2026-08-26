@@ -21,8 +21,8 @@ class SalesOrderExportPage(BasePage):
     EXPORT_READY_SELECTORS = (
         'input[placeholder*="选择导出模板"]:visible',
         'input[placeholder*="请选择导出模板"]:visible',
-        '.el-select:visible',
-        '.ant-select:visible',
+        ".el-select:visible",
+        ".ant-select:visible",
         'button:has-text("实时导出"):visible',
         'button:has-text("非实时导出"):visible',
     )

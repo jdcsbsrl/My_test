@@ -20,13 +20,13 @@ def test_db_cli_does_not_embed_database_credentials():
     source = Path("tools/db_redis_cli.py").read_text(encoding="utf-8")
 
     assert "postgresql://postgres:" not in source
-    assert "DATABASE_URL" not in source or "os.environ[\"DATABASE_URL\"]" not in source
+    assert "DATABASE_URL" not in source or 'os.environ["DATABASE_URL"]' not in source
 
 
 def test_project_auditor_root_is_derived_from_file_location():
     source = Path("tools/project_structure_auditor.py").read_text(encoding="utf-8")
 
-    assert 'D:\\Working\\test_erp' not in source
+    assert "D:\\Working\\test_erp" not in source
     assert "Path(__file__).resolve().parent.parent" in source
 
 
@@ -34,7 +34,7 @@ def test_knowledge_base_cli_uses_process_exit_status():
     source = Path("tools/kb_manager.py").read_text(encoding="utf-8")
 
     assert "raise SystemExit(main())" in source
-    assert "exit_code = 0 if result.get(\"success\", False) else 1" in source
+    assert 'exit_code = 0 if result.get("success", False) else 1' in source
 
 
 def test_database_migration_requires_exactly_one_migration_scope():

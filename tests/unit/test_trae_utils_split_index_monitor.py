@@ -9,7 +9,6 @@ from modules.trae_test.utils.file_splitter import JSONFileSplitter, split_file_c
 from modules.trae_test.utils.index_builder_v3 import IndexBuilderV3
 from modules.trae_test.utils.kb_monitor import FileSizeHook, KnowledgeBaseMonitor
 
-
 pytestmark = pytest.mark.unit
 
 

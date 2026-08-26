@@ -16,7 +16,6 @@ from modules.auto_test.facades.sales_order_facade import SalesOrderFacade
 from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
-
 ORDER_RE = re.compile(r"SO\d{14,}")
 DEFAULT_BASELINE = Path(".runtime/reports/sales_order_export_baseline.local.json")
 
@@ -225,17 +224,13 @@ def _collect_rich_order_numbers(page: Page, limit: int = 50) -> list[str]:
 def _available_templates(page: Page) -> list[str]:
     """Open the template selector and return all distinct non-empty options."""
     assert _open_template_select(page), "Template selector was not found"
-    page.locator(".el-select-dropdown__item:visible, .el-option:visible").first.wait_for(
-        state="visible", timeout=15000
-    )
-    values = page.evaluate(
-        """
+    page.locator(".el-select-dropdown__item:visible, .el-option:visible").first.wait_for(state="visible", timeout=15000)
+    values = page.evaluate("""
         () => Array.from(document.querySelectorAll('.el-select-dropdown__item, .el-option'))
             .filter(item => !item.classList.contains('is-disabled'))
             .map(item => (item.innerText || item.textContent || '').trim())
             .filter(Boolean)
-        """
-    )
+        """)
     templates: list[str] = []
     group_names = {"业务", "其他", "test", "未分类"}
     placeholders = {"请选择", "请选择导出模板", "Please select"}
@@ -253,7 +248,7 @@ def _open_template_select(page: Page) -> bool:
     selectors = [
         'div.el-select:has-text("请选择导出模板")',
         'div.el-select__selected-item:has-text("请选择导出模板")',
-        'div.el-select:has(.el-select__placeholder)',
+        "div.el-select:has(.el-select__placeholder)",
     ]
     for selector in selectors:
         try:
@@ -263,9 +258,7 @@ def _open_template_select(page: Page) -> bool:
                 return True
         except Exception:
             continue
-    return bool(
-        page.evaluate(
-            """
+    return bool(page.evaluate("""
             () => {
                 const fontNames = new Set(['微软雅黑', '宋体', 'Arial', 'Calibri']);
                 const selects = Array.from(document.querySelectorAll('.el-select'))
@@ -292,17 +285,13 @@ def _open_template_select(page: Page) -> bool:
                 }
                 return false;
             }
-            """
-        )
-    )
+            """))
 
 
 def _select_template(page: Page, template_name: str) -> bool:
     if not _open_template_select(page):
         return False
-    page.locator(".el-select-dropdown__item:visible, .el-option:visible").first.wait_for(
-        state="visible", timeout=15000
-    )
+    page.locator(".el-select-dropdown__item:visible, .el-option:visible").first.wait_for(state="visible", timeout=15000)
     return bool(
         page.evaluate(
             """

@@ -84,8 +84,10 @@ class HttpDriver:
         base = urlsplit(self.base_url)
         base_path = base.path.rstrip("/")
         candidate_path = posixpath.normpath(f"{base_path}/{parsed.path.lstrip('/')}")
-        if base_path and candidate_path not in {base_path, f"{base_path}/"} and not candidate_path.startswith(
-            f"{base_path}/"
+        if (
+            base_path
+            and candidate_path not in {base_path, f"{base_path}/"}
+            and not candidate_path.startswith(f"{base_path}/")
         ):
             raise ValueError(f"Endpoint escapes the configured base path: {endpoint!r}")
         return urlunsplit((base.scheme, base.netloc, candidate_path, parsed.query, ""))
@@ -124,9 +126,7 @@ class HttpDriver:
     def _redact(value: Any) -> Any:
         if isinstance(value, dict):
             return {
-                key: "[REDACTED]"
-                if HttpDriver._is_sensitive_key(key)
-                else HttpDriver._redact(item)
+                key: "[REDACTED]" if HttpDriver._is_sensitive_key(key) else HttpDriver._redact(item)
                 for key, item in value.items()
             }
         if isinstance(value, (list, tuple)):

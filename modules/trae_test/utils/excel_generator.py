@@ -86,7 +86,13 @@ class ExcelGenerator:
     MAX_FILE_SIZE = 10 * 1024 * 1024
 
     @classmethod
-    def generate(cls, cases: list[dict[str, Any]], output_path: str = "", requirement_name: str = "未命名需求", extra_fields: list[str] | None = None) -> str:
+    def generate(
+        cls,
+        cases: list[dict[str, Any]],
+        output_path: str = "",
+        requirement_name: str = "未命名需求",
+        extra_fields: list[str] | None = None,
+    ) -> str:
         """生成Excel文件（便捷方法）
 
         Args:
@@ -98,7 +104,12 @@ class ExcelGenerator:
         Returns:
             str: 生成的Excel文件路径
         """
-        return cls.generate_excel(test_cases=cases, output_path=output_path or None, requirement_name=requirement_name, extra_fields=extra_fields)
+        return cls.generate_excel(
+            test_cases=cases,
+            output_path=output_path or None,
+            requirement_name=requirement_name,
+            extra_fields=extra_fields,
+        )
 
     @classmethod
     def execute(cls, input_data=None, **kwargs):
@@ -139,7 +150,10 @@ class ExcelGenerator:
         extra_fields = kwargs.get("extra_fields")
 
         return cls.generate_excel(
-            test_cases=input_data, requirement_name=requirement_name, requirement_id=requirement_id, extra_fields=extra_fields
+            test_cases=input_data,
+            requirement_name=requirement_name,
+            requirement_id=requirement_id,
+            extra_fields=extra_fields,
         )
 
     @classmethod
@@ -242,7 +256,9 @@ class ExcelGenerator:
             ws.column_dimensions[col_letter].width = cls.COLUMN_WIDTHS.get(field, 20)
 
     @classmethod
-    def _write_case_row_with_style(cls, ws: Worksheet, row_num: int, case: dict[str, Any], extra_fields: list[str] | None = None) -> None:
+    def _write_case_row_with_style(
+        cls, ws: Worksheet, row_num: int, case: dict[str, Any], extra_fields: list[str] | None = None
+    ) -> None:
         """写入带样式的单行测试用例
 
         Args:
@@ -293,12 +309,16 @@ class ExcelGenerator:
                 pass
 
     @classmethod
-    def _generate_new(cls, test_cases: list[dict[str, str]], output_path: Path, extra_fields: list[str] | None = None) -> None:
+    def _generate_new(
+        cls, test_cases: list[dict[str, str]], output_path: Path, extra_fields: list[str] | None = None
+    ) -> None:
         """兼容旧接口，但不允许绕过固定模板来源。"""
         raise RuntimeError("禁止无模板生成Excel；必须使用fixtures/templates/测试用例模板.xlsx")
 
     @classmethod
-    def _write_test_cases_with_style(cls, ws: Worksheet, test_cases: list[dict[str, str]], extra_fields: list[str] | None = None) -> None:
+    def _write_test_cases_with_style(
+        cls, ws: Worksheet, test_cases: list[dict[str, str]], extra_fields: list[str] | None = None
+    ) -> None:
         """将测试用例写入工作表（带样式）
 
         Args:
@@ -430,7 +450,9 @@ class ExcelGenerator:
         return f"TC-{uuid.uuid4().hex[:8].upper()}"
 
     @classmethod
-    def _load_or_create_workbook(cls, output_path: Path | str, template_path: str | None = None, extra_fields: list[str] | None = None) -> tuple[Any, Any]:
+    def _load_or_create_workbook(
+        cls, output_path: Path | str, template_path: str | None = None, extra_fields: list[str] | None = None
+    ) -> tuple[Any, Any]:
         """加载模板或创建工作簿，返回 (wb, ws)
 
         Args:
@@ -465,7 +487,11 @@ class ExcelGenerator:
 
     @classmethod
     def export_cases(
-        cls, cases: list[dict[str, Any]], output_path: str, template_path: str = None, extra_fields: list[str] | None = None
+        cls,
+        cases: list[dict[str, Any]],
+        output_path: str,
+        template_path: str = None,
+        extra_fields: list[str] | None = None,
     ) -> dict[str, Any]:
         """导出测试用例到Excel（支持文件大小限制）
 
@@ -482,7 +508,10 @@ class ExcelGenerator:
             return {"success": False, "error": "无测试用例可导出"}
 
         try:
-            if template_path is not None and Path(template_path).resolve() != Path(get_default_template_path()).resolve():
+            if (
+                template_path is not None
+                and Path(template_path).resolve() != Path(get_default_template_path()).resolve()
+            ):
                 raise ValueError("正式Excel只允许使用唯一固定模板来源")
             cls._validate_test_cases(cases, extra_fields)
 
@@ -519,7 +548,9 @@ class ExcelGenerator:
             return {"success": False, "error": str(e)}
 
     @classmethod
-    def export_single_case(cls, case: dict[str, Any], output_path: str, extra_fields: list[str] | None = None) -> dict[str, Any]:
+    def export_single_case(
+        cls, case: dict[str, Any], output_path: str, extra_fields: list[str] | None = None
+    ) -> dict[str, Any]:
         """单例导出模式
 
         Args:
@@ -534,7 +565,12 @@ class ExcelGenerator:
 
     @classmethod
     def batch_export(
-        cls, cases: list[dict[str, Any]], output_dir: str, batch_size: int = 100, requirement_name: str = "未命名需求", extra_fields: list[str] | None = None
+        cls,
+        cases: list[dict[str, Any]],
+        output_dir: str,
+        batch_size: int = 100,
+        requirement_name: str = "未命名需求",
+        extra_fields: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """批量导出模式
 
@@ -602,11 +638,13 @@ class ExcelGenerator:
                 case_name = str(ws.cell(row=row, column=name_col + 1).value or "")
                 steps = str(ws.cell(row=row, column=steps_col + 1).value or "")
                 expected = str(ws.cell(row=row, column=expected_col + 1).value or "")
-                results.append({
-                    "case_name": case_name,
-                    "steps": steps.strip(),
-                    "expected_result": expected.strip(),
-                })
+                results.append(
+                    {
+                        "case_name": case_name,
+                        "steps": steps.strip(),
+                        "expected_result": expected.strip(),
+                    }
+                )
             return results
         finally:
             if wb is not None:

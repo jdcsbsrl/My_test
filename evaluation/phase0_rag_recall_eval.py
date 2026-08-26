@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
 from modules.trae_test.utils.rag_semantic import SemanticConfig
 
-
 DEFAULT_SAMPLES = Path("evaluation/phase0_rag_sales_samples.json")
 DEFAULT_JSON_OUT = Path(".runtime/reports/harness_metrics/phase0_rag_eval.json")
 DEFAULT_MD_OUT = Path(".runtime/reports/harness_metrics/phase0_rag_eval.md")

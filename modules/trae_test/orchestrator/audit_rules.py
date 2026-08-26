@@ -69,12 +69,12 @@ class RuleManager:
         当 YAML 配置文件不存在或加载失败时使用此默认值。
         """
         return {
-        "用例状态": {
-            "valid_values": ["正常"],
-            "default_value": "正常",
-            "required": True,
-            "error_message": "用例状态只能为'正常'，审核和评分状态不得写入该字段",
-        },
+            "用例状态": {
+                "valid_values": ["正常"],
+                "default_value": "正常",
+                "required": True,
+                "error_message": "用例状态只能为'正常'，审核和评分状态不得写入该字段",
+            },
             "用例等级": {
                 "valid_values": ["高", "中", "低"],
                 "default_value": "中",
@@ -214,10 +214,7 @@ class RuleManager:
     def _cleanup_expired_cache(self):
         """清理过期的缓存键"""
         now = time.time()
-        expired_keys = [
-            key for key, timestamp in self._cache_timestamps.items()
-            if now - timestamp >= self._cache_ttl
-        ]
+        expired_keys = [key for key, timestamp in self._cache_timestamps.items() if now - timestamp >= self._cache_ttl]
         for key in expired_keys:
             del self._cache[key]
             del self._cache_timestamps[key]
@@ -297,7 +294,9 @@ class RuleManager:
         if value in valid_values:
             return True, ""
 
-        error_message = field_rule.get("error_message", f"字段 '{field_name}' 的值 '{value}' 不在合法范围内: {valid_values}")
+        error_message = field_rule.get(
+            "error_message", f"字段 '{field_name}' 的值 '{value}' 不在合法范围内: {valid_values}"
+        )
         return False, error_message
 
     # ============================================================

@@ -49,8 +49,7 @@ def _validate_environment(configured_environment: object = None) -> str:
     environment = _runtime_environment()
     if not EnvironmentType.is_allowed(environment):
         raise EnvironmentSecurityError(
-            f"Redis access is disabled for environment {environment!r}; "
-            "only test, test_env and uat are allowed."
+            f"Redis access is disabled for environment {environment!r}; " "only test, test_env and uat are allowed."
         )
     if configured_environment is not None and str(configured_environment).strip().lower() != environment:
         raise EnvironmentSecurityError("Redis environment binding mismatch")

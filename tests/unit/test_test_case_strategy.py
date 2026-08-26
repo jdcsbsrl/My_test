@@ -7,6 +7,7 @@
 """
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from modules.trae_test.utils.test_case_strategy import (
@@ -192,9 +193,7 @@ class TestScoreEngine:
 
         assert len(scenarios) == 1
         assert scenarios[0].coverage_matrix["场景类型"] == "exception"
-        assert {"多对象", "多仓库", "多明细", "状态", "失败"}.issubset(
-            set(scenarios[0].coverage_dimensions)
-        )
+        assert {"多对象", "多仓库", "多明细", "状态", "失败"}.issubset(set(scenarios[0].coverage_dimensions))
 
     def test_strategy_limit_is_preserved_with_coverage_registration(self):
         strategy = TestCaseStrategy()
@@ -350,3 +349,13 @@ class TestRegenerationLoop:
             loop._release_lock()
         except Exception as e:
             pytest.fail(f"锁操作失败: {e}")
+
+    @patch("modules.trae_test.utils.test_case_strategy.runtime_dir")
+    def test_default_multi_process_lock_uses_runtime_cache(self, mock_runtime_dir, tmp_path):
+        mock_runtime_dir.return_value = tmp_path
+        loop = RegenerationLoopUnderTest(generator=Mock())
+
+        loop.enable_multi_process_support()
+
+        assert Path(loop._lock_file.name).parent == tmp_path / "locks"
+        loop._lock_file.close()

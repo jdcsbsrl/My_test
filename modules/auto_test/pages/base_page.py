@@ -236,7 +236,7 @@ class BasePage:
             logger.info(f"Typed into {selector}")
 
     def select_option(self, selector: str, value: str) -> None:
-        with allure.step(f"Select option from {selector}"):
+        with allure.step(f"Select option from {selector}"):  # nosec B608
             self.page.locator(selector).select_option(value)
             logger.info("Selected option")
 
@@ -365,8 +365,10 @@ class BasePage:
             是否成功点击
         """
         context = LocatorContext(selector=selectors[0] if selectors else None, selectors=selectors)
-        if len(selectors) > 1 and self.self_healing.enabled and self.self_healing.execute(
-            "try_click", context, lambda locator: locator.click(), timeout=timeout
+        if (
+            len(selectors) > 1
+            and self.self_healing.enabled
+            and self.self_healing.execute("try_click", context, lambda locator: locator.click(), timeout=timeout)
         ):
             return True
 
@@ -395,8 +397,10 @@ class BasePage:
         """
         with allure.step("Try fill with multiple selectors"):
             context = LocatorContext(selector=selectors[0] if selectors else None, selectors=selectors)
-            if len(selectors) > 1 and self.self_healing.enabled and self.self_healing.execute(
-                "try_fill", context, lambda locator: locator.fill(value), timeout=timeout
+            if (
+                len(selectors) > 1
+                and self.self_healing.enabled
+                and self.self_healing.execute("try_fill", context, lambda locator: locator.fill(value), timeout=timeout)
             ):
                 return True
 
@@ -429,8 +433,12 @@ class BasePage:
             names=name_variants,
             description=name_variants[0] if name_variants else role,
         )
-        if len(name_variants) > 1 and self.self_healing.enabled and self.self_healing.execute(
-            "try_click_by_role", context, lambda locator: locator.click(), timeout=timeout
+        if (
+            len(name_variants) > 1
+            and self.self_healing.enabled
+            and self.self_healing.execute(
+                "try_click_by_role", context, lambda locator: locator.click(), timeout=timeout
+            )
         ):
             return True
 

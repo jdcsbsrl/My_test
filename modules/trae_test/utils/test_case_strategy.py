@@ -14,10 +14,12 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from .business_rule_parser import RawScenario
 from .runtime_quality import attach_runtime_quality, read_runtime_quality
+from .runtime_paths import runtime_dir
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +100,6 @@ class TestCaseStrategy:
     @staticmethod
     def _get_config_path() -> str:
         """获取策略配置文件路径"""
-        from pathlib import Path
-
         return str(Path(__file__).resolve().parents[3] / "configs" / "strategy_config.yaml")
 
     def _load_keywords_from_config(self):
@@ -260,7 +260,11 @@ class TestCaseStrategy:
             scenario_type, ""
         )
 
-        test_point_clean = raw.test_point[:self._CASE_NAME_MAX_LENGTH] if len(raw.test_point) > self._CASE_NAME_MAX_LENGTH else raw.test_point
+        test_point_clean = (
+            raw.test_point[: self._CASE_NAME_MAX_LENGTH]
+            if len(raw.test_point) > self._CASE_NAME_MAX_LENGTH
+            else raw.test_point
+        )
 
         if raw.operation:
             return f"{raw.operation}-{test_point_clean}-{type_suffix}"
@@ -296,7 +300,7 @@ class TestCaseStrategy:
         if not preconditions:
             preconditions.append("系统已正常启动，用户已登录")
 
-        return preconditions[:self._MAX_PRECONDITIONS_COUNT]
+        return preconditions[: self._MAX_PRECONDITIONS_COUNT]
 
     def _generate_steps(self, raw: RawScenario, scenario_type: str) -> list[str]:
         """生成用例步骤（不带编号，由格式化器统一添加）"""
@@ -313,7 +317,7 @@ class TestCaseStrategy:
                         steps.append(step_info)
             if steps:
                 steps.append("验证全流程结果")
-            return steps[:self._MAX_STEPS_COUNT]
+            return steps[: self._MAX_STEPS_COUNT]
 
         if raw.test_point:
             tp = raw.test_point
@@ -903,11 +907,17 @@ class TestCaseRegenerationLoop:
     def enable_multi_process_support(self, lock_file_path: str | None = None) -> None:
         """启用多进程支持（创建文件锁）"""
         if lock_file_path is None:
-            lock_file_path = "/tmp/test_case_regeneration.lock"
+            lock_dir = runtime_dir("cache") / "locks"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            lock_path = lock_dir / "test_case_regeneration.lock"
+        else:
+            lock_path = Path(lock_file_path)
 
         try:
-            self._lock_file = open(lock_file_path, "w")
-            logger.info(f"Multi-process support enabled with lock file: {lock_file_path}")
+            if self._lock_file is not None:
+                self._lock_file.close()
+            self._lock_file = lock_path.open("w")
+            logger.info(f"Multi-process support enabled with lock file: {lock_path}")
         except Exception as e:
             logger.warning(f"Failed to enable multi-process support: {e}")
 

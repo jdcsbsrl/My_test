@@ -8,7 +8,6 @@ import pytest
 from modules.trae_test.utils import knowledge_retriever
 from modules.trae_test.utils.knowledge_retriever import API_VERSION, KnowledgeRetriever
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -259,12 +258,18 @@ def test_retrieve_modes_cache_db_fallback_and_batch(tmp_path, monkeypatch):
     retriever, _ = _retriever(tmp_path)
     calls = []
     monkeypatch.setattr(retriever, "search_module", lambda keyword: {"module": keyword})
-    monkeypatch.setattr(retriever, "search_business_rules", lambda keyword: [] if keyword == "needs-index" else [{"rule": keyword}])
+    monkeypatch.setattr(
+        retriever, "search_business_rules", lambda keyword: [] if keyword == "needs-index" else [{"rule": keyword}]
+    )
     monkeypatch.setattr(retriever, "search_requirements", lambda keyword="": [])
     monkeypatch.setattr(retriever, "search_by_inverted_index", lambda keyword: [{"chunk_id": keyword}])
-    monkeypatch.setattr(retriever, "_search_cache", lambda keyword, mode="auto": {"cached": True} if keyword == "cached" else None)
+    monkeypatch.setattr(
+        retriever, "_search_cache", lambda keyword, mode="auto": {"cached": True} if keyword == "cached" else None
+    )
     monkeypatch.setattr(retriever, "_search_db", lambda keyword: [{"db": True}] if keyword == "db" else None)
-    monkeypatch.setattr(retriever, "_set_search_cache", lambda keyword, result, mode="auto": calls.append((keyword, result)))
+    monkeypatch.setattr(
+        retriever, "_set_search_cache", lambda keyword, result, mode="auto": calls.append((keyword, result))
+    )
     monkeypatch.setattr(knowledge_retriever, "MODULE_NAMES", ["module"])
 
     assert retriever.retrieve("") is None
@@ -309,7 +314,9 @@ def test_inverted_index_loads_json_and_compressed_indexes(tmp_path, monkeypatch)
         },
     }
     (kb_dir / "index" / "inverted" / "inverted_index.json").write_text(json.dumps(index), encoding="utf-8")
-    monkeypatch.setattr(knowledge_retriever.PathManager, "get_chunks_dir", classmethod(lambda cls: str(kb_dir / "data" / "chunks")))
+    monkeypatch.setattr(
+        knowledge_retriever.PathManager, "get_chunks_dir", classmethod(lambda cls: str(kb_dir / "data" / "chunks"))
+    )
 
     results = retriever.search_by_inverted_index("ORDER", top_k=5)
 
@@ -409,7 +416,9 @@ def test_search_db_disabled_and_enabled_session_paths(tmp_path, monkeypatch):
 
         def query(self, model):
             if model is knowledge_retriever.KBRequirement:
-                return FakeQuery([SimpleNamespace(file=SimpleNamespace(title="file"), module="sales", title="req", data={"x": 1})])
+                return FakeQuery(
+                    [SimpleNamespace(file=SimpleNamespace(title="file"), module="sales", title="req", data={"x": 1})]
+                )
             return FakeQuery([])
 
         def close(self):

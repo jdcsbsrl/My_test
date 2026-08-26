@@ -249,8 +249,7 @@ class DynamicDataGenerator:
             "random_email": lambda: f"test_{random.randint(1000, 9999)}@example.com",
             "random_phone": lambda: f"1{random.randint(3, 9)}{''.join(random.choices(string.digits, k=9))}",
             "related_order_no": lambda: (
-                f"ORD{datetime.now().strftime('%Y%m%d')}"
-                f"{''.join(random.choices(string.digits, k=6))}"
+                f"ORD{datetime.now().strftime('%Y%m%d')}" f"{''.join(random.choices(string.digits, k=6))}"
             ),
             "random_int": lambda: random.randint(0, 999999),
             "random_float": lambda: round(random.uniform(0, 1000), 2),
@@ -776,8 +775,10 @@ class DatabaseDataGenerator(BaseDataGenerator):
         self.db_helper = None
 
     def _ensure_connection(self):
-        if not self.db_helper or not getattr(self.db_helper, "connection", None) or not getattr(
-            self.db_helper, "cursor", None
+        if (
+            not self.db_helper
+            or not getattr(self.db_helper, "connection", None)
+            or not getattr(self.db_helper, "cursor", None)
         ):
             self.db_helper = DBHelper().connect()
         return self.db_helper
@@ -819,7 +820,8 @@ class DatabaseDataGenerator(BaseDataGenerator):
 
         # 安全的查询构建
         db = self._ensure_connection()
-        query = f"SELECT {col_str} FROM {table_name}"
+        # 表名和列名已通过白名单/标识符校验，查询值仍使用参数绑定。
+        query = f"SELECT {col_str} FROM {table_name}"  # nosec B608
 
         params = []
         if filters:

@@ -54,9 +54,7 @@ class ExportPage(BasePage):
                 download.suggested_filename,
                 default=f"export_{uuid.uuid4().hex[:10]}.xlsx",
             )
-            download_path = self._runtime_artifact_path(
-                "downloads", f"{uuid.uuid4().hex[:10]}_{filename}"
-            )
+            download_path = self._runtime_artifact_path("downloads", f"{uuid.uuid4().hex[:10]}_{filename}")
             download_path.parent.mkdir(parents=True, exist_ok=True)
             download.save_as(str(download_path))
             file_size = download_path.stat().st_size if download_path.is_file() else 0

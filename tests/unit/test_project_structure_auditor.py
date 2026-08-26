@@ -42,7 +42,15 @@ def test_root_artifact_detection_rejects_log_file(tmp_path):
 
 
 def test_runtime_gitignore_check_allows_committed_keep_files(tmp_path, monkeypatch):
-    (tmp_path / ".gitignore").write_text(".runtime/**\nworkspace/**\ndata/private/**\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(
+        ".runtime/**\n"
+        "!.runtime/.keep\n"
+        "workspace/**\n"
+        "!workspace/.gitkeep\n"
+        "data/private/*\n"
+        "!data/private/.keep\n",
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         "tools.project_structure_auditor.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(stdout=".runtime/.keep\nworkspace/.gitkeep\ndata/private/.keep\n"),
@@ -50,6 +58,49 @@ def test_runtime_gitignore_check_allows_committed_keep_files(tmp_path, monkeypat
     auditor = auditor_for(tmp_path)
 
     auditor._check_runtime_gitignore()
+
+    assert not auditor.issues
+
+
+def test_runtime_gitignore_rejects_nested_keep_exceptions(tmp_path, monkeypatch):
+    (tmp_path / ".gitignore").write_text(
+        ".runtime/**\n"
+        "!.runtime/.keep\n"
+        "!.runtime/**/\n"
+        "!.runtime/**/.keep\n"
+        "workspace/**\n"
+        "!workspace/.gitkeep\n"
+        "data/private/*\n"
+        "!data/private/.keep\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "tools.project_structure_auditor.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(stdout=".runtime/.keep\nworkspace/.gitkeep\ndata/private/.keep\n"),
+    )
+    auditor = auditor_for(tmp_path)
+
+    auditor._check_runtime_gitignore()
+
+    assert any(issue["type"] == "unsafe_runtime_gitignore_rule" for issue in auditor.issues)
+
+
+def test_nonempty_unregistered_root_directory_is_blocking(tmp_path):
+    extra = tmp_path / "downloads"
+    extra.mkdir()
+    (extra / "report.xlsx").write_text("artifact", encoding="utf-8")
+    auditor = auditor_for(tmp_path)
+
+    auditor._check_root_directories()
+
+    assert any(issue["type"] == "unregistered_root_dir" and issue["path"] == "downloads" for issue in auditor.issues)
+
+
+def test_empty_unregistered_root_directory_is_ignored(tmp_path):
+    (tmp_path / "downloads").mkdir()
+    auditor = auditor_for(tmp_path)
+
+    auditor._check_root_directories()
 
     assert not auditor.issues
 
@@ -84,10 +135,7 @@ def test_required_dirs_reports_missing_assets(tmp_path):
     auditor = auditor_for(tmp_path)
     auditor._check_required_dirs()
 
-    assert any(
-        issue["type"] == "missing_required_dir" and issue["path"] == "assets"
-        for issue in auditor.issues
-    )
+    assert any(issue["type"] == "missing_required_dir" and issue["path"] == "assets" for issue in auditor.issues)
 
 
 def test_required_dirs_passes_when_git_skeleton_is_present(tmp_path):

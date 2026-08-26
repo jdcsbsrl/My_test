@@ -20,7 +20,6 @@ from .template_builder import LEGACY_RUNTIME_FIELDS, ensure_template
 from .test_case_strategy import TestCaseOptimizer, TestCaseScoreEngine, TestCaseStrategy
 from .coverage_matrix import CoverageMatrix, build_requirement_coverage_matrix
 
-
 QUALITY_SCORE_GATE = 85.0
 MAX_AUTO_OPTIMIZATION_ATTEMPTS = 3
 
@@ -136,7 +135,7 @@ class TestCaseGenerator:
         # ── 优先级计算 ───────────────────────────────────────
         priority_p = TestCaseStrategy.determine_priority_simple(
             test_point=keyword,
-            business_rule=knowledge_str[:TestCaseStrategy._CASE_NAME_MAX_LENGTH],
+            business_rule=knowledge_str[: TestCaseStrategy._CASE_NAME_MAX_LENGTH],
             constraint="",
             scenario_type=scenario_type,
         )
@@ -147,7 +146,7 @@ class TestCaseGenerator:
         # ── 步骤与预期结果智能生成 ────────────────────────────
         steps_str, expected_str = TestCaseStrategy.generate_case_content(
             test_point=keyword,
-            business_rule=knowledge_str[:TestCaseStrategy._BUSINESS_RULE_CONTENT_LENGTH],
+            business_rule=knowledge_str[: TestCaseStrategy._BUSINESS_RULE_CONTENT_LENGTH],
             scenario_type=scenario_type,
         )
         # ──────────────────────────────────────────────────────
@@ -220,7 +219,9 @@ class TestCaseGenerator:
         for top, second_map in hierarchy.items():
             top_norm = "".join(top.lower().split())
             if top_norm and top_norm in normalized:
-                candidates.append((1, f"{top} - {next(iter(second_map), '')} - {next(iter(second_map.values()), [''])[0]}"))
+                candidates.append(
+                    (1, f"{top} - {next(iter(second_map), '')} - {next(iter(second_map.values()), [''])[0]}")
+                )
             for second, thirds in (second_map or {}).items():
                 second_norm = "".join(second.lower().split())
                 if second_norm and second_norm in normalized:
@@ -259,14 +260,14 @@ class TestCaseGenerator:
             if (
                 runtime.final_audit_passed is not True
                 or runtime.needs_human_review
-                or float(runtime.final_score if runtime.final_score is not None else case.get("质量评分", 0) or 0) < QUALITY_SCORE_GATE
+                or float(runtime.final_score if runtime.final_score is not None else case.get("质量评分", 0) or 0)
+                < QUALITY_SCORE_GATE
                 or case.get("用例状态") != "正常"
             ):
                 not_ready.append(case.get("用例名称", "未命名用例"))
         if not_ready:
             raise RuntimeError(
-                f"最终审核未通过，禁止导出 {len(not_ready)} 条用例；"
-                f"评分门槛为{QUALITY_SCORE_GATE:g}分"
+                f"最终审核未通过，禁止导出 {len(not_ready)} 条用例；" f"评分门槛为{QUALITY_SCORE_GATE:g}分"
             )
 
         return self.excel_generator.generate(cases, output_path, extra_fields=extra_fields)
@@ -292,6 +293,7 @@ class TestCaseGenerator:
             导出文件的路径
         """
         from modules.trae_test.orchestrator.audit_gateway import AuditGateway
+
         cases = self.generate_cases(keyword, limit)
         score_engine = TestCaseScoreEngine()
         optimizer = TestCaseOptimizer(score_engine)

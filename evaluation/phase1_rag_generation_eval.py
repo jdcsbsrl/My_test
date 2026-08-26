@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from modules.trae_test.utils.rag_generation import RAGGenerationEvaluator, build_rag_case_generator
 
-
 DEFAULT_SAMPLES = Path("evaluation/phase1_rag_generation_samples.json")
 DEFAULT_JSON_OUT = Path(".runtime/reports/harness_metrics/phase1_rag_generation_eval.json")
 DEFAULT_MD_OUT = Path(".runtime/reports/harness_metrics/phase1_rag_generation_eval.md")

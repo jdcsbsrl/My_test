@@ -4,7 +4,6 @@ import pytest
 
 from modules.auto_test.drivers.browser_driver import BrowserDriver
 
-
 pytestmark = pytest.mark.unit
 
 

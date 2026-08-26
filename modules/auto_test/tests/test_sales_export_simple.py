@@ -1,6 +1,5 @@
 """Simple sales order export smoke test."""
 
-import os
 import time
 
 import pytest
@@ -8,7 +7,6 @@ from playwright.sync_api import Page
 
 from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE, SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
-
 
 
 @pytest.mark.regression

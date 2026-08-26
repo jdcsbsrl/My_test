@@ -12,7 +12,6 @@ from modules.auto_test.core.login_service import LoginService
 from modules.auto_test.core.secret_manager import SecretManager, _origin_from_api_base
 from modules.auto_test.core.token_manager import TokenInfo, TokenManager
 
-
 pytestmark = pytest.mark.unit
 
 

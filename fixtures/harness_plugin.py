@@ -71,11 +71,7 @@ def _run_id(config: pytest.Config | None = None) -> str:
     state = getattr(config, "_harness_state", None) if config is not None else None
     if isinstance(state, dict) and state.get("run_id"):
         return str(state["run_id"])
-    return _safe_runtime_component(
-        os.getenv("TEST_RUN_ID")
-        or os.getenv("PYTEST_XDIST_TESTRUNUID")
-        or "local"
-    )
+    return _safe_runtime_component(os.getenv("TEST_RUN_ID") or os.getenv("PYTEST_XDIST_TESTRUNUID") or "local")
 
 
 def _runtime_reports_dir(config: pytest.Config | None = None) -> Path:
@@ -117,9 +113,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "results": [],
         "metrics": None,
         "run_id": _safe_runtime_component(
-            os.getenv("TEST_RUN_ID")
-            or os.getenv("PYTEST_XDIST_TESTRUNUID")
-            or f"local-{uuid.uuid4().hex}"
+            os.getenv("TEST_RUN_ID") or os.getenv("PYTEST_XDIST_TESTRUNUID") or f"local-{uuid.uuid4().hex}"
         ),
     }
     state = _state(config)

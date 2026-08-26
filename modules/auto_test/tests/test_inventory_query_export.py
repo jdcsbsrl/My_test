@@ -9,7 +9,6 @@ from playwright.sync_api import Page
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.inventory_sku_page import InventorySKUPage
 
-
 SEARCH_TIMEOUT_SECONDS = InventorySKUPage.SEARCH_TIMEOUT_SECONDS
 
 
@@ -85,7 +84,9 @@ class TestInventoryQuery:
             sku_page.click_reset()
             sku_page.fill_sku_code(edge_case)
             response_time = sku_page.click_search()
-            assert response_time < SEARCH_TIMEOUT_SECONDS, f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
+            assert (
+                response_time < SEARCH_TIMEOUT_SECONDS
+            ), f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
             print(f"\n✅ 边缘输入 '{edge_case[:20]}...' 处理成功")
 
     def test_search_result_count(self, logged_in_page: Page) -> None:
@@ -233,9 +234,9 @@ class TestInventoryExport:
         print(f"   - 文件名: {download_result['filename']}")
         print(f"   - 文件路径: {download_result['file_path']}")
         print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
-        assert download_result["file_path"] and os.path.exists(download_result["file_path"]), (
-            f"导出文件不存在: {download_result['file_path']}"
-        )
+        assert download_result["file_path"] and os.path.exists(
+            download_result["file_path"]
+        ), f"导出文件不存在: {download_result['file_path']}"
 
     def test_export_with_empty_results_disabled(self, logged_in_page: Page) -> None:
         """Test that export is disabled when search returns no results."""

@@ -149,8 +149,10 @@ class TestTestCaseGenerator:
         generator = GeneratorUnderTest(retriever=mock_retriever)
         generator.excel_generator = mock_excel_generator
 
-        with patch("modules.trae_test.orchestrator.audit_gateway.AuditGateway") as gateway_cls, \
-             patch("modules.trae_test.utils.test_case_generator.TestCaseScoreEngine") as score_cls:
+        with (
+            patch("modules.trae_test.orchestrator.audit_gateway.AuditGateway") as gateway_cls,
+            patch("modules.trae_test.utils.test_case_generator.TestCaseScoreEngine") as score_cls,
+        ):
             gateway_cls.return_value.audit.return_value.passed = True
             gateway_cls.return_value.audit.return_value.errors = []
             score_cls.return_value.score.return_value = 90

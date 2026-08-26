@@ -4,7 +4,6 @@ import pytest
 
 from modules.auto_test.reporting import allure_http
 
-
 pytestmark = pytest.mark.unit
 
 

@@ -8,8 +8,7 @@ def test_convert_widdershins_markdown_to_business_rules(tmp_path: Path):
     source = tmp_path / "openapi.md"
     target = tmp_path / "knowledge.json"
     source.write_text(
-        "## 告警任务\n\nGET /api/tasks\n\n返回任务列表。\n\n"
-        "## 创建任务\n\nPOST /api/tasks\n\n创建一个任务。\n",
+        "## 告警任务\n\nGET /api/tasks\n\n返回任务列表。\n\n" "## 创建任务\n\nPOST /api/tasks\n\n创建一个任务。\n",
         encoding="utf-8",
     )
 

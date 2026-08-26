@@ -51,9 +51,7 @@ class BrowserDriver:
         # use the same executable. An explicit environment override still wins.
         repo_browsers = Path(__file__).resolve().parents[3] / "browsers"
         configured_browsers = (
-            Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"])
-            if os.getenv("PLAYWRIGHT_BROWSERS_PATH")
-            else None
+            Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]) if os.getenv("PLAYWRIGHT_BROWSERS_PATH") else None
         )
         if repo_browsers.is_dir() and (configured_browsers is None or not configured_browsers.is_dir()):
             os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(repo_browsers)

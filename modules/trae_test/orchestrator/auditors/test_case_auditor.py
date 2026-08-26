@@ -15,9 +15,15 @@ class TestCaseAuditor:
     MIN_STEP_COUNT = 3
     MIN_EXPECTED_COUNT = 2
     _POINT_PATTERN = re.compile(r"^\s*(?:\d+[\.、)]|[-*•])\s*.+")
-    _ACTION_PATTERN = re.compile(r"(点击|双击|选择|输入|填写|勾选|清空|打开|进入|切换|提交|保存|删除|查询|搜索|上传|下载|展开|收起|确认|取消|登录|退出|拖动|悬停)")
-    _OBJECT_PATTERN = re.compile(r"(页面|页|按钮|输入框|文本框|下拉框|选择框|复选框|单选框|表格|列表|弹窗|菜单|导航|标签|字段|列|链接|图标|区域|模块|订单|商品|客户|库存)")
-    _VAGUE_PATTERN = re.compile(r"^(?:执行(?:相关|对应)?操作|进入相关页面|检查结果|操作成功|符合预期|页面正常|系统正常|数据正确|验证成功)[。；;！! ]*$")
+    _ACTION_PATTERN = re.compile(
+        r"(点击|双击|选择|输入|填写|勾选|清空|打开|进入|切换|提交|保存|删除|查询|搜索|上传|下载|展开|收起|确认|取消|登录|退出|拖动|悬停)"
+    )
+    _OBJECT_PATTERN = re.compile(
+        r"(页面|页|按钮|输入框|文本框|下拉框|选择框|复选框|单选框|表格|列表|弹窗|菜单|导航|标签|字段|列|链接|图标|区域|模块|订单|商品|客户|库存)"
+    )
+    _VAGUE_PATTERN = re.compile(
+        r"^(?:执行(?:相关|对应)?操作|进入相关页面|检查结果|操作成功|符合预期|页面正常|系统正常|数据正确|验证成功)[。；;！! ]*$"
+    )
 
     # 标准测试用例字段（15字段）
     REQUIRED_FIELDS = list(ALL_FIELDS)
@@ -198,7 +204,9 @@ class TestCaseAuditor:
         matrix = context.get("coverage_matrix") or context.get("requirement_matrix") or []
         # 支持已有运行时 CoverageMatrix；不把运行时字段写入正式15列。
         if not matrix:
-            runtime_matrices = [case.get("_runtime_coverage_matrix") for case in test_cases if case.get("_runtime_coverage_matrix")]
+            runtime_matrices = [
+                case.get("_runtime_coverage_matrix") for case in test_cases if case.get("_runtime_coverage_matrix")
+            ]
             if runtime_matrices:
                 runtime = runtime_matrices[0] or {}
                 matrix = [{"id": rule, "priority": "P1"} for rule in runtime.get("business_rules", [])]
@@ -206,7 +214,9 @@ class TestCaseAuditor:
                     for item in matrix:
                         item["required_scenarios"] = list(runtime.get("normal_scenarios", []))
         if context.get("require_requirement_coverage") and not matrix:
-            self._business_error(result, "REQ_COVERAGE_MATRIX_MISSING", "已启用需求级审核，但未提供覆盖矩阵", "需求级覆盖")
+            self._business_error(
+                result, "REQ_COVERAGE_MATRIX_MISSING", "已启用需求级审核，但未提供覆盖矩阵", "需求级覆盖"
+            )
             return
         excluded_scope = context.get("excluded_scope") or context.get("excluded_scopes") or []
         if not matrix and not excluded_scope and not context.get("requires_rollback"):
@@ -220,46 +230,79 @@ class TestCaseAuditor:
 
         mapped = []
         for case in test_cases:
-            mapped.append({
-                "rules": values(case, "覆盖规则ID", "覆盖规则", "coverage_rule_ids"),
-                "scenarios": values(case, "场景类型", "场景标签", "scenario_type"),
-                "priority": values(case, "优先级", "priority"),
-                "rollback": values(case, "回滚标识", "是否回滚场景", "rollback")
-                or (set() if not any(k in case for k in ("回滚标识", "是否回滚场景", "rollback")) else {"否"}),
-                "text": " ".join(str(v) for v in case.values()),
-            })
+            mapped.append(
+                {
+                    "rules": values(case, "覆盖规则ID", "覆盖规则", "coverage_rule_ids"),
+                    "scenarios": values(case, "场景类型", "场景标签", "scenario_type"),
+                    "priority": values(case, "优先级", "priority"),
+                    "rollback": values(case, "回滚标识", "是否回滚场景", "rollback")
+                    or (set() if not any(k in case for k in ("回滚标识", "是否回滚场景", "rollback")) else {"否"}),
+                    "text": " ".join(str(v) for v in case.values()),
+                }
+            )
 
         covered_rule_ids = set().union(*(item["rules"] for item in mapped)) if mapped else set()
         valid_rules = []
         for rule in matrix:
             if not isinstance(rule, dict):
-                self._business_error(result, "REQ_COVERAGE_MATRIX_INVALID", "需求覆盖矩阵中的规则必须是对象，不能使用字符串或其他类型", "需求级覆盖")
+                self._business_error(
+                    result,
+                    "REQ_COVERAGE_MATRIX_INVALID",
+                    "需求覆盖矩阵中的规则必须是对象，不能使用字符串或其他类型",
+                    "需求级覆盖",
+                )
                 continue
             rule_id = str(rule.get("id") or rule.get("rule_id") or "").strip()
             if not rule_id:
-                self._business_error(result, "REQ_COVERAGE_MATRIX_INVALID", "需求覆盖矩阵规则缺少 id 或 rule_id", "需求级覆盖")
+                self._business_error(
+                    result, "REQ_COVERAGE_MATRIX_INVALID", "需求覆盖矩阵规则缺少 id 或 rule_id", "需求级覆盖"
+                )
                 continue
             valid_rules.append(rule)
             rule_cases = [item for item in mapped if rule_id in item["rules"]]
             if not rule_cases:
-                self._business_error(result, "REQ_COVERAGE_INCOMPLETE", f"需求规则 {rule_id} 没有对应测试用例覆盖", "需求级覆盖")
+                self._business_error(
+                    result, "REQ_COVERAGE_INCOMPLETE", f"需求规则 {rule_id} 没有对应测试用例覆盖", "需求级覆盖"
+                )
                 continue
-            required_scenarios = {str(v).strip() for v in (rule.get("required_scenarios") or rule.get("scenarios") or []) if str(v).strip()}
+            required_scenarios = {
+                str(v).strip()
+                for v in (rule.get("required_scenarios") or rule.get("scenarios") or [])
+                if str(v).strip()
+            }
             present_scenarios = set().union(*(item["scenarios"] for item in rule_cases))
             missing_scenarios = required_scenarios - present_scenarios
             if missing_scenarios:
-                code = "REQ_P0_SCENARIO_MISSING" if str(rule.get("priority", "")).upper() == "P0" else "REQ_SCENARIO_MISSING"
-                self._business_error(result, code, f"需求规则 {rule_id} 缺少场景覆盖：{', '.join(sorted(missing_scenarios))}", "需求级覆盖")
+                code = (
+                    "REQ_P0_SCENARIO_MISSING"
+                    if str(rule.get("priority", "")).upper() == "P0"
+                    else "REQ_SCENARIO_MISSING"
+                )
+                self._business_error(
+                    result,
+                    code,
+                    f"需求规则 {rule_id} 缺少场景覆盖：{', '.join(sorted(missing_scenarios))}",
+                    "需求级覆盖",
+                )
 
         if context.get("requires_rollback"):
-            has_rollback = any(item["rollback"] & {"是", "有", "true", "True", "回滚"} or "回滚" in item["text"] for item in mapped)
+            has_rollback = any(
+                item["rollback"] & {"是", "有", "true", "True", "回滚"} or "回滚" in item["text"] for item in mapped
+            )
             if not has_rollback:
-                self._business_error(result, "REQ_ROLLBACK_SCENARIO_MISSING", "需求涉及跨对象或跨模块变更，但未提供回滚场景", "需求级覆盖")
+                self._business_error(
+                    result,
+                    "REQ_ROLLBACK_SCENARIO_MISSING",
+                    "需求涉及跨对象或跨模块变更，但未提供回滚场景",
+                    "需求级覆盖",
+                )
 
         for excluded in excluded_scope:
             term = str(excluded).strip()
             if term and any(term.lower() in item["text"].lower() for item in mapped):
-                self._business_error(result, "REQ_SCOPE_BOUNDARY_VIOLATION", f"用例包含需求明确排除的范围：{term}", "需求级范围")
+                self._business_error(
+                    result, "REQ_SCOPE_BOUNDARY_VIOLATION", f"用例包含需求明确排除的范围：{term}", "需求级范围"
+                )
 
         if matrix:
             expected_rule_ids = {str(r.get("id") or r.get("rule_id")).strip() for r in valid_rules}
@@ -270,12 +313,21 @@ class TestCaseAuditor:
                 try:
                     threshold = float(threshold)
                 except (TypeError, ValueError):
-                    self._business_error(result, "REQ_COVERAGE_THRESHOLD_INVALID", "覆盖率门槛必须是0到1之间的数字", "需求级覆盖")
+                    self._business_error(
+                        result, "REQ_COVERAGE_THRESHOLD_INVALID", "覆盖率门槛必须是0到1之间的数字", "需求级覆盖"
+                    )
                 else:
                     if not 0 <= threshold <= 1:
-                        self._business_error(result, "REQ_COVERAGE_THRESHOLD_INVALID", "覆盖率门槛必须是0到1之间的数字", "需求级覆盖")
+                        self._business_error(
+                            result, "REQ_COVERAGE_THRESHOLD_INVALID", "覆盖率门槛必须是0到1之间的数字", "需求级覆盖"
+                        )
                     elif coverage < threshold:
-                        self._business_error(result, "REQ_COVERAGE_BELOW_THRESHOLD", f"需求规则覆盖率为{coverage:.0%}，低于要求的{threshold:.0%}", "需求级覆盖")
+                        self._business_error(
+                            result,
+                            "REQ_COVERAGE_BELOW_THRESHOLD",
+                            f"需求规则覆盖率为{coverage:.0%}，低于要求的{threshold:.0%}",
+                            "需求级覆盖",
+                        )
 
     @classmethod
     def _split_points(cls, value: object) -> list[str]:
@@ -300,14 +352,31 @@ class TestCaseAuditor:
         expected = self._split_points(case.get("预期结果", ""))
 
         if not preconditions:
-            self._business_error(result, "TC_PRECONDITIONS_REQUIRED", "前置条件必须分点描述，且至少包含2条可验证条件", case_location)
+            self._business_error(
+                result, "TC_PRECONDITIONS_REQUIRED", "前置条件必须分点描述，且至少包含2条可验证条件", case_location
+            )
         elif len(preconditions) < self.MIN_PRECONDITION_COUNT:
-            self._business_error(result, "TC_PRECONDITIONS_MIN_COUNT", f"前置条件至少需要{self.MIN_PRECONDITION_COUNT}条，当前为{len(preconditions)}条", case_location)
+            self._business_error(
+                result,
+                "TC_PRECONDITIONS_MIN_COUNT",
+                f"前置条件至少需要{self.MIN_PRECONDITION_COUNT}条，当前为{len(preconditions)}条",
+                case_location,
+            )
 
         if len(steps) < self.MIN_STEP_COUNT:
-            self._business_error(result, "TC_STEPS_MIN_COUNT", f"执行步骤至少需要{self.MIN_STEP_COUNT}条，当前为{len(steps)}条；每条必须独立分点", case_location)
+            self._business_error(
+                result,
+                "TC_STEPS_MIN_COUNT",
+                f"执行步骤至少需要{self.MIN_STEP_COUNT}条，当前为{len(steps)}条；每条必须独立分点",
+                case_location,
+            )
         if len(expected) < self.MIN_EXPECTED_COUNT:
-            self._business_error(result, "TC_EXPECTED_MIN_COUNT", f"预期结果至少需要{self.MIN_EXPECTED_COUNT}条，当前为{len(expected)}条；每条必须独立分点", case_location)
+            self._business_error(
+                result,
+                "TC_EXPECTED_MIN_COUNT",
+                f"预期结果至少需要{self.MIN_EXPECTED_COUNT}条，当前为{len(expected)}条；每条必须独立分点",
+                case_location,
+            )
 
         for field_name, points, rule_id in (
             ("前置条件", preconditions, "TC_PRECONDITION_VAGUE"),
@@ -316,19 +385,49 @@ class TestCaseAuditor:
         ):
             for point in points:
                 if self._VAGUE_PATTERN.match(point):
-                    self._business_error(result, rule_id, f"{field_name}内容过于粗糙，必须说明具体业务对象、动作或可观察结果：{point}", case_location)
+                    self._business_error(
+                        result,
+                        rule_id,
+                        f"{field_name}内容过于粗糙，必须说明具体业务对象、动作或可观察结果：{point}",
+                        case_location,
+                    )
 
         for step_number, step in enumerate(steps, start=1):
             if not self._ACTION_PATTERN.search(step):
-                self._business_error(result, "TC_STEP_ACTION_REQUIRED", f"第{step_number}步缺少明确操作动作，应描述点击、输入、选择、提交等具体动作：{step}", case_location)
+                self._business_error(
+                    result,
+                    "TC_STEP_ACTION_REQUIRED",
+                    f"第{step_number}步缺少明确操作动作，应描述点击、输入、选择、提交等具体动作：{step}",
+                    case_location,
+                )
             if not self._OBJECT_PATTERN.search(step):
-                self._business_error(result, "TC_STEP_PAGE_OBJECT_REQUIRED", f"第{step_number}步缺少页面对象，应明确页面、按钮、输入框、列表等操作对象：{step}", case_location)
-            if re.search(r"(输入|填写|选择|搜索|查询|上传)", step) and not re.search(r"[：:]|['\"]|“[^”]+”|\b\d+\b|\S+数据|测试", step):
-                self._business_error(result, "TC_STEP_DATA_REQUIRED", f"第{step_number}步包含数据操作但未给出具体测试数据：{step}", case_location)
+                self._business_error(
+                    result,
+                    "TC_STEP_PAGE_OBJECT_REQUIRED",
+                    f"第{step_number}步缺少页面对象，应明确页面、按钮、输入框、列表等操作对象：{step}",
+                    case_location,
+                )
+            if re.search(r"(输入|填写|选择|搜索|查询|上传)", step) and not re.search(
+                r"[：:]|['\"]|“[^”]+”|\b\d+\b|\S+数据|测试", step
+            ):
+                self._business_error(
+                    result,
+                    "TC_STEP_DATA_REQUIRED",
+                    f"第{step_number}步包含数据操作但未给出具体测试数据：{step}",
+                    case_location,
+                )
 
         for expected_number, expectation in enumerate(expected, start=1):
-            if not re.search(r"(打开|显示|提示|生成|保存|更新|变为|状态|数量|金额|订单号|记录|可见|不可见|成功|失败|阻止|禁止|校验|一致)", expectation):
-                self._business_error(result, "TC_EXPECTED_OBSERVABLE_REQUIRED", f"第{expected_number}条预期结果不可观察或验证，应描述页面、提示、状态、数据或记录变化：{expectation}", case_location)
+            if not re.search(
+                r"(打开|显示|提示|生成|保存|更新|变为|状态|数量|金额|订单号|记录|可见|不可见|成功|失败|阻止|禁止|校验|一致)",
+                expectation,
+            ):
+                self._business_error(
+                    result,
+                    "TC_EXPECTED_OBSERVABLE_REQUIRED",
+                    f"第{expected_number}条预期结果不可观察或验证，应描述页面、提示、状态、数据或记录变化：{expectation}",
+                    case_location,
+                )
 
         precondition_text = " ".join(preconditions)
         step_text = " ".join(steps)
@@ -336,7 +435,12 @@ class TestCaseAuditor:
             referenced_terms = set(re.findall(r"[“\"]([^”\"]+)[”\"]", step_text))
             missing_terms = [term for term in referenced_terms if term not in precondition_text and len(term) >= 2]
             if missing_terms:
-                self._business_error(result, "TC_PRECONDITION_STEP_INCONSISTENT", f"步骤引用的业务数据/对象未在前置条件中说明：{', '.join(missing_terms)}", case_location)
+                self._business_error(
+                    result,
+                    "TC_PRECONDITION_STEP_INCONSISTENT",
+                    f"步骤引用的业务数据/对象未在前置条件中说明：{', '.join(missing_terms)}",
+                    case_location,
+                )
 
     def _check_required_fields(self, case: dict, case_location: str, result: AuditResult):
         """检查必需字段完整性
@@ -353,9 +457,7 @@ class TestCaseAuditor:
                 missing_fields.append(field)
 
         if missing_fields:
-            result.add_error(
-                "TC_FIELD_MISSING", f"缺少必需字段：{', '.join(missing_fields)}", case_location
-            )
+            result.add_error("TC_FIELD_MISSING", f"缺少必需字段：{', '.join(missing_fields)}", case_location)
 
         # 验证用例名称不为空
         name = case.get("用例名称", "").strip()

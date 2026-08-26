@@ -23,9 +23,7 @@ class DBHelper:
     ) -> None:
         config = get_config(env) if env else get_config()
         requested_environment = EnvironmentType.normalize(env) if env is not None else ""
-        configured_environment = EnvironmentType.normalize(
-            getattr(config, "env", os.getenv("TEST_ENV", "test"))
-        )
+        configured_environment = EnvironmentType.normalize(getattr(config, "env", os.getenv("TEST_ENV", "test")))
         if requested_environment and requested_environment != configured_environment:
             raise EnvironmentSecurityError(
                 f"Database environment mismatch: requested={requested_environment!r}, "
@@ -40,9 +38,11 @@ class DBHelper:
         prefix = "UAT" if self.environment == "uat" else "TEST"
 
         def configured(name: str, default: Any) -> Any:
-            return os.getenv(f"{prefix}_DB_{name.upper()}") or os.getenv(
-                f"{prefix}_DATABASE_{name.upper()}"
-            ) or config.get(f"database.{name}", default)
+            return (
+                os.getenv(f"{prefix}_DB_{name.upper()}")
+                or os.getenv(f"{prefix}_DATABASE_{name.upper()}")
+                or config.get(f"database.{name}", default)
+            )
 
         configured_values = {
             "host": configured("host", "localhost"),
@@ -53,8 +53,10 @@ class DBHelper:
         }
         supplied_values = {"host": host, "port": port, "name": database, "user": user, "password": password}
         for name, value in supplied_values.items():
-            if value is not None and configured_values[name] not in (None, "") and str(value) != str(
-                configured_values[name]
+            if (
+                value is not None
+                and configured_values[name] not in (None, "")
+                and str(value) != str(configured_values[name])
             ):
                 raise EnvironmentSecurityError(
                     f"Explicit database {name} does not match the configured {self.environment} database"

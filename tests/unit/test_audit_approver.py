@@ -35,6 +35,7 @@ class TestAuditApprover:
 
     def test_not_ci_non_interactive(self):
         import os
+
         original_ci = os.environ.get("CI")
         if "CI" in os.environ:
             del os.environ["CI"]

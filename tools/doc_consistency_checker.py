@@ -7,7 +7,6 @@ import json
 import re
 from pathlib import Path
 
-
 CORE_DOCS = (
     "docs/TRAE_TEST_WORKFLOW.md",
     "docs/AUTO_TEST_WORKFLOW.md",
@@ -18,6 +17,7 @@ CORE_DOCS = (
     "docs/CODING_RULES.md",
     "docs/PROJECT_ARTIFACT_PLACEMENT.md",
     "docs/AGENT_RULES.md",
+    "docs/VIRTUAL_ENV.md",
 )
 
 FRONTMATTER_REQUIRED_FIELDS = ("title", "purpose", "version", "updated", "authority")
@@ -140,7 +140,11 @@ class DocConsistencyChecker:
             content = path.read_text(encoding="utf-8")
             for reference in REMOVED_REFERENCES:
                 if reference in content:
-                    self._issue("removed_tool_reference", f"发现已删除入口引用：{reference}", str(path.relative_to(self.project_root)))
+                    self._issue(
+                        "removed_tool_reference",
+                        f"发现已删除入口引用：{reference}",
+                        str(path.relative_to(self.project_root)),
+                    )
 
     def run(self) -> dict[str, object]:
         content = self._read_agents()

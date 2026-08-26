@@ -72,9 +72,7 @@ def test_lifecycle_rejects_foreign_worker_and_tenant(monkeypatch):
             owner_worker_id="gw1",
         )
     with pytest.raises(CleanupOwnershipError):
-        manager.register_created_data(
-            "order", "order-1", Mock(), owner_tenant_id="tenant-b"
-        )
+        manager.register_created_data("order", "order-1", Mock(), owner_tenant_id="tenant-b")
 
 
 def test_db_fallback_is_tenant_scoped_and_releases_connection(monkeypatch):
@@ -123,9 +121,7 @@ def test_cleanup_failure_blocks_after_all_items_are_attempted(monkeypatch):
 def test_db_helper_rejects_environment_mismatch_before_connect(monkeypatch):
     config = SimpleNamespace(
         env="test",
-        get=lambda key, default=None: {"database.environment": "uat", "database.name": "test_db"}.get(
-            key, default
-        ),
+        get=lambda key, default=None: {"database.environment": "uat", "database.name": "test_db"}.get(key, default),
     )
     monkeypatch.setattr(db_helper_module, "get_config", lambda env=None: config)
 

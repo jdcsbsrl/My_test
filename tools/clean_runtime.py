@@ -18,17 +18,11 @@ def protected_patterns(root: Path) -> list[str]:
     keep_files = [root / ".keep"]
     if root.is_dir():
         for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-            dirnames[:] = [
-                name for name in dirnames if not (Path(directory) / name).is_symlink()
-            ]
+            dirnames[:] = [name for name in dirnames if not (Path(directory) / name).is_symlink()]
             # Pytest and browser runs may create isolated nested runtime
             # roots. They are independent sandboxes and must not contribute
             # their .keep rules to the project runtime cleaner.
-            dirnames[:] = [
-                name
-                for name in dirnames
-                if not (Path(directory) != root and name == ".runtime")
-            ]
+            dirnames[:] = [name for name in dirnames if not (Path(directory) != root and name == ".runtime")]
             if ".keep" in filenames:
                 keep_files.append(Path(directory) / ".keep")
 
@@ -74,9 +68,7 @@ def clean_runtime(keep_days: int = 14, root: Path | None = None, *, dry_run: boo
             current_dir = Path(directory_name)
             # Do not recurse through symlinked directories. A runtime cleaner
             # must never turn a link into an escape hatch outside .runtime.
-            dirnames[:] = [
-                name for name in dirnames if not (current_dir / name).is_symlink()
-            ]
+            dirnames[:] = [name for name in dirnames if not (current_dir / name).is_symlink()]
             for filename in filenames:
                 path = current_dir / filename
                 if path.name == ".keep" or path.is_symlink() or not path.is_file():
@@ -86,8 +78,7 @@ def clean_runtime(keep_days: int = 14, root: Path | None = None, *, dry_run: boo
                     continue
                 relative = path.relative_to(runtime_root).as_posix()
                 if any(
-                    fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(path.name, pattern)
-                    for pattern in patterns
+                    fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(path.name, pattern) for pattern in patterns
                 ):
                     continue
                 try:

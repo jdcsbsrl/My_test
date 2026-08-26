@@ -5,7 +5,6 @@ import pytest
 from modules.auto_test.core.secret_manager import AuthConfig, Credentials
 from modules.auto_test.facades.auth_facade import AuthFacade
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -95,7 +94,9 @@ def test_login_posts_password_payload_without_real_network(facade):
 
 
 def test_login_path_rejects_absolute_or_parent_paths(facade):
-    facade._config.get = lambda key, default=None: "https://evil.example/login" if key == "api.auth_login_path" else default
+    facade._config.get = lambda key, default=None: (
+        "https://evil.example/login" if key == "api.auth_login_path" else default
+    )
     with pytest.raises(ValueError, match="relative path"):
         facade._login_path()
 
@@ -113,7 +114,9 @@ def test_get_token_accepts_token_and_access_token(monkeypatch, facade):
 
 
 def test_get_token_raises_for_missing_token_or_failure(facade):
-    facade.login = lambda username=None, password=None, env=None: SimpleNamespace(json=lambda: {"code": 200, "data": {}})
+    facade.login = lambda username=None, password=None, env=None: SimpleNamespace(
+        json=lambda: {"code": 200, "data": {}}
+    )
     with pytest.raises(ValueError):
         facade.get_token()
 

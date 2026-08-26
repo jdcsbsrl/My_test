@@ -16,7 +16,6 @@ from modules.auto_test.core.self_healing import (
 from modules.auto_test.pages import base_page as base_page_module
 from modules.auto_test.pages.base_page import BasePage
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -322,10 +321,7 @@ def test_execute_records_history_for_success_and_failure(tmp_path):
         timeout=5,
     )
 
-    events = [
-        json.loads(line)
-        for line in (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    events = [json.loads(line) for line in (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()]
     assert events[0]["success"] is True
     assert events[0]["needs_review"] is True
     assert events[0]["selector"] == "#new"
@@ -445,10 +441,7 @@ def test_operation_failure_records_failure_without_reuse(tmp_path):
         timeout=5,
     )
 
-    events = [
-        json.loads(line)
-        for line in (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    events = [json.loads(line) for line in (tmp_path / "history.jsonl").read_text(encoding="utf-8").splitlines()]
     assert events[0]["success"] is False
     assert events[0]["needs_review"] is False
     assert SelfHealingHistoryStore(tmp_path / "history.jsonl").successful_selectors("Save") == []

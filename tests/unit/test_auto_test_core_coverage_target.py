@@ -26,7 +26,6 @@ from modules.auto_test.core import (
 from modules.auto_test.core.driver import HttpDriver
 from modules.trae_test.orchestrator.audit_models import AuditIssue, AuditResult
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -351,7 +350,9 @@ class TestManualGateAndSessionProbe:
 
 class TestHttpDriverCore:
     def test_driver_uses_config_and_builds_urls(self):
-        config = SimpleNamespace(get=lambda key, default=None: {"api.verify_ssl": False, "api.timeout": 7}.get(key, default))
+        config = SimpleNamespace(
+            get=lambda key, default=None: {"api.verify_ssl": False, "api.timeout": 7}.get(key, default)
+        )
         driver = HttpDriver("https://example.test", config)
 
         assert driver.timeout == 7
@@ -399,7 +400,9 @@ class TestPreAudit:
         calls = []
         result = AuditResult()
         audit = pre_audit.PreAudit()
-        audit.gateway = SimpleNamespace(audit=lambda payload, kind, context: calls.append((payload, kind, context)) or result)
+        audit.gateway = SimpleNamespace(
+            audit=lambda payload, kind, context: calls.append((payload, kind, context)) or result
+        )
 
         assert audit.check_environment({"env": "uat"}) is result
 
@@ -425,7 +428,9 @@ class TestPreAudit:
         calls = []
         result = AuditResult()
         audit = pre_audit.PreAudit()
-        audit.gateway = SimpleNamespace(audit=lambda payload, kind, context: calls.append((payload, kind, context)) or result)
+        audit.gateway = SimpleNamespace(
+            audit=lambda payload, kind, context: calls.append((payload, kind, context)) or result
+        )
 
         assert audit.check_test_readiness(["case"]) is result
 

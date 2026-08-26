@@ -60,16 +60,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install linting tools
-        run: pip install "ruff>=0.3.0" "black==24.10.0" "mypy>=1.9.0"
+        run: pip install "ruff==0.15.13" "black==26.3.1" "mypy==2.1.0"
       - name: Ruff code check
         run: ruff check .
-        continue-on-error: true
-        if: always()
       - name: Black format check
         run: black --check --config pyproject.toml .
-        continue-on-error: true
-        if: always()
-      - name: Mypy type check
+      - name: Mypy type check (advisory)
         run: mypy modules/
         continue-on-error: true
         if: always()
@@ -91,11 +87,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
       - name: Install dependencies
-        run: pip install bandit
+        run: pip install "bandit==1.7.8"
       - name: Bandit security scan
-        run: bandit -r modules/ -f json -o bandit-report.json --severity-level medium
-        continue-on-error: true
-        if: always()
+        run: bandit -r modules/ -c .bandit -f json -o bandit-report.json --severity-level medium
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         with:

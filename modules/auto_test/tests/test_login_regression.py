@@ -1,7 +1,5 @@
 """Login Regression Tests - Validate authentication across environments."""
 
-import os
-
 import pytest
 from playwright.sync_api import Browser, Page
 

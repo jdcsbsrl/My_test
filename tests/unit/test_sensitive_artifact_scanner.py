@@ -67,7 +67,7 @@ def test_scanner_ignores_short_secret_in_ordinary_message(tmp_path: Path, monkey
 
 def test_scanner_ignores_source_like_assignment_in_json_message(tmp_path: Path) -> None:
     (tmp_path / "result.json").write_text(
-        '{"message": "assert password = \\\"example\\\" in source"}',
+        '{"message": "assert password = \\"example\\" in source"}',
         encoding="utf-8",
     )
 

@@ -27,7 +27,6 @@ from modules.trae_test.utils.template_builder import ALL_FIELDS
 from modules.trae_test.utils.test_case_generator import TestCaseGenerator
 from modules.trae_test.utils.test_case_strategy import TestCaseScoreEngine
 
-
 DEFAULT_SAMPLES = Path("evaluation/phase0_rag_sales_samples.json")
 DEFAULT_JSON_OUT = Path(".runtime/reports/harness_metrics/rag_generation_accuracy_eval.json")
 DEFAULT_MD_OUT = Path(".runtime/reports/harness_metrics/rag_generation_accuracy_eval.md")

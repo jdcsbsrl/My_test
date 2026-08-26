@@ -14,7 +14,6 @@ from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
-
 def _skip_ci_environment_issue(reason: str) -> None:
     if os.getenv("CI", "").lower() in {"1", "true", "yes"}:
         pytest.skip(f"CI测试环境页面/接口未就绪，跳过本次UI用例: {reason}")
@@ -82,8 +81,7 @@ class TestExportFlowPrecise:
         print("\n" + "=" * 70)
         print("Step 7: Click template select dropdown")
         print("=" * 70)
-        logged_in_page.evaluate(
-            """
+        logged_in_page.evaluate("""
             () => {
                 const selects = document.querySelectorAll('.el-select');
                 if (selects.length > 0) {
@@ -92,15 +90,13 @@ class TestExportFlowPrecise:
                 }
                 return false;
             }
-        """
-        )
+        """)
         logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)
         print("Step 8: List available templates")
         print("=" * 70)
-        templates = logged_in_page.evaluate(
-            """
+        templates = logged_in_page.evaluate("""
             () => {
                 const result = [];
                 const items = document.querySelectorAll('.el-select-dropdown__item, .el-option');
@@ -112,8 +108,7 @@ class TestExportFlowPrecise:
                 }
                 return result;
             }
-        """
-        )
+        """)
         print(f"Found {len(templates)} templates:")
         for template in templates:
             print(f"  [{template['index']}] '{template['text']}'")
@@ -121,8 +116,7 @@ class TestExportFlowPrecise:
         print("\n" + "=" * 70)
         print("Step 9: Select template by keyword 'Dayone'")
         print("=" * 70)
-        selected_template_text = logged_in_page.evaluate(
-            """
+        selected_template_text = logged_in_page.evaluate("""
             () => {
                 const items = document.querySelectorAll('.el-select-dropdown__item, .el-option');
                 for (let i = 0; i < items.length; i++) {
@@ -134,8 +128,7 @@ class TestExportFlowPrecise:
                 }
                 return null;
             }
-        """
-        )
+        """)
         print(f"Selected template: '{selected_template_text}'")
         if selected_template_text is None:
             _skip_ci_environment_issue("未找到Dayone导出模板")
@@ -148,20 +141,16 @@ class TestExportFlowPrecise:
         print("Step 10: Ensure order number field is selected (use template defaults)")
         print("=" * 70)
 
-        selected_count = logged_in_page.evaluate(
-            """
+        selected_count = logged_in_page.evaluate("""
             () => {
                 return document.querySelectorAll('input[type="checkbox"]:checked').length;
             }
-        """
-        )
-        total_count = logged_in_page.evaluate(
-            """
+        """)
+        total_count = logged_in_page.evaluate("""
             () => {
                 return document.querySelectorAll('input[type="checkbox"]').length;
             }
-        """
-        )
+        """)
         print(f"Default selected fields: {selected_count}/{total_count}")
 
         print("\n" + "=" * 70)
@@ -261,9 +250,7 @@ class TestExportFlowPrecise:
             print(f"\n❌ 导出文件缺少请求导出的订单号，缺少数量: {len(missing_order_numbers)}")
             pytest.fail(f"导出文件缺少请求导出的订单号，缺少数量: {len(missing_order_numbers)}")
 
-        unexpected_order_numbers = [
-            num for num in exported_unique_order_numbers if num not in expected_order_numbers
-        ]
+        unexpected_order_numbers = [num for num in exported_unique_order_numbers if num not in expected_order_numbers]
         if unexpected_order_numbers:
             print(f"\n❌ 导出文件包含未请求的订单号，异常数量: {len(unexpected_order_numbers)}")
             pytest.fail(f"导出文件包含未请求的订单号，异常数量: {len(unexpected_order_numbers)}")

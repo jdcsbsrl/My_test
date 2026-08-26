@@ -51,7 +51,11 @@ class TokenManager:
         if not token or expires_in <= 0:
             raise ValueError("A non-empty token and positive expiry are required")
         self._tokens[env] = TokenInfo(
-            token=str(token), env=env, username=str(username), obtained_at=datetime.now().isoformat(), expires_in=expires_in
+            token=str(token),
+            env=env,
+            username=str(username),
+            obtained_at=datetime.now().isoformat(),
+            expires_in=expires_in,
         )
         self._save_tokens()
         logger.info("已保存 %s 环境的 token", env.upper())

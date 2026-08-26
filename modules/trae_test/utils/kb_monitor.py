@@ -176,7 +176,9 @@ class KnowledgeBaseMonitor:
 
         try:
             title = os.path.splitext(os.path.basename(file_path))[0]
-            existing_chunks = self.splitter.get_existing_chunks(title) if hasattr(self.splitter, "get_existing_chunks") else []
+            existing_chunks = (
+                self.splitter.get_existing_chunks(title) if hasattr(self.splitter, "get_existing_chunks") else []
+            )
             for path in existing_chunks:
                 target = os.path.join(rollback_dir, os.path.basename(path))
                 shutil.copy2(path, target)
@@ -209,7 +211,9 @@ class KnowledgeBaseMonitor:
             return result
         finally:
             if not result["success"]:
-                current_chunks = self.splitter.get_existing_chunks(title) if hasattr(self.splitter, "get_existing_chunks") else []
+                current_chunks = (
+                    self.splitter.get_existing_chunks(title) if hasattr(self.splitter, "get_existing_chunks") else []
+                )
                 for path in current_chunks:
                     os.unlink(path)
                 for backup in old_chunks:

@@ -346,7 +346,9 @@ class TestInventorySKUExport:
                 facade.sku_page.click_reset()
                 facade.search_by_sku("YX-L")
                 result = facade.export_with_page_size(
-                    page_size=page_size, select_all_fields=True, download_dir=f".runtime/downloads/page_size_{page_size}"
+                    page_size=page_size,
+                    select_all_fields=True,
+                    download_dir=f".runtime/downloads/page_size_{page_size}",
                 )
                 allure.attach(
                     json.dumps(result, ensure_ascii=False, indent=2, default=str),
@@ -433,7 +435,9 @@ class TestInventorySKUIntegration:
             facade.sku_page.set_page_size(20)
 
         with allure.step("3. 导出当前搜索"):
-            result = facade.export_current_search(select_all_fields=True, download_dir=".runtime/downloads/full_workflow")
+            result = facade.export_current_search(
+                select_all_fields=True, download_dir=".runtime/downloads/full_workflow"
+            )
             if not result["success"] and _is_ci_environment_issue(result):
                 allure.attach(
                     json.dumps(result, ensure_ascii=False, indent=2, default=str),

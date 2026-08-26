@@ -34,6 +34,35 @@ class ProjectStructureAuditor:
         "assets",
         "docs",
     ]
+    ALLOWED_ROOT_DIRS = {
+        ".git",
+        ".github",
+        ".runtime",
+        ".venv",
+        "assets",
+        "browsers",
+        "configs",
+        "data",
+        "docs",
+        "evaluation",
+        "fixtures",
+        "modules",
+        "tests",
+        "tools",
+        "workspace",
+    }
+    REQUIRED_GITIGNORE_RULES = (
+        ".runtime/**",
+        "!.runtime/.keep",
+        "workspace/**",
+        "!workspace/.gitkeep",
+        "data/private/*",
+        "!data/private/.keep",
+    )
+    FORBIDDEN_RUNTIME_GITIGNORE_RULES = (
+        "!.runtime/**/",
+        "!.runtime/**/.keep",
+    )
 
     # 禁止在根目录的脚本模式
     FORBIDDEN_SCRIPTS_PATTERNS = [
@@ -47,13 +76,36 @@ class ProjectStructureAuditor:
 
     # 合法的输出目录（仅workspace）
     REGISTERED_ROOT_FILES = {
-        "AGENTS.md", "README.md", "pyproject.toml", "pytest.ini", "requirements.txt", "uv.lock",
-        ".bandit", ".gitattributes", ".gitignore", ".pre-commit-config.yaml", ".secrets.baseline",
-        ".env", ".env.example",
+        "AGENTS.md",
+        "README.md",
+        "pyproject.toml",
+        "pytest.ini",
+        "requirements.txt",
+        "uv.lock",
+        ".bandit",
+        ".gitattributes",
+        ".gitignore",
+        ".pre-commit-config.yaml",
+        ".secrets.baseline",
+        ".env",
+        ".env.example",
     }
-    ROOT_ARTIFACT_PATTERNS = ["*.log", "*.tmp", "*.bak", "*.zip", "*.xlsx", "*.xls", "*.csv", "*.json", "*.png", "*.jpg", "*.jpeg", "*.html"]
+    ROOT_ARTIFACT_PATTERNS = [
+        "*.log",
+        "*.tmp",
+        "*.bak",
+        "*.zip",
+        "*.xlsx",
+        "*.xls",
+        "*.csv",
+        "*.json",
+        "*.png",
+        "*.jpg",
+        "*.jpeg",
+        "*.html",
+    ]
     WRITE_PATH_PATTERNS = [
-        re.compile(r"\bopen\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][wax+]") ,
+        re.compile(r"\bopen\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"][wax+]"),
         re.compile(r"\bPath\(\s*['\"]([^'\"]+)['\"]\s*\)\.(?:write_text|write_bytes|touch)\b"),
         re.compile(r"\bos\.makedirs\(\s*['\"]([^'\"]+)['\"]"),
     ]
@@ -82,6 +134,7 @@ class ProjectStructureAuditor:
         print()
 
         self._check_required_dirs()
+        self._check_root_directories()
         self._check_forbidden_scripts()
         self._check_output_dirs()
         self._check_module_structure()
@@ -116,6 +169,35 @@ class ProjectStructureAuditor:
                     {"type": "missing_required_dir", "path": dir_path, "message": f"缺少必需的目录: {dir_path}"}
                 )
                 print(f"  [FAIL] {dir_path}")
+        print()
+
+    def _check_root_directories(self):
+        """阻断包含内容的未登记顶层目录；空目录不进入 Git，允许本地暂存。"""
+        print("检查顶层目录登记...")
+        root = Path(self.PROJECT_ROOT)
+        for path in sorted(root.iterdir(), key=lambda item: item.name):
+            if not path.is_dir() or path.name in self.ALLOWED_ROOT_DIRS:
+                continue
+            try:
+                has_content = next(path.iterdir(), None) is not None
+            except OSError as exc:
+                self.warnings.append(
+                    {
+                        "type": "unreadable_root_dir",
+                        "path": path.name,
+                        "message": f"无法读取未登记顶层目录 {path.name}: {exc}",
+                    }
+                )
+                continue
+            if has_content:
+                self.issues.append(
+                    {
+                        "type": "unregistered_root_dir",
+                        "path": path.name,
+                        "message": f"顶层目录未在项目规范登记: {path.name}",
+                    }
+                )
+        print("  [OK] 顶层目录登记检查完成")
         print()
 
     def _check_forbidden_scripts(self):
@@ -175,7 +257,13 @@ class ProjectStructureAuditor:
         registered = set(self.REGISTERED_ROOT_FILES)
         doc_path = os.path.join(self.PROJECT_ROOT, "docs", "PROJECT_ARTIFACT_PLACEMENT.md")
         if not os.path.exists(doc_path):
-            self.issues.append({"type": "missing_artifact_policy", "path": "docs/PROJECT_ARTIFACT_PLACEMENT.md", "message": "缺少项目文件与产物规范"})
+            self.issues.append(
+                {
+                    "type": "missing_artifact_policy",
+                    "path": "docs/PROJECT_ARTIFACT_PLACEMENT.md",
+                    "message": "缺少项目文件与产物规范",
+                }
+            )
             return registered
         content = Path(doc_path).read_text(encoding="utf-8")
         marker = "## 10. 根目录例外登记"
@@ -193,9 +281,17 @@ class ProjectStructureAuditor:
             if not os.path.isfile(path) or name in registered:
                 continue
             if any(fnmatch.fnmatch(name, pattern) for pattern in self.ROOT_ARTIFACT_PATTERNS):
-                self.issues.append({"type": "root_artifact", "path": name, "message": f"根目录禁止放置运行产物: {name}"})
+                self.issues.append(
+                    {"type": "root_artifact", "path": name, "message": f"根目录禁止放置运行产物: {name}"}
+                )
             elif name.endswith((".json", ".yaml", ".yml", ".toml")) or name.startswith(("test_", "debug_", "temp_")):
-                self.issues.append({"type": "unregistered_root_file", "path": name, "message": f"根目录文件未在规范登记表中登记: {name}"})
+                self.issues.append(
+                    {
+                        "type": "unregistered_root_file",
+                        "path": name,
+                        "message": f"根目录文件未在规范登记表中登记: {name}",
+                    }
+                )
         print("  [OK] 根目录产物和登记表检查完成")
         print()
 
@@ -204,23 +300,49 @@ class ProjectStructureAuditor:
         print("检查运行时和私有目录 Git 忽略规则...")
         gitignore = Path(self.PROJECT_ROOT) / ".gitignore"
         content = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-        for required in (".runtime/*", "workspace/*", "data/private/*"):
+        for required in self.REQUIRED_GITIGNORE_RULES:
             if required not in content:
-                self.issues.append({"type": "missing_gitignore_rule", "path": required, "message": f"缺少 Git 忽略规则: {required}"})
-        tracked = subprocess.run(["git", "ls-files", ".runtime", "workspace", "data/private"], cwd=self.PROJECT_ROOT, capture_output=True, text=True, check=False)
+                self.issues.append(
+                    {"type": "missing_gitignore_rule", "path": required, "message": f"缺少 Git 忽略规则: {required}"}
+                )
+        for forbidden in self.FORBIDDEN_RUNTIME_GITIGNORE_RULES:
+            if forbidden in content:
+                self.issues.append(
+                    {
+                        "type": "unsafe_runtime_gitignore_rule",
+                        "path": forbidden,
+                        "message": f"运行时忽略规则会重新暴露嵌套测试产物: {forbidden}",
+                    }
+                )
+        tracked = subprocess.run(
+            ["git", "ls-files", ".runtime", "workspace", "data/private"],
+            cwd=self.PROJECT_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         tracked_artifacts = [
-            line for line in tracked.stdout.splitlines()
-            if line and not Path(line).name.endswith((".keep", ".gitkeep"))
+            line for line in tracked.stdout.splitlines() if line and not Path(line).name.endswith((".keep", ".gitkeep"))
         ]
         if tracked_artifacts:
-            self.issues.append({"type": "tracked_runtime_artifact", "path": "\n".join(tracked_artifacts), "message": "运行时、工作区或私有数据中存在被 Git 跟踪的文件"})
+            self.issues.append(
+                {
+                    "type": "tracked_runtime_artifact",
+                    "path": "\n".join(tracked_artifacts),
+                    "message": "运行时、工作区或私有数据中存在被 Git 跟踪的文件",
+                }
+            )
         print("  [OK] Git 忽略规则检查完成")
         print()
 
     def _check_bare_write_paths(self):
         """扫描 Python 中写入项目根目录的裸相对路径，迁移期间先作为警告。"""
         print("检查裸相对路径写文件...")
-        source_dirs = [Path(self.PROJECT_ROOT) / "modules", Path(self.PROJECT_ROOT) / "tools", Path(self.PROJECT_ROOT) / "fixtures"]
+        source_dirs = [
+            Path(self.PROJECT_ROOT) / "modules",
+            Path(self.PROJECT_ROOT) / "tools",
+            Path(self.PROJECT_ROOT) / "fixtures",
+        ]
         count = 0
         for source_dir in source_dirs:
             if not source_dir.exists():
@@ -233,8 +355,17 @@ class ProjectStructureAuditor:
                 for pattern in self.WRITE_PATH_PATTERNS:
                     for match in pattern.finditer(text):
                         value = match.group(1)
-                        if not value.startswith((".runtime/", "workspace/", "/", "\\")) and ".." not in Path(value).parts:
-                            self.warnings.append({"type": "bare_relative_write_path", "path": str(source.relative_to(self.PROJECT_ROOT)), "message": f"发现裸相对路径写入: {value}"})
+                        if (
+                            not value.startswith((".runtime/", "workspace/", "/", "\\"))
+                            and ".." not in Path(value).parts
+                        ):
+                            self.warnings.append(
+                                {
+                                    "type": "bare_relative_write_path",
+                                    "path": str(source.relative_to(self.PROJECT_ROOT)),
+                                    "message": f"发现裸相对路径写入: {value}",
+                                }
+                            )
                             count += 1
         print(f"  [WARN] 发现 {count} 个裸相对路径写入" if count else "  [OK] 未发现裸相对路径写入")
         print()
@@ -326,15 +457,15 @@ class ProjectStructureAuditor:
                 for child in os.listdir(dir_path):
                     child_path = os.path.join(dir_path, child)
                     if os.path.isdir(child_path) and child in self.FORBIDDEN_WORKSPACE_SUBDIRS:
-                        self.issues.append({
-                            "type": "forbidden_workspace_subdir",
-                            "path": os.path.relpath(child_path, self.PROJECT_ROOT),
-                            "message": f"workspace日期目录下禁止创建 {child}/ 子目录",
-                        })
+                        self.issues.append(
+                            {
+                                "type": "forbidden_workspace_subdir",
+                                "path": os.path.relpath(child_path, self.PROJECT_ROOT),
+                                "message": f"workspace日期目录下禁止创建 {child}/ 子目录",
+                            }
+                        )
         else:
-            meaningful_entries = [
-                item for item in os.listdir(workspace_path) if item not in {".gitkeep", ".keep"}
-            ]
+            meaningful_entries = [item for item in os.listdir(workspace_path) if item not in {".gitkeep", ".keep"}]
             if not meaningful_entries:
                 print("  [OK] workspace为空骨架，等待首个日期目录")
                 print()
@@ -439,7 +570,17 @@ def main():
         print(json.dumps({**result, "exit_code": auditor.exit_code()}, ensure_ascii=False))
     else:
         auditor.generate_report()
-        print(json.dumps({"passed": result["passed"], "issues": len(result["issues"]), "warnings": len(result["warnings"]), "exit_code": auditor.exit_code()}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "passed": result["passed"],
+                    "issues": len(result["issues"]),
+                    "warnings": len(result["warnings"]),
+                    "exit_code": auditor.exit_code(),
+                },
+                ensure_ascii=False,
+            )
+        )
     return auditor.exit_code()
 
 

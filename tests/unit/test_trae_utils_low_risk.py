@@ -11,7 +11,6 @@ from modules.trae_test.utils.template_builder import ALL_FIELDS, ensure_template
 from modules.trae_test.utils.test_case_generator import TestCaseGenerator
 from modules.trae_test.utils.workspace_manager import WorkspaceManager
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -38,12 +37,16 @@ class TestBusinessRuleParser:
                     "business_rules": ["create order requires customer"],
                 }
             ],
-            "core_constraints": [{"name": "amount", "rule": "amount > 0", "description": "positive", "impact": "order"}],
+            "core_constraints": [
+                {"name": "amount", "rule": "amount > 0", "description": "positive", "impact": "order"}
+            ],
             "batch_operations": {"pending": ["approve", "ignore"]},
             "forward_sales_flow": {
                 "step_1": {
                     "name": "create",
-                    "core_operations": [{"operation": "submit", "path": "/sales/submit", "description": "submit order"}],
+                    "core_operations": [
+                        {"operation": "submit", "path": "/sales/submit", "description": "submit order"}
+                    ],
                 }
             },
             "reverse_return_flow": {"steps": ["return"], "constraints": ["paid"], "prerequisite": "shipped"},
@@ -167,7 +170,9 @@ class TestDirValidator:
             dir_validator.assert_directory("Bad - Second - Third")
 
     def test_fix_directory_normalizes_separators_and_uses_closest_match(self, monkeypatch):
-        monkeypatch.setattr(dir_validator, "_load_module_hierarchy", lambda: {"SalesModule": {"OrderManage": ["ListPage"]}})
+        monkeypatch.setattr(
+            dir_validator, "_load_module_hierarchy", lambda: {"SalesModule": {"OrderManage": ["ListPage"]}}
+        )
 
         fixed, fixes = dir_validator.fix_directory("Sales - Order - List")
 
@@ -232,7 +237,13 @@ class TestWorkspaceManager:
 class TestTemplateBuilderAndExcelGenerator:
     def test_fixed_redacted_samples_cover_login_query_export_cleanup_and_schema(self):
         samples_dir = Path(get_default_template_path()).parent / "samples"
-        expected = {"login_case.json", "query_case.json", "export_case.json", "cleanup_case.json", "schema_boundary_cases.json"}
+        expected = {
+            "login_case.json",
+            "query_case.json",
+            "export_case.json",
+            "cleanup_case.json",
+            "schema_boundary_cases.json",
+        }
         assert {path.name for path in samples_dir.glob("*.json")} >= expected
 
         for name in sorted(expected - {"schema_boundary_cases.json"}):
@@ -296,7 +307,9 @@ class TestTemplateBuilderAndExcelGenerator:
         assert rows[0]["case_name"] == "case name"
 
     def test_generate_excel_defaults_to_date_directory(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("modules.trae_test.utils.excel_generator.workspace_manager", WorkspaceManager(str(tmp_path)))
+        monkeypatch.setattr(
+            "modules.trae_test.utils.excel_generator.workspace_manager", WorkspaceManager(str(tmp_path))
+        )
 
         path = Path(ExcelGenerator.generate_excel([_case()], requirement_name="demo", date_str="20260727"))
 
@@ -335,15 +348,17 @@ class TestTemplateBuilderAndExcelGenerator:
             ExcelGenerator._validate_test_cases([legacy_runtime])
 
     def test_runtime_fields_are_nested_and_never_exported_as_columns(self):
-        case = _case(**{
-            "_runtime_quality": {
-                "final_score": 90,
-                "score_threshold": 85.0,
-                "needs_human_review": False,
-                "final_audit_passed": True,
-            },
-            "_runtime_quality_version": "1.0",
-        })
+        case = _case(
+            **{
+                "_runtime_quality": {
+                    "final_score": 90,
+                    "score_threshold": 85.0,
+                    "needs_human_review": False,
+                    "final_audit_passed": True,
+                },
+                "_runtime_quality_version": "1.0",
+            }
+        )
         ExcelGenerator._validate_test_cases([case])
         assert list(case)[:15] == ALL_FIELDS
 
@@ -374,7 +389,9 @@ class TestTemplateBuilderAndExcelGenerator:
         assert too_large["success"] is False
 
     def test_batch_export_splits_cases(self, tmp_path):
-        results = ExcelGenerator.batch_export([_case(**{"用例名称": f"case {i}"}) for i in range(3)], str(tmp_path), batch_size=2)
+        results = ExcelGenerator.batch_export(
+            [_case(**{"用例名称": f"case {i}"}) for i in range(3)], str(tmp_path), batch_size=2
+        )
 
         assert [result["cases_in_batch"] for result in results] == [2, 1]
         assert all(result["success"] for result in results)

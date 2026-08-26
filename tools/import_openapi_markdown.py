@@ -7,7 +7,6 @@ import json
 import re
 from pathlib import Path
 
-
 METHOD_RE = re.compile(r"^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s+(\S+)", re.MULTILINE)
 HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 NOISE_RE = re.compile(r"^(\[|\{|\}|\]|```|注意[:：]|参数[:：]|请求参数|响应参数)")

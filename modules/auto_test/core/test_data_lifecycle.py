@@ -279,9 +279,7 @@ class TestDataLifecycleManager:
             else:
                 fallback_error = None
                 if fallback and not self._enable_db_fallback:
-                    fallback_error = CleanupOwnershipError(
-                        f"DB fallback is disabled for environment {self.env!r}"
-                    )
+                    fallback_error = CleanupOwnershipError(f"DB fallback is disabled for environment {self.env!r}")
                 self._record_cleanup_failure(cleanup_item, api_error, fallback_error)
                 self._log_cleanup_failure(
                     cleanup_item,
@@ -360,8 +358,9 @@ class TestDataLifecycleManager:
             raise CleanupOwnershipError(f"DB fallback is disabled for environment {self.env!r}")
         db = self.db_helper.connect()
         try:
+            # table_name 只能来自 TABLE_MAP，记录标识和租户标识使用参数绑定。
             db.execute(
-                f"DELETE FROM {table_name} WHERE id = %s AND tenant_id = %s",
+                f"DELETE FROM {table_name} WHERE id = %s AND tenant_id = %s",  # nosec B608
                 (data_item["id"], data_item["tenant_id"]),
             )
             rowcount = getattr(getattr(db, "cursor", None), "rowcount", None)

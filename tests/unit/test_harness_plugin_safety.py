@@ -4,7 +4,6 @@ import pytest
 
 from fixtures import harness_plugin
 
-
 pytestmark = pytest.mark.unit
 
 

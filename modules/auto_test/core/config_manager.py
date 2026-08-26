@@ -109,9 +109,7 @@ class ConfigManager:
             for candidate in (
                 self._config.get("base_url"),
                 self._config.get("api_base_url"),
-                self._config.get("api", {}).get("base_url")
-                if isinstance(self._config.get("api", {}), dict)
-                else None,
+                self._config.get("api", {}).get("base_url") if isinstance(self._config.get("api", {}), dict) else None,
             ):
                 if candidate:
                     origin = self._origin_from_url(str(candidate))
@@ -133,11 +131,7 @@ class ConfigManager:
         ui_url = str(self._config.get("base_url") or f"{origin}{ui_path}").strip()
         api_url = str(
             self._config.get("api_base_url")
-            or (
-                self._config.get("api", {}).get("base_url")
-                if isinstance(self._config.get("api", {}), dict)
-                else None
-            )
+            or (self._config.get("api", {}).get("base_url") if isinstance(self._config.get("api", {}), dict) else None)
             or f"{origin}{api_path}"
         ).strip()
         self._validate_same_origin(ui_url, origin, "base_url")

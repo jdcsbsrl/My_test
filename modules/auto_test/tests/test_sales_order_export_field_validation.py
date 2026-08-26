@@ -19,9 +19,10 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.core.secret_provider import get_secret
 
-
 ORDER_RE = re.compile(r"SO\d{14,}")
-SENSITIVE_KEY_RE = re.compile(r"(?:token|secret|password|passwd|cookie|authorization|client.?id|api.?key)", re.IGNORECASE)
+SENSITIVE_KEY_RE = re.compile(
+    r"(?:token|secret|password|passwd|cookie|authorization|client.?id|api.?key)", re.IGNORECASE
+)
 SENSITIVE_VALUE_RE = re.compile(
     r"(?:Bearer\s+\S+|shpat_[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"
 )
@@ -169,9 +170,7 @@ def _summarize_response_value(value: Any, depth: int = 0) -> Any:
                 break
             key_text = str(key)
             summary[key_text] = (
-                "<redacted>"
-                if SENSITIVE_KEY_RE.search(key_text)
-                else _summarize_response_value(child, depth + 1)
+                "<redacted>" if SENSITIVE_KEY_RE.search(key_text) else _summarize_response_value(child, depth + 1)
             )
         return summary
     if isinstance(value, list):
@@ -363,11 +362,15 @@ def _read_workbook(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     headers = [str(value or "").strip() for value in raw_rows[0]]
     rows: list[dict[str, str]] = []
     for raw in raw_rows[1:]:
-        rows.append({headers[i]: _norm(value) for i, value in enumerate(raw) if i < len(headers) and value not in (None, "")})
+        rows.append(
+            {headers[i]: _norm(value) for i, value in enumerate(raw) if i < len(headers) and value not in (None, "")}
+        )
     return headers, rows
 
 
-def _candidate_source_rows(order_no: str, list_records: dict[str, dict[str, Any]], details: dict[str, Any]) -> list[dict[str, str]]:
+def _candidate_source_rows(
+    order_no: str, list_records: dict[str, dict[str, Any]], details: dict[str, Any]
+) -> list[dict[str, str]]:
     merged = {"list": list_records.get(order_no, {}), "detail": details.get(order_no, {})}
     rows = _flatten(merged)
     return rows or [{}]
@@ -549,6 +552,5 @@ class TestSalesOrderExportFieldValidation:
 
         assert len(templates) == len(manifest), "Not every realtime template produced a workbook"
         assert not blocking_failures, (
-            "Sales order export blocking failures: "
-            f"{json.dumps(blocking_failures, ensure_ascii=False, indent=2)}"
+            "Sales order export blocking failures: " f"{json.dumps(blocking_failures, ensure_ascii=False, indent=2)}"
         )

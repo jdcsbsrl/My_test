@@ -6,7 +6,6 @@ from typing import Any
 
 from .config import AuditConfig
 
-
 # 延迟导入，避免循环依赖
 # OperationType 在 audit_agent_enhanced.py 中定义
 # 通过 _get_operation_type() 函数延迟获取

@@ -42,9 +42,7 @@ def _nav_json_path() -> str:
 
 def _fallback_nav_json_path() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(
-        os.path.join(here, "..", "..", "..", "fixtures", "navigation", "module_hierarchy.json")
-    )
+    return os.path.normpath(os.path.join(here, "..", "..", "..", "fixtures", "navigation", "module_hierarchy.json"))
 
 
 @lru_cache(maxsize=1)

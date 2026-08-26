@@ -11,8 +11,17 @@ from pathlib import Path
 from typing import Any
 
 IMPORT_FIELDS: list[str] = [
-    "用例目录", "用例名称", "需求ID", "前置条件", "用例步骤", "预期结果",
-    "用例类型", "用例状态", "用例等级", "创建人", "优先级",
+    "用例目录",
+    "用例名称",
+    "需求ID",
+    "前置条件",
+    "用例步骤",
+    "预期结果",
+    "用例类型",
+    "用例状态",
+    "用例等级",
+    "创建人",
+    "优先级",
 ]
 EXTENSION_FIELDS: list[str] = ["是否可自动化", "回归测试标识", "知识库关联", "质量评分"]
 
@@ -25,33 +34,70 @@ QUALITY_SCORE_MIN = 0.0
 QUALITY_SCORE_MAX = 100.0
 
 RUNTIME_QUALITY_FIELDS = {
-    "original_score", "optimized_score", "final_score", "score_history",
-    "score_threshold", "is_cold_start", "confidence", "optimization_attempts",
-    "needs_human_review", "final_audit_passed",
+    "original_score",
+    "optimized_score",
+    "final_score",
+    "score_history",
+    "score_threshold",
+    "is_cold_start",
+    "confidence",
+    "optimization_attempts",
+    "needs_human_review",
+    "final_audit_passed",
 }
 RUNTIME_COVERAGE_FIELDS = {
-    "business_rules", "business_objects", "normal_scenarios", "abnormal_scenarios",
-    "boundary_scenarios", "rollback_scenarios", "exclusions",
+    "business_rules",
+    "business_objects",
+    "normal_scenarios",
+    "abnormal_scenarios",
+    "boundary_scenarios",
+    "rollback_scenarios",
+    "exclusions",
 }
 RUNTIME_REGENERATION_FIELDS = {"count", "last_regenerated_at"}
 RUNTIME_FIELDS = {
-    "_runtime_quality", "_runtime_quality_version", "_runtime_coverage_matrix",
-    "_runtime_coverage_matrix_version", "_runtime_regeneration",
+    "_runtime_quality",
+    "_runtime_quality_version",
+    "_runtime_coverage_matrix",
+    "_runtime_coverage_matrix_version",
+    "_runtime_regeneration",
 }
 
 # 旧实现曾把这些字段直接写进用例字典；正式 schema 明确拒绝它们。
 LEGACY_RUNTIME_FIELDS = {
-    "原始评分", "优化后评分", "最终评分", "最终审核通过", "是否冷启动评分",
-    "评分置信度", "评分历史", "优化次数", "评分门槛", "最终评分是否达标",
-    "needs_human_review", "regeneration_count", "last_regenerated_at",
-    "execution_count", "用例ID",
+    "原始评分",
+    "优化后评分",
+    "最终评分",
+    "最终审核通过",
+    "是否冷启动评分",
+    "评分置信度",
+    "评分历史",
+    "优化次数",
+    "评分门槛",
+    "最终评分是否达标",
+    "needs_human_review",
+    "regeneration_count",
+    "last_regenerated_at",
+    "execution_count",
+    "用例ID",
 }
 
 COLUMN_WIDTHS = {
-    "用例目录": 25, "用例名称": 40, "需求ID": 12, "前置条件": 30,
-    "用例步骤": 40, "预期结果": 35, "用例类型": 12, "用例状态": 10,
-    "用例等级": 10, "创建人": 12, "优先级": 8, "是否可自动化": 12,
-    "回归测试标识": 15, "知识库关联": 15, "质量评分": 12,
+    "用例目录": 25,
+    "用例名称": 40,
+    "需求ID": 12,
+    "前置条件": 30,
+    "用例步骤": 40,
+    "预期结果": 35,
+    "用例类型": 12,
+    "用例状态": 10,
+    "用例等级": 10,
+    "创建人": 12,
+    "优先级": 8,
+    "是否可自动化": 12,
+    "回归测试标识": 15,
+    "知识库关联": 15,
+    "质量评分": 12,
 }
 
 
