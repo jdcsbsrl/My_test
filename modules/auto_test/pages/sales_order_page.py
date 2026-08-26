@@ -1423,6 +1423,10 @@ class SalesOrderPage(BasePage):
         self.page.wait_for_timeout(1000)
         for opened_page in self.page.context.pages:
             if opened_page is not self.page and "sales/order/exportPage" in opened_page.url:
+                try:
+                    opened_page.wait_for_url("**/sales/order/exportPage**", timeout=10000)
+                except Exception:
+                    logger.warning("导出弹出页已创建但 URL 未在限定时间内稳定: {}", opened_page.url)
                 export_url = opened_page.url
                 opened_page.close()
                 self.page.goto(export_url, wait_until="domcontentloaded")

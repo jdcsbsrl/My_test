@@ -285,6 +285,22 @@ class TestBaseAndExportPage:
             "trace_id": None,
         }
 
+    def test_sales_export_ready_accepts_template_input_control(self):
+        page = FakePage()
+        page.locators[".el-select:visible"] = FakeLocator(".el-select:visible", count=0)
+        page.locators[".ant-select:visible"] = FakeLocator(".ant-select:visible", count=0)
+        page.locators['button:has-text("实时导出"):visible'] = FakeLocator(
+            'button:has-text("实时导出"):visible', count=0
+        )
+        page.locators['button:has-text("非实时导出"):visible'] = FakeLocator(
+            'button:has-text("非实时导出"):visible', count=0
+        )
+
+        export_page = SalesOrderExportPage(page)
+
+        assert export_page._export_controls_ready()
+        assert any("选择导出模板" in call[1] for call in page.calls if call[0] == "locator")
+
     def test_base_page_wrappers_and_navigation(self, monkeypatch):
         monkeypatch.setattr(
             base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test/index")

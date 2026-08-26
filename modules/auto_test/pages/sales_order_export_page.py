@@ -18,6 +18,15 @@ EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
 
 
 class SalesOrderExportPage(BasePage):
+    EXPORT_READY_SELECTORS = (
+        'input[placeholder*="选择导出模板"]:visible',
+        'input[placeholder*="请选择导出模板"]:visible',
+        '.el-select:visible',
+        '.ant-select:visible',
+        'button:has-text("实时导出"):visible',
+        'button:has-text("非实时导出"):visible',
+    )
+
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.export_url_pattern = "sales/order/exportPage"
@@ -69,12 +78,13 @@ class SalesOrderExportPage(BasePage):
         Checking body text is insufficient here: the route can be ready while
         the Vue application is still loading its template/field data.
         """
-        try:
-            template_select = self.page.locator(".el-select:visible, .ant-select:visible")
-            realtime_button = self.page.get_by_role("button", name="实时导出", exact=True)
-            return template_select.count() > 0 or realtime_button.count() > 0
-        except Exception:
-            return False
+        for selector in self.EXPORT_READY_SELECTORS:
+            try:
+                if self.page.locator(selector).count() > 0:
+                    return True
+            except Exception:
+                continue
+        return False
 
     @allure.step("检查是否在导出页面")
     def is_on_export_page(self) -> bool:
