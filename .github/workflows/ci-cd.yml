@@ -486,8 +486,66 @@ jobs:
             --json "$report_dir/ci-metrics-report.json" \
             >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Download each failed job log and annotations
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report_dir=".runtime/reports/ci-failure-logs"
+          python - "$report_dir/jobs.json" "$report_dir" "$GITHUB_REPOSITORY" <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          jobs_path = Path(sys.argv[1])
+          report_dir = Path(sys.argv[2])
+          repository = sys.argv[3]
+          jobs = json.loads(jobs_path.read_text(encoding="utf-8")).get("jobs", [])
+          failed = [job for job in jobs if job.get("conclusion") == "failure"]
+          summary = ["# 失败 Job 明细", ""]
+          for job in failed:
+              job_id = str(job.get("id"))
+              safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(job.get("name", job_id))).strip("_") or job_id
+              log_path = report_dir / f"job-{job_id}-{safe_name}.log"
+              annotation_path = report_dir / f"job-{job_id}-{safe_name}-annotations.json"
+              log_result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/actions/jobs/{job_id}/logs"],
+                  check=False,
+                  capture_output=True,
+              )
+              log_path.write_bytes(log_result.stdout)
+              annotation_result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/check-runs/{job_id}/annotations"],
+                  check=False,
+                  capture_output=True,
+              )
+              annotation_path.write_bytes(annotation_result.stdout)
+              failed_steps = [
+                  step.get("name", "未命名步骤")
+                  for step in job.get("steps", [])
+                  if step.get("conclusion") == "failure"
+              ]
+              summary.append(f"## {job.get('name', job_id)}")
+              summary.append(f"- Job ID：`{job_id}`")
+              summary.append(f"- 失败步骤：{'、'.join(failed_steps) or '未识别'}")
+              summary.append(f"- 原始日志：`{log_path.name}`")
+              summary.append(f"- Annotations：`{annotation_path.name}`")
+              summary.append(f"- 日志下载退出码：`{log_result.returncode}`")
+              summary.append("")
+          if not failed:
+              summary.extend(["未识别到失败 Job。", ""])
+          (report_dir / "failed-jobs-summary.md").write_text("\n".join(summary), encoding="utf-8")
+          PY
+
       - name: Upload failed job logs
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ci-failure-logs-${{ github.run_id }}
           path: .runtime/reports/ci-failure-logs

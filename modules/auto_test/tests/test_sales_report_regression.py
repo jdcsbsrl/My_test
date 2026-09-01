@@ -9,6 +9,7 @@ from openpyxl import load_workbook
 from playwright.sync_api import Page
 
 from modules.auto_test.core.config_manager import get_config
+from modules.auto_test.core.secret_provider import get_secret
 from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.pages.sales_report_page import SalesReportPage
 

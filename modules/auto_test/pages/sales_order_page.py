@@ -375,7 +375,7 @@ class SalesOrderPage(BasePage):
                 (expectedName) => Array.from(document.querySelectorAll('.store-item'))
                   .some((candidate) => candidate.querySelector('.store-name')?.innerText?.trim() === expectedName)
                 """,
-                store_name,
+                arg=store_name,
                 timeout=30000,
             )
 
