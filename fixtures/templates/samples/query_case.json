@@ -1,0 +1,25 @@
+{
+  "用例目录": "销售 - 订单处理 - 查询",
+  "用例名称": "按脱敏订单号查询销售订单并保持筛选条件",
+  "需求ID": "REQ-FIXTURE-QUERY",
+  "前置条件": "1. 用户已登录并拥有销售订单查询权限\n2. 系统存在脱敏订单 SO-FIXTURE-0001",
+  "用例步骤": "1. 打开销售订单列表\n2. 在系统单号输入 SO-FIXTURE-0001 并点击查询\n3. 翻页后返回第一页",
+  "预期结果": "1. 查询按钮可用且请求参数只包含当前筛选条件\n2. 列表仅展示 SO-FIXTURE-0001\n3. 返回第一页后筛选条件和结果保持一致",
+  "用例类型": "功能测试",
+  "用例状态": "正常",
+  "用例等级": "中",
+  "创建人": "fixture-author",
+  "优先级": "P1",
+  "是否可自动化": "是",
+  "回归测试标识": "全量回归",
+  "知识库关联": "fixture.query.order_filter_pagination",
+  "质量评分": 88.0,
+  "_runtime_coverage_matrix": {
+    "business_rules": ["订单查询仅返回匹配结果"],
+    "business_objects": ["订单"],
+    "normal_scenarios": ["精确查询"],
+    "boundary_scenarios": ["分页返回第一页"],
+    "exclusions": []
+  },
+  "_runtime_coverage_matrix_version": "1.0"
+}

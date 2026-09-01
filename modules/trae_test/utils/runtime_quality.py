@@ -68,7 +68,9 @@ def attach_runtime_quality(
 ) -> dict[str, Any]:
     """把评分状态写入运行时命名空间，保持正式15列字段不变。"""
 
-    normalized = snapshot if isinstance(snapshot, RuntimeQualitySnapshot) else RuntimeQualitySnapshot.from_mapping(snapshot)
+    normalized = (
+        snapshot if isinstance(snapshot, RuntimeQualitySnapshot) else RuntimeQualitySnapshot.from_mapping(snapshot)
+    )
     case[RUNTIME_QUALITY_KEY] = normalized.to_dict()
     case[RUNTIME_QUALITY_VERSION_KEY] = RUNTIME_QUALITY_VERSION
     return case
@@ -81,4 +83,3 @@ def read_runtime_quality(case: Mapping[str, Any]) -> RuntimeQualitySnapshot:
     if isinstance(value, Mapping):
         return RuntimeQualitySnapshot.from_mapping(value)
     return RuntimeQualitySnapshot()
-

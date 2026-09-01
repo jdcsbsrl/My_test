@@ -8,7 +8,6 @@ from modules.auto_test.facades.api.sales_order_facade import SalesOrderFacade as
 from modules.auto_test.facades.inventory_sku_facade import InventorySKUFacade
 from modules.auto_test.facades.sales_order_facade import SalesOrderFacade as UiSalesOrderFacade
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -37,7 +36,9 @@ class DummyApiClient:
 def test_api_sales_order_query_orders_builds_default_payload(monkeypatch):
     monkeypatch.setattr(
         "modules.auto_test.facades.api.sales_order_facade.get_config",
-        lambda: SimpleNamespace(get=lambda key, default=None: "/sales/order" if key == "api.sales_order_resource" else default),
+        lambda: SimpleNamespace(
+            get=lambda key, default=None: "/sales/order" if key == "api.sales_order_resource" else default
+        ),
     )
     monkeypatch.setattr("modules.auto_test.facades.api.sales_order_facade.attach_request_info", lambda response: None)
     client = DummyApiClient()
@@ -64,7 +65,9 @@ def test_api_sales_order_query_orders_builds_default_payload(monkeypatch):
 def test_api_sales_order_export_orders_uses_configured_endpoint(monkeypatch):
     monkeypatch.setattr(
         "modules.auto_test.facades.api.sales_order_facade.get_config",
-        lambda: SimpleNamespace(get=lambda key, default=None: "/custom/order" if key == "api.sales_order_resource" else default),
+        lambda: SimpleNamespace(
+            get=lambda key, default=None: "/custom/order" if key == "api.sales_order_resource" else default
+        ),
     )
     monkeypatch.setattr("modules.auto_test.facades.api.sales_order_facade.attach_request_info", lambda response: None)
     client = DummyApiClient()
@@ -133,7 +136,9 @@ def test_api_auth_login_uses_secret_password_and_attaches_response(monkeypatch):
         ),
     )
     monkeypatch.setattr("modules.auto_test.facades.api.auth_facade.get_secret_manager", lambda: secrets)
-    monkeypatch.setattr("modules.auto_test.facades.api.auth_facade.attach_request_info", lambda response: attached.append(response))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.api.auth_facade.attach_request_info", lambda response: attached.append(response)
+    )
     client = DummyApiClient()
     facade = ApiAuthFacade(client)
 
@@ -198,8 +203,12 @@ def test_ui_sales_order_facade_export_selected_handles_export_page_load_failure(
     order_page = MagicMock()
     export_page = MagicMock()
     export_page.wait_for_export_page.return_value = False
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=order_page))
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=order_page)
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page)
+    )
 
     page = MagicMock()
     facade = UiSalesOrderFacade(page)
@@ -211,7 +220,9 @@ def test_ui_sales_order_facade_export_selected_handles_export_page_load_failure(
 def test_ui_sales_order_facade_export_with_sort_adds_context(monkeypatch, tmp_path):
     order_page = MagicMock()
     order_page.verify_selected_count.return_value = 3
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=order_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=order_page)
+    )
 
     facade = UiSalesOrderFacade(MagicMock())
     facade.select_sort = MagicMock()
@@ -243,7 +254,9 @@ def test_inventory_sku_facade_search_by_sku_ensures_page_and_returns_results(mon
     sku_page.click_search.return_value = 0.75
     sku_page.get_result_count.return_value = 2
     sku_page.get_search_results.return_value = [{"sku": "SKU-1"}, {"sku": "SKU-2"}]
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
 
     facade = InventorySKUFacade(MagicMock())
     result = facade.search_by_sku("SKU")
@@ -261,8 +274,12 @@ def test_inventory_sku_facade_export_current_search_reports_field_selection_fail
     export_page.select_fields.return_value = 0
     export_page.get_selected_field_count.return_value = 1
     export_page.download_to.return_value = {"success": True, "file_size": 10}
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page)
+    )
 
     facade = InventorySKUFacade(MagicMock())
 
@@ -278,7 +295,9 @@ def test_inventory_sku_facade_export_with_page_size_adds_counts(monkeypatch):
     sku_page = MagicMock()
     sku_page.set_page_size.return_value = 0.5
     sku_page.get_result_count.return_value = 12
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
 
     page = MagicMock()
     facade = InventorySKUFacade(page)
@@ -303,7 +322,9 @@ def test_inventory_sku_facade_pagination_navigation_exercises_next_and_back(monk
     sku_page = MagicMock()
     sku_page.get_current_page.side_effect = [1, 2, 1]
     sku_page.get_total_pages.return_value = 3
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
 
     result = InventorySKUFacade(MagicMock()).verify_pagination_navigation()
 
@@ -399,8 +420,12 @@ def test_ui_sales_order_facade_export_selected_success_with_fields_and_ensures(m
     export_page.wait_for_export_page.return_value = True
     export_page.select_export_template.return_value = True
     export_page.download_to.return_value = {"success": True, "file_path": "orders.xlsx"}
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=order_page))
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=order_page)
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page)
+    )
     monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.time.sleep", lambda seconds: None)
     monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.time.time", lambda: 12345)
 
@@ -429,8 +454,12 @@ def test_ui_sales_order_facade_export_selected_selects_all_fields(monkeypatch, t
     export_page.wait_for_export_page.return_value = True
     export_page.select_export_template.return_value = False
     export_page.download_to.return_value = {"success": True}
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=MagicMock())
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page)
+    )
     monkeypatch.setattr("modules.auto_test.facades.sales_order_facade.time.time", lambda: 99)
 
     result = UiSalesOrderFacade(MagicMock()).export_selected(select_all_fields=True, download_dir=str(tmp_path))
@@ -448,8 +477,12 @@ def test_inventory_sku_facade_export_current_search_success_with_selected_fields
     export_page.wait_for_export_page.return_value = True
     export_page.select_fields.return_value = 2
     export_page.download_to.return_value = {"success": True, "file_path": "sku.xlsx"}
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page)
+    )
     monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.time.time", lambda: 456)
 
     result = InventorySKUFacade(MagicMock()).export_current_search(
@@ -469,8 +502,12 @@ def test_inventory_sku_facade_export_selected_success_selects_all(monkeypatch, t
     export_page = MagicMock()
     export_page.wait_for_export_page.return_value = True
     export_page.download_to.return_value = {"success": True}
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=MagicMock())
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page)
+    )
     monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.time.time", lambda: 789)
 
     result = InventorySKUFacade(MagicMock()).export_selected(select_all_fields=True, download_dir=str(tmp_path))
@@ -484,8 +521,12 @@ def test_inventory_sku_facade_export_selected_success_selects_all(monkeypatch, t
 def test_inventory_sku_facade_export_selected_reports_load_failure(monkeypatch):
     export_page = MagicMock()
     export_page.wait_for_export_page.return_value = False
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=MagicMock()))
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=MagicMock())
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventoryExportPage", MagicMock(return_value=export_page)
+    )
 
     result = InventorySKUFacade(MagicMock()).export_selected()
 
@@ -497,7 +538,9 @@ def test_inventory_sku_facade_pagination_navigation_skips_single_page(monkeypatc
     sku_page = MagicMock()
     sku_page.get_current_page.return_value = 1
     sku_page.get_total_pages.return_value = 1
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
 
     result = InventorySKUFacade(MagicMock()).verify_pagination_navigation()
 
@@ -510,7 +553,9 @@ def test_inventory_sku_facade_verify_helpers_delegate_to_page(monkeypatch):
     sku_page = MagicMock()
     sku_page.is_header_checkbox_checked.return_value = False
     sku_page.get_current_page_row_count.return_value = 25
-    monkeypatch.setattr("modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page))
+    monkeypatch.setattr(
+        "modules.auto_test.facades.inventory_sku_facade.InventorySKUPage", MagicMock(return_value=sku_page)
+    )
 
     facade = InventorySKUFacade(MagicMock())
 
@@ -558,9 +603,7 @@ def test_ui_sales_order_verify_export_order_consistency_handles_empty_expected(t
     sheet.append(["SO-1"])
     workbook.save(file_path)
 
-    result = UiSalesOrderFacade.verify_export_order_consistency(
-        str(file_path), [], order_number_column_name="systemNo"
-    )
+    result = UiSalesOrderFacade.verify_export_order_consistency(str(file_path), [], order_number_column_name="systemNo")
 
     assert result["success"] is True
     assert result["export_count"] == 1

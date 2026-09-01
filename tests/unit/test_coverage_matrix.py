@@ -63,4 +63,3 @@ def test_missing_runtime_matrix_returns_empty_matrix() -> None:
         "rollback_scenarios": [],
         "exclusions": [],
     }
-

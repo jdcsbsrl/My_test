@@ -11,10 +11,10 @@ from urllib.parse import urlsplit, urlunsplit
 import allure
 import requests
 
-
 _SENSITIVE_KEY_PATTERN = (
     r"password|passwd|token|secret|authorization|cookie|clientid|encrypt[-_]key|"
-    r"app[-_]?(?:key|secret)|api[-_]?key|credential|username|phone|email|address|id[-_]?card"
+    r"app[-_]?(?:key|secret)|api[-_]?key|credential|username|phone|email|address|"
+    r"id[-_]?card|mobile|identity|realname|contact|account"
 )
 
 
@@ -25,21 +25,27 @@ def _redact_text(value: str) -> str:
 
 def _redact_url(value: str) -> str:
     parsed = urlsplit(str(value))
-    if not parsed.query:
-        return str(value)
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "[REDACTED]", ""))
+    if not parsed.scheme or not parsed.netloc:
+        return "[REDACTED URL]" if parsed.query else str(value)
+    safe_netloc = parsed.hostname or parsed.netloc
+    if parsed.port:
+        safe_netloc = f"{safe_netloc}:{parsed.port}"
+    query = "[REDACTED]" if parsed.query else ""
+    return urlunsplit((parsed.scheme, safe_netloc, parsed.path, query, ""))
 
 
 def _redact_value(value):
     if isinstance(value, dict):
         return {
-            key: "[REDACTED]"
-            if re.search(_SENSITIVE_KEY_PATTERN, str(key), re.IGNORECASE)
-            else _redact_value(item)
+            key: "[REDACTED]" if re.search(_SENSITIVE_KEY_PATTERN, str(key), re.IGNORECASE) else _redact_value(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
         return [_redact_value(item) for item in value]
+    if isinstance(value, str):
+        return _redact_text(value)
+    if isinstance(value, bytes):
+        return _redact_text(value.decode(errors="replace"))
     return value
 
 

@@ -14,7 +14,6 @@ from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
-
 def _skip_ci_environment_issue(reason: str) -> None:
     if os.getenv("CI", "").lower() in {"1", "true", "yes"}:
         pytest.skip(f"CI测试环境页面/接口未就绪，跳过本次UI用例: {reason}")
@@ -36,7 +35,7 @@ class TestExportFlowPrecise:
         print("=" * 70)
         sales_order_page.navigate_to("sales/order/saleOrder")
         logged_in_page.wait_for_load_state("networkidle")
-        print(f"URL: {sales_order_page.current_url}")
+        print("URL: same-origin sales order route reached")
 
         print("\n" + "=" * 70)
         print("Step 2: Click pending tab")
@@ -48,7 +47,7 @@ class TestExportFlowPrecise:
         print("Step 3: Get order numbers before sort")
         print("=" * 70)
         order_numbers_before = sales_order_page.get_sorted_order_numbers(limit=10)
-        print(f"Order numbers before sort: {order_numbers_before}")
+        print(f"Order numbers before sort: {len(order_numbers_before)} found")
 
         print("\n" + "=" * 70)
         print("Step 4: Click sort dropdown and select payment time ascending")
@@ -63,7 +62,7 @@ class TestExportFlowPrecise:
         print("Step 5: Get order numbers after sort")
         print("=" * 70)
         page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
-        print(f"Order numbers after sort (payment time ascending): {page_order_numbers[:10]}...")
+        print(f"Order numbers after sort (payment time ascending): {len(page_order_numbers)} found")
         print(f"Total: {len(page_order_numbers)}")
 
         assert len(page_order_numbers) > 0, "页面未获取到订单号"
@@ -73,17 +72,16 @@ class TestExportFlowPrecise:
         print("=" * 70)
         timestamp = str(int(time.time() * 1000))
         order_param = ",".join(page_order_numbers[:3]) if page_order_numbers else ""
-        print(f"Order param for export: {order_param}")
+        print(f"Order param for export: {len(page_order_numbers[:3])} order numbers")
         export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo={order_param}")
         logged_in_page.wait_for_load_state("networkidle")
 
-        print(f"Export page URL: {export_page.current_url}")
+        print("Export page URL: same-origin export route reached")
 
         print("\n" + "=" * 70)
         print("Step 7: Click template select dropdown")
         print("=" * 70)
-        logged_in_page.evaluate(
-            """
+        logged_in_page.evaluate("""
             () => {
                 const selects = document.querySelectorAll('.el-select');
                 if (selects.length > 0) {
@@ -92,15 +90,13 @@ class TestExportFlowPrecise:
                 }
                 return false;
             }
-        """
-        )
+        """)
         logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)
         print("Step 8: List available templates")
         print("=" * 70)
-        templates = logged_in_page.evaluate(
-            """
+        templates = logged_in_page.evaluate("""
             () => {
                 const result = [];
                 const items = document.querySelectorAll('.el-select-dropdown__item, .el-option');
@@ -112,8 +108,7 @@ class TestExportFlowPrecise:
                 }
                 return result;
             }
-        """
-        )
+        """)
         print(f"Found {len(templates)} templates:")
         for template in templates:
             print(f"  [{template['index']}] '{template['text']}'")
@@ -121,8 +116,7 @@ class TestExportFlowPrecise:
         print("\n" + "=" * 70)
         print("Step 9: Select template by keyword 'Dayone'")
         print("=" * 70)
-        selected_template_text = logged_in_page.evaluate(
-            """
+        selected_template_text = logged_in_page.evaluate("""
             () => {
                 const items = document.querySelectorAll('.el-select-dropdown__item, .el-option');
                 for (let i = 0; i < items.length; i++) {
@@ -134,8 +128,7 @@ class TestExportFlowPrecise:
                 }
                 return null;
             }
-        """
-        )
+        """)
         print(f"Selected template: '{selected_template_text}'")
         if selected_template_text is None:
             _skip_ci_environment_issue("未找到Dayone导出模板")
@@ -148,20 +141,16 @@ class TestExportFlowPrecise:
         print("Step 10: Ensure order number field is selected (use template defaults)")
         print("=" * 70)
 
-        selected_count = logged_in_page.evaluate(
-            """
+        selected_count = logged_in_page.evaluate("""
             () => {
                 return document.querySelectorAll('input[type="checkbox"]:checked').length;
             }
-        """
-        )
-        total_count = logged_in_page.evaluate(
-            """
+        """)
+        total_count = logged_in_page.evaluate("""
             () => {
                 return document.querySelectorAll('input[type="checkbox"]').length;
             }
-        """
-        )
+        """)
         print(f"Default selected fields: {selected_count}/{total_count}")
 
         print("\n" + "=" * 70)
@@ -229,7 +218,7 @@ class TestExportFlowPrecise:
 
         wb.close()
 
-        print(f"Exported order numbers: {order_numbers[:10]}...")
+        print(f"Exported order numbers: {len(order_numbers)} found")
         print(f"Total exported: {len(order_numbers)}")
 
         exported_unique_order_numbers = []
@@ -239,7 +228,7 @@ class TestExportFlowPrecise:
                 seen_exported_order_numbers.add(order_num)
                 exported_unique_order_numbers.append(order_num)
 
-        print(f"Exported unique order numbers: {exported_unique_order_numbers[:10]}...")
+        print(f"Exported unique order numbers: {len(exported_unique_order_numbers)} found")
         print(f"Total exported unique: {len(exported_unique_order_numbers)}")
 
         print("\n" + "=" * 70)
@@ -251,22 +240,20 @@ class TestExportFlowPrecise:
             if order_num in exported_unique_order_numbers:
                 matching_numbers.append(order_num)
 
-        print(f"Matching order numbers: {matching_numbers}")
+        print(f"Matching order numbers: {len(matching_numbers)} found")
         print(f"Total matched: {len(matching_numbers)}")
 
         expected_order_numbers = page_order_numbers[:3]
         missing_order_numbers = [num for num in expected_order_numbers if num not in exported_unique_order_numbers]
 
         if missing_order_numbers:
-            print(f"\n❌ 导出文件缺少请求导出的订单号: {missing_order_numbers}")
-            pytest.fail(f"导出文件缺少请求导出的订单号: {missing_order_numbers}")
+            print(f"\n❌ 导出文件缺少请求导出的订单号，缺少数量: {len(missing_order_numbers)}")
+            pytest.fail(f"导出文件缺少请求导出的订单号，缺少数量: {len(missing_order_numbers)}")
 
-        unexpected_order_numbers = [
-            num for num in exported_unique_order_numbers if num not in expected_order_numbers
-        ]
+        unexpected_order_numbers = [num for num in exported_unique_order_numbers if num not in expected_order_numbers]
         if unexpected_order_numbers:
-            print(f"\n❌ 导出文件包含未请求的订单号: {unexpected_order_numbers}")
-            pytest.fail(f"导出文件包含未请求的订单号: {unexpected_order_numbers}")
+            print(f"\n❌ 导出文件包含未请求的订单号，异常数量: {len(unexpected_order_numbers)}")
+            pytest.fail(f"导出文件包含未请求的订单号，异常数量: {len(unexpected_order_numbers)}")
 
         print("\n✅ 导出订单覆盖验证通过：导出文件包含且仅包含请求导出的订单号")
 

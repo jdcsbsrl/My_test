@@ -47,8 +47,7 @@ class AuditGateway:
 
         self.notify_callback = notify_callback or print
 
-    def audit(self, target: Any, audit_type: AuditType = AuditType.ALL,
-              context: dict = None) -> AuditResult:
+    def audit(self, target: Any, audit_type: AuditType = AuditType.ALL, context: dict = None) -> AuditResult:
         """统一审核入口
 
         Args:
@@ -76,12 +75,14 @@ class AuditGateway:
             approval_result = self.approver.request_approval(context)
             if not approval_result["approved"]:
                 result = AuditResult(passed=False)
-                result.issues.append(AuditIssue(
-                    severity="error",
-                    rule_id="OPERATION_NOT_APPROVED",
-                    category="approval",
-                    message=f"操作未获得用户批准: {approval_result['reason']}",
-                ))
+                result.issues.append(
+                    AuditIssue(
+                        severity="error",
+                        rule_id="OPERATION_NOT_APPROVED",
+                        category="approval",
+                        message=f"操作未获得用户批准: {approval_result['reason']}",
+                    )
+                )
                 result.execution_time = (datetime.now() - start_time).total_seconds()
                 result.audit_type = audit_type_enum
                 self.logger.log(result, context)
@@ -99,6 +100,7 @@ class AuditGateway:
         block_on_fail = context.get("block_on_fail", self.config.enforce_hard_block)
         if not result.passed and block_on_fail:
             from .audit_agent_enhanced import AuditFailedException
+
             error_report = self._generate_error_report(result, audit_type_enum)
             raise AuditFailedException(error_report)
 
@@ -141,7 +143,7 @@ class AuditGateway:
 
     def _generate_error_report(self, result: AuditResult, audit_type: AuditType) -> str:
         """生成错误报告"""
-        audit_type_str = audit_type.value if hasattr(audit_type, 'value') else str(audit_type)
+        audit_type_str = audit_type.value if hasattr(audit_type, "value") else str(audit_type)
         lines = [
             "=" * 80,
             f"审核失败报告 - {audit_type_str}",

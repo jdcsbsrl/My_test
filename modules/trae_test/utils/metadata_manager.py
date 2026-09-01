@@ -156,36 +156,36 @@ class MetadataManager:
         }
 
         for filename in os.listdir(original_dir):
-                if filename.endswith(".json") or filename.endswith(".md"):
-                    file_path = os.path.join(original_dir, filename)
+            if filename.endswith(".json") or filename.endswith(".md"):
+                file_path = os.path.join(original_dir, filename)
 
-                    title = os.path.splitext(filename)[0]
-                    file_id = title.replace(" ", "_").lower()
+                title = os.path.splitext(filename)[0]
+                file_id = title.replace(" ", "_").lower()
 
-                    stat = os.stat(file_path)
+                stat = os.stat(file_path)
 
-                    tags = list(set(self._extract_file_tags(title) + self._extract_declared_tags(file_path)))
-                    classification = self._classify_file(title)
-                    chunk_count = self._count_actual_chunks(file_id)
+                tags = list(set(self._extract_file_tags(title) + self._extract_declared_tags(file_path)))
+                classification = self._classify_file(title)
+                chunk_count = self._count_actual_chunks(file_id)
 
-                    file_info = {
-                        "file_id": file_id,
-                        "title": title,
-                        "original_path": f"data/original/{filename}",
-                        "chunks_path": f"data/chunks/{file_id}/",
-                        "tags": tags,
-                        "classification": classification,
-                        "hash": self._compute_file_hash(file_path),
-                        "created_at": datetime.datetime.fromtimestamp(stat.st_ctime).isoformat(),
-                        "last_modified": datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                        "chunk_count": chunk_count,
-                        "total_size": stat.st_size,
-                    }
+                file_info = {
+                    "file_id": file_id,
+                    "title": title,
+                    "original_path": f"data/original/{filename}",
+                    "chunks_path": f"data/chunks/{file_id}/",
+                    "tags": tags,
+                    "classification": classification,
+                    "hash": self._compute_file_hash(file_path),
+                    "created_at": datetime.datetime.fromtimestamp(stat.st_ctime).isoformat(),
+                    "last_modified": datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "chunk_count": chunk_count,
+                    "total_size": stat.st_size,
+                }
 
-                    registry["files"][file_id] = file_info
+                registry["files"][file_id] = file_info
 
-                    result["files"].append(title)
-                    result["registered_files"] += 1
+                result["files"].append(title)
+                result["registered_files"] += 1
 
         if previous_count and result["registered_files"] < previous_count and not allow_shrink:
             result.update(

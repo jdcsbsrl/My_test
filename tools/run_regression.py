@@ -20,5 +20,6 @@ def main() -> int:
     failed = sum(1 for item in report.results if item["status"] == "FAIL")
     return 1 if failed else 0
 
+
 if __name__ == "__main__":
     sys.exit(main())

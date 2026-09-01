@@ -4,7 +4,6 @@ import pytest
 
 from modules.auto_test.api.base_api import BaseAPI
 
-
 pytestmark = pytest.mark.unit
 
 

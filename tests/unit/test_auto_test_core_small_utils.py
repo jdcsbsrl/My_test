@@ -15,7 +15,6 @@ from modules.auto_test.core.harness_metrics import (
     metrics_enabled,
 )
 
-
 pytestmark = pytest.mark.unit
 
 

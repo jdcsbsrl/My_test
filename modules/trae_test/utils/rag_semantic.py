@@ -21,7 +21,6 @@ from modules.auto_test.core.config_manager import EnvironmentType, EnvironmentSe
 
 from .path_utils import find_project_root
 
-
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]{1,2}")
 
 
@@ -52,8 +51,7 @@ def validate_rag_environment(env: str | None = None) -> str:
     current = env or os.getenv("TEST_ENV", "test")
     if not EnvironmentType.is_allowed(current):
         raise EnvironmentSecurityError(
-            "环境安全异常: RAG 向量化与生成仅允许在 test, test_env, uat 环境执行。"
-            f"当前环境: {current}"
+            "环境安全异常: RAG 向量化与生成仅允许在 test, test_env, uat 环境执行。" f"当前环境: {current}"
         )
     return current
 
@@ -177,7 +175,11 @@ class SemanticIndexer:
         items: list[dict[str, Any]] = []
         for chunk, text, vector in zip(chunks, texts, vectors):
             metadata = chunk.get("metadata", {})
-            chunk_id = str(chunk.get("chunk_id") or metadata.get("chunk_id") or hashlib.sha1(text.encode()).hexdigest())
+            chunk_id = str(
+                chunk.get("chunk_id")
+                or metadata.get("chunk_id")
+                or hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()
+            )
             items.append(
                 {
                     "id": chunk_id,

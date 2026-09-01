@@ -190,7 +190,8 @@ class AuditLogger:
             context_json = json.dumps(context, ensure_ascii=False, default=str)
 
             if self._use_pg:
-                result = session.execute(text("""
+                result = session.execute(
+                    text("""
                     INSERT INTO audit_logs (
                         timestamp, audit_type, passed, score, execution_time,
                         error_count, warning_count, issues_json, suggestions_json, context_json
@@ -198,18 +199,20 @@ class AuditLogger:
                         :timestamp, :audit_type, :passed, :score, :execution_time,
                         :error_count, :warning_count, :issues_json, :suggestions_json, :context_json
                     ) RETURNING id
-                """), {
-                    "timestamp": timestamp,
-                    "audit_type": audit_type,
-                    "passed": passed,
-                    "score": score,
-                    "execution_time": execution_time,
-                    "error_count": error_count,
-                    "warning_count": warning_count,
-                    "issues_json": issues_json,
-                    "suggestions_json": suggestions_json,
-                    "context_json": context_json,
-                })
+                """),
+                    {
+                        "timestamp": timestamp,
+                        "audit_type": audit_type,
+                        "passed": passed,
+                        "score": score,
+                        "execution_time": execution_time,
+                        "error_count": error_count,
+                        "warning_count": warning_count,
+                        "issues_json": issues_json,
+                        "suggestions_json": suggestions_json,
+                        "context_json": context_json,
+                    },
+                )
                 session.commit()
                 return result.scalar()
             else:
@@ -264,6 +267,7 @@ class AuditLogger:
         Returns:
             list[dict]: 审核日志列表
         """
+        limit, offset = self._validate_pagination(limit, offset)
         conditions = []
         params: dict[str, Any] = {}
 
@@ -284,22 +288,36 @@ class AuditLogger:
             params["issue_category"] = f"%{issue_category}%"
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
+        # where_clause 只由上方固定字段和操作符片段组成，值均使用参数绑定。
+        sql = (
+            "SELECT * FROM audit_logs WHERE "
+            f"{where_clause} "  # nosec B608
+            "ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
+        )
+        query_params = {**params, "limit": limit, "offset": offset}
 
         def do_query(session):
             if self._use_pg:
-                sql = f"SELECT * FROM audit_logs WHERE {where_clause} ORDER BY timestamp DESC LIMIT :limit OFFSET :offset"
-                pg_params = params.copy()
-                pg_params["limit"] = limit
-                pg_params["offset"] = offset
-                rows = session.execute(text(sql), pg_params).fetchall()
+                rows = session.execute(text(sql), query_params).fetchall()
             else:
-                sql = f"SELECT * FROM audit_logs WHERE {where_clause} ORDER BY timestamp DESC LIMIT {limit} OFFSET {offset}"
-                sqlite_params = list(params.values())
-                sqlite_sql = sql.replace(":", "?")
-                rows = session.execute(sqlite_sql, sqlite_params).fetchall()
+                # SQLite 同样保留命名参数，不再把分页值拼接到 SQL 中。
+                rows = session.execute(sql, query_params).fetchall()
             return [self._row_to_dict(row) for row in rows]
 
         return self._execute_in_session(do_query)
+
+    @staticmethod
+    def _validate_pagination(limit: int, offset: int) -> tuple[int, int]:
+        """验证分页参数，避免类型绕过、无界查询和 SQL 拼接。"""
+        if isinstance(limit, bool) or not isinstance(limit, int):
+            raise TypeError("limit must be an integer")
+        if not 1 <= limit <= 10000:
+            raise ValueError("limit must be between 1 and 10000")
+        if isinstance(offset, bool) or not isinstance(offset, int):
+            raise TypeError("offset must be an integer")
+        if offset < 0:
+            raise ValueError("offset must be greater than or equal to 0")
+        return limit, offset
 
     def get_summary(self, days: int = 7) -> dict:
         """获取审核摘要统计
@@ -317,13 +335,10 @@ class AuditLogger:
         def do_summary(session):
             if self._use_pg:
                 total = session.execute(
-                    text("SELECT COUNT(*) FROM audit_logs WHERE timestamp >= :since"),
-                    {"since": since}
+                    text("SELECT COUNT(*) FROM audit_logs WHERE timestamp >= :since"), {"since": since}
                 ).scalar()
             else:
-                total = session.execute(
-                    "SELECT COUNT(*) FROM audit_logs WHERE timestamp >= ?", (since,)
-                ).fetchone()[0]
+                total = session.execute("SELECT COUNT(*) FROM audit_logs WHERE timestamp >= ?", (since,)).fetchone()[0]
 
             if total == 0:
                 return {
@@ -341,24 +356,29 @@ class AuditLogger:
             if self._use_pg:
                 passed = session.execute(
                     text("SELECT COUNT(*) FROM audit_logs WHERE timestamp >= :since AND passed = true"),
-                    {"since": since}
+                    {"since": since},
                 ).scalar()
 
-                avg_time = session.execute(
-                    text("SELECT AVG(execution_time) FROM audit_logs WHERE timestamp >= :since"),
-                    {"since": since}
-                ).scalar() or 0.0
+                avg_time = (
+                    session.execute(
+                        text("SELECT AVG(execution_time) FROM audit_logs WHERE timestamp >= :since"), {"since": since}
+                    ).scalar()
+                    or 0.0
+                )
 
                 error_stats = session.execute(
                     text("SELECT SUM(error_count), SUM(warning_count) FROM audit_logs WHERE timestamp >= :since"),
-                    {"since": since}
+                    {"since": since},
                 ).fetchone()
                 total_errors = error_stats[0] or 0
                 total_warnings = error_stats[1] or 0
 
                 type_rows = session.execute(
-                    text("SELECT audit_type, COUNT(*) as cnt FROM audit_logs WHERE timestamp >= :since GROUP BY audit_type"),
-                    {"since": since}
+                    text(
+                        "SELECT audit_type, COUNT(*) as cnt FROM audit_logs "
+                        "WHERE timestamp >= :since GROUP BY audit_type"
+                    ),
+                    {"since": since},
                 ).fetchall()
                 type_distribution = {row[0]: row[1] for row in type_rows}
             else:
@@ -366,9 +386,12 @@ class AuditLogger:
                     "SELECT COUNT(*) FROM audit_logs WHERE timestamp >= ? AND passed = 1", (since,)
                 ).fetchone()[0]
 
-                avg_time = session.execute(
-                    "SELECT AVG(execution_time) FROM audit_logs WHERE timestamp >= ?", (since,)
-                ).fetchone()[0] or 0.0
+                avg_time = (
+                    session.execute(
+                        "SELECT AVG(execution_time) FROM audit_logs WHERE timestamp >= ?", (since,)
+                    ).fetchone()[0]
+                    or 0.0
+                )
 
                 error_stats = session.execute(
                     "SELECT SUM(error_count), SUM(warning_count) FROM audit_logs WHERE timestamp >= ?",
@@ -407,10 +430,7 @@ class AuditLogger:
 
         def do_cleanup(session):
             if self._use_pg:
-                result = session.execute(
-                    text("DELETE FROM audit_logs WHERE timestamp < :cutoff"),
-                    {"cutoff": cutoff}
-                )
+                result = session.execute(text("DELETE FROM audit_logs WHERE timestamp < :cutoff"), {"cutoff": cutoff})
                 deleted = result.rowcount
             else:
                 cursor = session.execute("DELETE FROM audit_logs WHERE timestamp < ?", (cutoff,))
@@ -437,8 +457,7 @@ class AuditLogger:
         def do_get(session):
             if self._use_pg:
                 row = session.execute(
-                    text("SELECT * FROM audit_logs WHERE id = :log_id"),
-                    {"log_id": log_id}
+                    text("SELECT * FROM audit_logs WHERE id = :log_id"), {"log_id": log_id}
                 ).fetchone()
             else:
                 row = session.execute("SELECT * FROM audit_logs WHERE id = ?", (log_id,)).fetchone()

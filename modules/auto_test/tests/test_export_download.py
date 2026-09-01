@@ -13,45 +13,50 @@ from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.auto_test.pages.sales_order_page import SalesOrderPage
 
 
-
 @pytest.mark.regression
 @pytest.mark.ui
 @pytest.mark.p1
 class TestExportDownload:
     """Test export download functionality."""
 
-    def test_export_download_simple(self, logged_in_page: Page) -> None:
-        """Test simple export download."""
+    @pytest.mark.parametrize(
+        ("store_name", "store_id"),
+        SalesOrderPage.SALES_EXPORT_STORE_CASES,
+        ids=lambda case: case[0].replace("_", "-") if isinstance(case, tuple) else str(case),
+    )
+    def test_export_download_simple(
+        self,
+        logged_in_page: Page,
+        store_name: str,
+        store_id: str,
+    ) -> None:
+        """Filter by a known store before testing the export backend."""
         export_page = SalesOrderExportPage(logged_in_page)
         sales_order_page = SalesOrderPage(logged_in_page)
 
-        print("\n=== Step 1: Navigate to export page ===")
+        print(f"\n=== Step 1: Filter store {store_name} ({store_id}) ===")
         sales_order_page.navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_load_state("networkidle")
-        order_numbers = sales_order_page.get_sorted_order_numbers(limit=1)
-        assert order_numbers, "测试环境没有可用于导出的订单"
+        sales_order_page.wait_for_order_page_ready()
+        order_numbers = sales_order_page.search_by_store(store_name, store_id)
+        print(f"Filtered order: {order_numbers[0]}")
+
+        print("\n=== Step 2: Navigate to export page ===")
         timestamp = str(int(time.time() * 1000))
-        export_page.navigate_to(
-            f"sales/order/exportPage?t={timestamp}&orderNo={order_numbers[0]}"
-        )
+        export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo={order_numbers[0]}")
         assert export_page.wait_for_export_page(timeout=30000), "导出页面未完成加载"
 
-        print(f"URL: {export_page.current_url}")
+        print("URL: same-origin export route reached")
 
-        print("\n=== Step 2: Check export page structure ===")
-        page_html = logged_in_page.evaluate(
-            """
+        print("\n=== Step 3: Check export page structure ===")
+        page_html = logged_in_page.evaluate("""
             () => {
                 return document.body.innerHTML.substring(0, 5000);
             }
-        """
-        )
-        print("Page HTML snippet (first 5000 chars):")
-        print(page_html[:2000])
+        """)
+        print(f"Page HTML captured for structure check: {len(page_html)} characters")
 
-        print("\n=== Step 3: Check all buttons ===")
-        buttons = logged_in_page.evaluate(
-            """
+        print("\n=== Step 4: Check all buttons ===")
+        buttons = logged_in_page.evaluate("""
             () => {
                 const result = [];
                 const btns = document.querySelectorAll('button');
@@ -68,13 +73,12 @@ class TestExportDownload:
                 }
                 return result;
             }
-        """
-        )
+        """)
         print(f"Found {len(buttons)} buttons:")
         for btn in buttons:
             print(f"  [{btn['index']}] text='{btn['text']}', class={btn['className']}, id={btn['id']}")
 
-        print("\n=== Step 4: Select the first available export template ===")
+        print("\n=== Step 5: Select the first available export template ===")
         selects = logged_in_page.locator(".el-select")
         assert selects.count() > 0, "未找到导出模板选择器"
         selects.first.click()
@@ -83,7 +87,7 @@ class TestExportDownload:
         assert options.count() > 0, "测试环境未返回可用导出模板"
         options.first.click()
 
-        print("\n=== Step 5: Wait for download (the page object performs one click) ===")
+        print("\n=== Step 6: Wait for download (the page object performs one click) ===")
         result = export_page.wait_for_download(timeout=120000)
         assert result["success"], result.get("error", "download failed")
         assert result["file_size"] > 0, "下载文件为空"

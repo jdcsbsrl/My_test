@@ -4,7 +4,6 @@ import pytest
 
 from modules.auto_test.api.customer_api_resource import CustomerApiResourceAPI
 
-
 pytestmark = pytest.mark.unit
 
 

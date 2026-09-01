@@ -15,10 +15,10 @@ from typing import Any
 from .dir_validator import _load_module_hierarchy
 from .excel_generator import ExcelGenerator
 from .knowledge_retriever import KnowledgeRetriever
-from .template_builder import ensure_template
+from .runtime_quality import attach_runtime_quality, read_runtime_quality
+from .template_builder import LEGACY_RUNTIME_FIELDS, ensure_template
 from .test_case_strategy import TestCaseOptimizer, TestCaseScoreEngine, TestCaseStrategy
 from .coverage_matrix import CoverageMatrix, build_requirement_coverage_matrix
-
 
 QUALITY_SCORE_GATE = 85.0
 MAX_AUTO_OPTIMIZATION_ATTEMPTS = 3
@@ -135,7 +135,7 @@ class TestCaseGenerator:
         # ── 优先级计算 ───────────────────────────────────────
         priority_p = TestCaseStrategy.determine_priority_simple(
             test_point=keyword,
-            business_rule=knowledge_str[:TestCaseStrategy._CASE_NAME_MAX_LENGTH],
+            business_rule=knowledge_str[: TestCaseStrategy._CASE_NAME_MAX_LENGTH],
             constraint="",
             scenario_type=scenario_type,
         )
@@ -146,7 +146,7 @@ class TestCaseGenerator:
         # ── 步骤与预期结果智能生成 ────────────────────────────
         steps_str, expected_str = TestCaseStrategy.generate_case_content(
             test_point=keyword,
-            business_rule=knowledge_str[:TestCaseStrategy._BUSINESS_RULE_CONTENT_LENGTH],
+            business_rule=knowledge_str[: TestCaseStrategy._BUSINESS_RULE_CONTENT_LENGTH],
             scenario_type=scenario_type,
         )
         # ──────────────────────────────────────────────────────
@@ -219,7 +219,9 @@ class TestCaseGenerator:
         for top, second_map in hierarchy.items():
             top_norm = "".join(top.lower().split())
             if top_norm and top_norm in normalized:
-                candidates.append((1, f"{top} - {next(iter(second_map), '')} - {next(iter(second_map.values()), [''])[0]}"))
+                candidates.append(
+                    (1, f"{top} - {next(iter(second_map), '')} - {next(iter(second_map.values()), [''])[0]}")
+                )
             for second, thirds in (second_map or {}).items():
                 second_norm = "".join(second.lower().split())
                 if second_norm and second_norm in normalized:
@@ -252,17 +254,20 @@ class TestCaseGenerator:
         ensure_template()
 
         # 导出是最终交付动作，禁止绕过评分和最终审核门禁。
-        not_ready = [
-            case.get("用例名称", "未命名用例")
-            for case in cases
-            if case.get("最终审核通过") is not True
-            or float(case.get("最终评分", case.get("质量评分", 0)) or 0) < QUALITY_SCORE_GATE
-            or case.get("用例状态") != "正常"
-        ]
+        not_ready = []
+        for case in cases:
+            runtime = read_runtime_quality(case)
+            if (
+                runtime.final_audit_passed is not True
+                or runtime.needs_human_review
+                or float(runtime.final_score if runtime.final_score is not None else case.get("质量评分", 0) or 0)
+                < QUALITY_SCORE_GATE
+                or case.get("用例状态") != "正常"
+            ):
+                not_ready.append(case.get("用例名称", "未命名用例"))
         if not_ready:
             raise RuntimeError(
-                f"最终审核未通过，禁止导出 {len(not_ready)} 条用例；"
-                f"评分门槛为{QUALITY_SCORE_GATE:g}分"
+                f"最终审核未通过，禁止导出 {len(not_ready)} 条用例；" f"评分门槛为{QUALITY_SCORE_GATE:g}分"
             )
 
         return self.excel_generator.generate(cases, output_path, extra_fields=extra_fields)
@@ -288,6 +293,7 @@ class TestCaseGenerator:
             导出文件的路径
         """
         from modules.trae_test.orchestrator.audit_gateway import AuditGateway
+
         cases = self.generate_cases(keyword, limit)
         score_engine = TestCaseScoreEngine()
         optimizer = TestCaseOptimizer(score_engine)
@@ -300,14 +306,18 @@ class TestCaseGenerator:
         audit_result = gateway.audit(cases, "test_case", context)
 
         for case in cases:
-            canonical_score = float(case.get("最终评分", case.get("质量评分", 0)) or 0)
-            case["最终评分"] = canonical_score
+            canonical_score = float(case.get("质量评分", 0) or 0)
             case["质量评分"] = canonical_score
-            case["最终审核通过"] = bool(audit_result.passed) and canonical_score >= QUALITY_SCORE_GATE
             case["用例状态"] = "正常"
-            case["needs_human_review"] = not case["最终审核通过"]
+            runtime = read_runtime_quality(case)
+            runtime.final_score = canonical_score
+            runtime.final_audit_passed = bool(audit_result.passed) and canonical_score >= QUALITY_SCORE_GATE
+            runtime.needs_human_review = not runtime.final_audit_passed
+            attach_runtime_quality(case, runtime)
+            for field in LEGACY_RUNTIME_FIELDS:
+                case.pop(field, None)
 
-        if not audit_result.passed or any(not case["最终审核通过"] for case in cases):
+        if not audit_result.passed or any(not read_runtime_quality(case).final_audit_passed for case in cases):
             raise RuntimeError(f"审核未通过，导出已阻断：{len(audit_result.errors)}个错误")
 
         return self.export_to_excel(cases, output_path, extra_fields=extra_fields)
@@ -318,27 +328,30 @@ class TestCaseGenerator:
     ) -> dict[str, Any]:
         """记录不可覆盖的评分轨迹，并在低于85分时自动优化或退回人工。"""
         original = float(score_engine.score(case))
-        case.setdefault("原始评分", original)
         execution_count = int(case.get("execution_count", 0) or 0)
         cold_start_threshold = int(getattr(score_engine, "_COLD_START_THRESHOLD", 10) or 10)
-        case["是否冷启动评分"] = execution_count < cold_start_threshold
-        case["评分置信度"] = round(float(score_engine._calculate_confidence(execution_count)), 4)
-        case["评分历史"] = list(case.get("评分历史", []))
-        case["评分历史"].append({"阶段": "original", "评分": original})
+        runtime = read_runtime_quality(case)
+        runtime.original_score = original if runtime.original_score is None else runtime.original_score
+        runtime.score_threshold = QUALITY_SCORE_GATE
+        runtime.is_cold_start = execution_count < cold_start_threshold
+        runtime.confidence = round(float(score_engine._calculate_confidence(execution_count)), 4)
+        runtime.score_history = list(runtime.score_history)
+        runtime.score_history.append({"stage": "original", "score": original})
         current = original
         for attempt in range(1, MAX_AUTO_OPTIMIZATION_ATTEMPTS + 1):
             if current >= QUALITY_SCORE_GATE:
                 break
             optimizer.optimize(case, target_score=QUALITY_SCORE_GATE)
             current = float(score_engine.score(case))
-            case["评分历史"].append({"阶段": f"optimized_{attempt}", "评分": current})
-        case["优化后评分"] = current
-        case["最终评分"] = current
+            runtime.score_history.append({"stage": f"optimized_{attempt}", "score": current})
+        runtime.optimized_score = current
+        runtime.final_score = current
+        runtime.optimization_attempts = max(0, len(runtime.score_history) - 1)
+        runtime.needs_human_review = current < QUALITY_SCORE_GATE
+        runtime.final_audit_passed = False
+        attach_runtime_quality(case, runtime)
         case["质量评分"] = current
-        case["优化次数"] = max(0, len(case["评分历史"]) - 1)
         case["用例状态"] = "正常"
-        case["needs_human_review"] = current < QUALITY_SCORE_GATE
-        case["最终审核通过"] = False
         return case
 
 

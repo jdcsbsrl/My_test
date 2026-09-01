@@ -48,4 +48,5 @@ class AuthFacade(_CanonicalAuthFacade):
         attach_request_info(response)
         return response
 
+
 __all__ = ["AuthFacade"]

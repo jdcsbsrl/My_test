@@ -136,7 +136,9 @@ class TestCaseBusinessContentAudit:
     def test_rejects_rough_steps_and_unobservable_results(self):
         from modules.trae_test.orchestrator.auditors.test_case_auditor import TestCaseAuditor
 
-        result = TestCaseAuditor().audit([self._case(用例步骤="1. 执行相关操作\n2. 检查结果\n3. 进入相关页面", 预期结果="1. 符合预期\n2. 页面正常")])
+        result = TestCaseAuditor().audit(
+            [self._case(用例步骤="1. 执行相关操作\n2. 检查结果\n3. 进入相关页面", 预期结果="1. 符合预期\n2. 页面正常")]
+        )
         codes = {issue.rule_id for issue in result.issues if issue.severity == "error"}
         assert "TC_STEP_VAGUE" in codes
         assert "TC_EXPECTED_VAGUE" in codes

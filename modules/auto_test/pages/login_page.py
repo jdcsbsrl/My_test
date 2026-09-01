@@ -1,6 +1,5 @@
 import allure
 from playwright.sync_api import Page
-from urllib.parse import urlsplit
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -31,15 +30,31 @@ class LoginPage(BasePage):
             'input[id*="password"]',
         ]
         self._login_button_selectors = [
-            'button:has-text("鐧?褰?)', ".el-button--primary", ".el-button.el-button--primary",
-            "button.el-button--primary", '//button[contains(text(), "鐧?)]',
-            '//button[contains(text(), "褰?)]', 'button[type="button"].el-button--primary',
-            'button[type="button"]', 'button:has-text("鐧诲綍")',
-            '//button[contains(text(), "鐧诲綍")]', 'button[type="submit"]',
-            'input[type="submit"]', ".ant-btn-primary", ".login-btn", ".login-button",
-            '[data-testid="login-btn"]', '[data-test-id="login-btn"]', "#login-btn",
-            "#submit-btn", "form button", "form > button", ".btn-primary", ".submit-btn",
-            "button.submit", "button.primary",
+            'button:has-text("鐧?褰?)',
+            ".el-button--primary",
+            ".el-button.el-button--primary",
+            "button.el-button--primary",
+            '//button[contains(text(), "鐧?)]',
+            '//button[contains(text(), "褰?)]',
+            'button[type="button"].el-button--primary',
+            'button[type="button"]',
+            'button:has-text("鐧诲綍")',
+            '//button[contains(text(), "鐧诲綍")]',
+            'button[type="submit"]',
+            'input[type="submit"]',
+            ".ant-btn-primary",
+            ".login-btn",
+            ".login-button",
+            '[data-testid="login-btn"]',
+            '[data-test-id="login-btn"]',
+            "#login-btn",
+            "#submit-btn",
+            "form button",
+            "form > button",
+            ".btn-primary",
+            ".submit-btn",
+            "button.submit",
+            "button.primary",
         ]
 
     def has_username_input(self, timeout: int = 5000) -> bool:
@@ -68,19 +83,19 @@ class LoginPage(BasePage):
             pass
         logger.info("导航到登录页面")
 
-    @allure.step("Enter username")
     def enter_username(self, username: str) -> None:
         """输入用户名"""
-        if not self.try_fill(self._username_selectors, username):
-            raise ValueError("无法找到用户名输入框")
-        logger.info("输入用户名（账号已填写）")
+        with allure.step("Enter username"):
+            if not self.try_fill(self._username_selectors, username):
+                raise ValueError("无法找到用户名输入框")
+            logger.info("输入用户名（账号已填写）")
 
-    @allure.step("Enter password")
     def enter_password(self, password: str) -> None:
         """输入密码"""
-        if not self.try_fill(self._password_selectors, password):
-            raise ValueError("无法找到密码输入框")
-        logger.info("输入密码")
+        with allure.step("Enter password"):
+            if not self.try_fill(self._password_selectors, password):
+                raise ValueError("无法找到密码输入框")
+            logger.info("输入密码")
 
     @allure.step("Click login button")
     def click_login(self) -> None:
@@ -112,7 +127,6 @@ class LoginPage(BasePage):
         logger.info("尝试按Enter键提交表单")
         self.page.keyboard.press("Enter")
 
-    @allure.step("Perform login")
     def login(self, username: str, password: str, timeout: int = 45000) -> bool:
         """执行完整登录流程，支持重试机制
 
@@ -126,12 +140,21 @@ class LoginPage(BasePage):
         """
         import random
 
-        # One retry is sufficient for transient navigation issues. Failed
-        # credentials should return promptly instead of polling for 45s three
-        # times and then being rerun by pytest again.
+        # Do not decorate this method: Allure would serialize username and
+        # password as step parameters. The nested step contains no values.
+        with allure.step("Perform login"):
+            return self._login_without_recording_credentials(username, password, timeout, random)
+
+    def _login_without_recording_credentials(self, username: str, password: str, timeout: int, random) -> bool:
+
+        # One retry is sufficient for transient navigation issues. Invalid
+        # credentials remain bounded, while valid credentials keep the caller's
+        # timeout so a slow CI backend is not mistaken for a failed login.
         max_retries = 1
-        effective_timeout = min(timeout, 15000) if (not username or not password) else min(timeout, 20000)
+        effective_timeout = min(timeout, 15000) if (not username or not password) else max(20000, timeout)
         for attempt in range(max_retries + 1):
+            login_responses = []
+            response_handler = None
             try:
                 self.navigate_to_login()
                 self.wait_for_load_state("networkidle")
@@ -146,6 +169,26 @@ class LoginPage(BasePage):
 
                 self._handle_checkbox()
 
+                def capture_login_response(response) -> None:
+                    if "/auth/login" not in response.url:
+                        return
+                    summary = {"status": response.status}
+                    try:
+                        payload = response.json()
+                        if isinstance(payload, dict):
+                            summary["code"] = payload.get("code")
+                            summary["message"] = payload.get("message") or payload.get("msg")
+                            summary["has_token"] = bool(
+                                payload.get("token")
+                                or payload.get("accessToken")
+                                or (isinstance(payload.get("data"), dict) and payload["data"].get("token"))
+                            )
+                    except Exception:
+                        summary["body"] = "unreadable"
+                    login_responses.append(summary)
+
+                response_handler = capture_login_response
+                self.page.on("response", response_handler)
                 self.click_login()
 
                 login_success = False
@@ -163,10 +206,21 @@ class LoginPage(BasePage):
                     logger.info("登录成功")
                     return True
 
-                logger.warning(f"登录失败（尝试 {attempt + 1}）：URL仍包含login或未检测到登录成功标识")
+                logger.warning(
+                    "登录失败（尝试 {}）：URL仍包含login或未检测到登录成功标识，接口摘要={}，当前URL={}",
+                    attempt + 1,
+                    login_responses[-3:],
+                    self.current_url,
+                )
 
             except Exception as e:
                 logger.error(f"登录异常（尝试 {attempt + 1}）: {e}")
+            finally:
+                if response_handler is not None:
+                    try:
+                        self.page.remove_listener("response", response_handler)
+                    except Exception:
+                        pass
 
             if attempt < max_retries:
                 logger.info(f"准备重试登录，第 {attempt + 2} 次尝试")

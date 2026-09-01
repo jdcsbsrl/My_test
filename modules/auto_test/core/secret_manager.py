@@ -79,19 +79,33 @@ class SecretManager:
             f"{env.upper()}_CLIENTID", environment=env, fallbacks=(f"TEST_{env.upper()}_CLIENTID", "TEST_CLIENTID")
         )
         encrypt_key = get_secret(
-            f"{env.upper()}_ENCRYPT_KEY", environment=env, fallbacks=(f"TEST_{env.upper()}_ENCRYPT_KEY", "TEST_ENCRYPT_KEY")
+            f"{env.upper()}_ENCRYPT_KEY",
+            environment=env,
+            fallbacks=(f"TEST_{env.upper()}_ENCRYPT_KEY", "TEST_ENCRYPT_KEY"),
         )
-        isencrypt = get_secret(
-            f"{env.upper()}_ISENCRYPT", environment=env, fallbacks=(f"TEST_{env.upper()}_ISENCRYPT", "TEST_ISENCRYPT")
-        ) or "true"
-        content_language = get_secret(
-            f"{env.upper()}_CONTENT_LANGUAGE", environment=env, fallbacks=(f"TEST_{env.upper()}_CONTENT_LANGUAGE", "TEST_CONTENT_LANGUAGE")
-        ) or "zh_CN"
+        isencrypt = (
+            get_secret(
+                f"{env.upper()}_ISENCRYPT",
+                environment=env,
+                fallbacks=(f"TEST_{env.upper()}_ISENCRYPT", "TEST_ISENCRYPT"),
+            )
+            or "true"
+        )
+        content_language = (
+            get_secret(
+                f"{env.upper()}_CONTENT_LANGUAGE",
+                environment=env,
+                fallbacks=(f"TEST_{env.upper()}_CONTENT_LANGUAGE", "TEST_CONTENT_LANGUAGE"),
+            )
+            or "zh_CN"
+        )
         origin = get_secret(
             f"{env.upper()}_ORIGIN", environment=env, fallbacks=(f"TEST_{env.upper()}_ORIGIN", "TEST_ORIGIN")
         ) or _origin_from_api_base(cfg_base)
         user_agent = get_secret(
-            f"{env.upper()}_USER_AGENT", environment=env, fallbacks=(f"TEST_{env.upper()}_USER_AGENT", "TEST_USER_AGENT")
+            f"{env.upper()}_USER_AGENT",
+            environment=env,
+            fallbacks=(f"TEST_{env.upper()}_USER_AGENT", "TEST_USER_AGENT"),
         ) or (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         )

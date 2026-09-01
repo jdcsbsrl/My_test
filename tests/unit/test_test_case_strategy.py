@@ -7,6 +7,7 @@
 """
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 from modules.trae_test.utils.test_case_strategy import (
@@ -18,6 +19,7 @@ from modules.trae_test.utils.test_case_strategy import (
 )
 from modules.trae_test.utils.business_rule_parser import RawScenario
 from modules.trae_test.utils.test_case_strategy import TestCaseStrategy
+from modules.trae_test.utils.runtime_quality import read_runtime_quality
 
 
 class TestScoreEngine:
@@ -191,9 +193,7 @@ class TestScoreEngine:
 
         assert len(scenarios) == 1
         assert scenarios[0].coverage_matrix["场景类型"] == "exception"
-        assert {"多对象", "多仓库", "多明细", "状态", "失败"}.issubset(
-            set(scenarios[0].coverage_dimensions)
-        )
+        assert {"多对象", "多仓库", "多明细", "状态", "失败"}.issubset(set(scenarios[0].coverage_dimensions))
 
     def test_strategy_limit_is_preserved_with_coverage_registration(self):
         strategy = TestCaseStrategy()
@@ -267,8 +267,8 @@ class TestRegenerationLoop:
         result = loop.generate_and_optimize("test", limit=1)
 
         assert result[0]["用例状态"] == "正常"
-        assert result[0]["needs_human_review"] is True
-        assert result[0]["regeneration_count"] >= 3
+        assert read_runtime_quality(result[0]).needs_human_review is True
+        assert result[0]["_runtime_regeneration"]["count"] >= 3
 
     def test_qualified_case(self):
         """测试合格用例"""
@@ -283,7 +283,7 @@ class TestRegenerationLoop:
         result = loop.generate_and_optimize("test", limit=1)
 
         assert result[0]["用例状态"] == "正常"
-        assert result[0]["needs_human_review"] is False
+        assert read_runtime_quality(result[0]).needs_human_review is False
         assert "质量评分" in result[0]
 
     def test_cool_down_period(self):
@@ -292,8 +292,10 @@ class TestRegenerationLoop:
 
         case = {
             "用例名称": "test_case",
-            "regeneration_count": 3,
-            "last_regenerated_at": datetime.now().isoformat(),
+            "_runtime_regeneration": {
+                "count": 3,
+                "last_regenerated_at": datetime.now().isoformat(),
+            },
         }
 
         assert loop._is_circuit_broken(case) is True
@@ -304,8 +306,10 @@ class TestRegenerationLoop:
 
         case = {
             "用例名称": "test_case",
-            "regeneration_count": 2,
-            "last_regenerated_at": (datetime.now() - timedelta(hours=2)).isoformat(),
+            "_runtime_regeneration": {
+                "count": 2,
+                "last_regenerated_at": (datetime.now() - timedelta(hours=2)).isoformat(),
+            },
         }
 
         assert loop._is_circuit_broken(case) is False
@@ -330,7 +334,7 @@ class TestRegenerationLoop:
             {
                 "用例名称": "test_case",
                 "质量评分": 55,
-                "regeneration_count": 3,
+                "_runtime_regeneration": {"count": 3},
             }
         )
 
@@ -345,3 +349,13 @@ class TestRegenerationLoop:
             loop._release_lock()
         except Exception as e:
             pytest.fail(f"锁操作失败: {e}")
+
+    @patch("modules.trae_test.utils.test_case_strategy.runtime_dir")
+    def test_default_multi_process_lock_uses_runtime_cache(self, mock_runtime_dir, tmp_path):
+        mock_runtime_dir.return_value = tmp_path
+        loop = RegenerationLoopUnderTest(generator=Mock())
+
+        loop.enable_multi_process_support()
+
+        assert Path(loop._lock_file.name).parent == tmp_path / "locks"
+        loop._lock_file.close()

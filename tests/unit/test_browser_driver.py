@@ -1,9 +1,8 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
 from modules.auto_test.drivers.browser_driver import BrowserDriver
-
 
 pytestmark = pytest.mark.unit
 
@@ -120,6 +119,35 @@ def test_close_context_stops_trace_when_path_is_given(monkeypatch):
 
     context.tracing.stop.assert_called_once_with(path=".runtime/reports/traces/test.zip")
     context.close.assert_called_once_with()
+
+
+def test_close_context_closes_page_before_context(driver):
+    context = Mock()
+    page = Mock()
+    events = Mock()
+    page.close.side_effect = lambda: events.page()
+    context.close.side_effect = lambda: events.context()
+    driver._contexts = [context]
+
+    driver.close_context(context, page=page)
+
+    assert page.close.call_count == 1
+    assert context.close.call_count == 1
+    assert driver._contexts == []
+    assert events.mock_calls == [call.page(), call.context()]
+
+
+def test_shutdown_browser_closes_tracked_contexts_before_browser(driver):
+    browser = Mock()
+    context = Mock()
+    driver.browser = browser
+    driver._contexts = [context]
+
+    driver.shutdown_browser()
+
+    context.close.assert_called_once_with()
+    browser.close.assert_called_once_with()
+    assert driver._contexts == []
 
 
 def test_close_context_closes_context_when_trace_save_fails(monkeypatch):

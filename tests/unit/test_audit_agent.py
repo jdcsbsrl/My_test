@@ -66,8 +66,13 @@ class TestAuditAgentTestCases:
             "前置条件": "1. 用户已登录ERP系统并拥有库存SKU权限\n2. 系统中存在可操作的库存SKU数据",
             "用例步骤": "1. 进入库存SKU页面\n2. 点击业务操作按钮\n3. 在页面提交测试数据并查看结果",
             "预期结果": "1. 页面显示库存SKU列表\n2. 系统显示处理结果",
-            "用例类型": "功能测试", "用例状态": "正常", "用例等级": "高", "创建人": "余小龙",
-            "优先级": "P0", "是否可自动化": "是", "回归测试标识": "是",
+            "用例类型": "功能测试",
+            "用例状态": "正常",
+            "用例等级": "高",
+            "创建人": "余小龙",
+            "优先级": "P0",
+            "是否可自动化": "是",
+            "回归测试标识": "是",
             "知识库关联": "库存SKU 页面 业务规则 操作 结果",
             "质量评分": 95,
         }
@@ -91,12 +96,14 @@ class TestAuditAgentTestCases:
 
     def test_runtime_coverage_matrix_is_consumed(self):
         agent = AuditAgent()
-        case = self._valid_case(**{
-            "_runtime_coverage_matrix": {"business_rules": ["RUNTIME-R1"], "normal_scenarios": ["正常"]},
-            "覆盖规则ID": "RUNTIME-R1",
-            "场景类型": "正常",
-            "优先级": "P1",
-        })
+        case = self._valid_case(
+            **{
+                "_runtime_coverage_matrix": {"business_rules": ["RUNTIME-R1"], "normal_scenarios": ["正常"]},
+                "覆盖规则ID": "RUNTIME-R1",
+                "场景类型": "正常",
+                "优先级": "P1",
+            }
+        )
         result = agent.audit_test_cases([case], {"require_requirement_coverage": True})
         assert result.passed is True
 
@@ -135,7 +142,10 @@ class TestAuditAgentTestCases:
         ]
         result = agent.audit_test_cases(
             cases,
-            {"coverage_matrix": [{"id": "R1", "priority": "P0", "required_scenarios": ["正常", "异常"]}], "requires_rollback": True},
+            {
+                "coverage_matrix": [{"id": "R1", "priority": "P0", "required_scenarios": ["正常", "异常"]}],
+                "requires_rollback": True,
+            },
         )
         assert result.passed is True
         assert any("需求规则覆盖率：100%" in s for s in result.suggestions)
@@ -190,8 +200,13 @@ class TestAuditAgentTestCases:
             "前置条件": "1. 用户已登录ERP系统\n2. 用户拥有库存SKU权限",
             "用例步骤": "1. 进入库存SKU页面\n2. 点击批量加入采购计划按钮\n3. 查看弹窗",
             "预期结果": "1. 页面显示库存SKU\n2. 弹窗正常打开",
-            "用例类型": "功能测试", "用例状态": "正常", "用例等级": "中", "创建人": "余小龙",
-            "优先级": "P1", "是否可自动化": "是", "回归测试标识": "是",
+            "用例类型": "功能测试",
+            "用例状态": "正常",
+            "用例等级": "中",
+            "创建人": "余小龙",
+            "优先级": "P1",
+            "是否可自动化": "是",
+            "回归测试标识": "是",
             "知识库关联": "库存SKU 产品中心 页面",
             "质量评分": 95,
         }
@@ -208,10 +223,16 @@ class TestAuditAgentTestCases:
             "前置条件": "1. 用户已登录ERP系统并拥有订单权限\n2. 系统中存在可提交订单",
             "用例步骤": "1. 进入销售订单页面\n2. 点击新建订单按钮\n3. 填写订单信息并提交",
             "预期结果": "1. 页面显示销售订单页面\n2. 提交成功并生成订单号",
-            "用例类型": "功能测试", "用例状态": "正常", "用例等级": "中", "创建人": "测试人员",
-            "优先级": "P1", "是否可自动化": "是", "回归测试标识": "是",
+            "用例类型": "功能测试",
+            "用例状态": "正常",
+            "用例等级": "中",
+            "创建人": "测试人员",
+            "优先级": "P1",
+            "是否可自动化": "是",
+            "回归测试标识": "是",
             "知识库关联": "销售订单 页面 提交 订单号 业务规则",
-            "最终评分": 92, "质量评分": 88,
+            "最终评分": 92,
+            "质量评分": 88,
         }
         result = agent.audit_test_cases([case])
         assert result.passed is False
@@ -233,6 +254,11 @@ class TestAuditAgentCode:
         agent = AuditAgent()
         r = agent.audit_code("def test(): pass")
         assert r.passed is True
+
+    def test_future_import_is_not_reported_as_private(self):
+        agent = AuditAgent()
+        result = agent.audit_code("from __future__ import annotations")
+        assert all(issue.rule_id != "CODE_PRIVATE_IMPORT" for issue in result.issues)
 
     def test_syntax_error(self):
         agent = AuditAgent()

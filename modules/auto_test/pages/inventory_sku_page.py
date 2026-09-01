@@ -1,8 +1,9 @@
+import os
 import re
 import time
 
 import allure
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Page
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -11,6 +12,8 @@ logger = get_logger()
 
 
 class InventorySKUPage(BasePage):
+    SEARCH_TIMEOUT_SECONDS = float(os.getenv("SKU_QUERY_TIMEOUT_SECONDS", "90"))
+
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.search_url = "product/productCenter/inventoryInfo"
@@ -18,18 +21,18 @@ class InventorySKUPage(BasePage):
     @allure.step("导航到库存SKU页面")
     def navigate_to_search_page(self) -> None:
         self.navigate_to(self.search_url)
-        self.wait_for_load_state("domcontentloaded")
-        ready_locator = self.page.locator("input, button, table, [role='table']").first
-        try:
-            ready_locator.wait_for(state="attached", timeout=30000)
-        except PlaywrightTimeoutError:
-            logger.warning(
-                "库存SKU页面首屏控件未在30秒内出现，准备刷新重试: url={}, title={}",
-                self.page.url,
-                self.page.title(),
-            )
-            self.page.reload(wait_until="domcontentloaded", timeout=60000)
-            ready_locator.wait_for(state="attached", timeout=45000)
+        self.wait_for_business_ready(
+            [
+                'button:visible:has-text("搜索")',
+                'input[placeholder*="库存SKU编码"]:visible',
+                'input[placeholder*="产品名称"]:visible',
+            ],
+            page_name="库存SKU页面",
+            # The inventory route intermittently mounts after its first
+            # reload in the shared test environment. Keep recovery bounded;
+            # a persistent outage still fails the test with the final error.
+            max_route_retries=2,
+        )
         logger.info("导航到库存SKU页面")
 
     @allure.step("输入SKU编码: {sku_code}")
@@ -114,8 +117,7 @@ class InventorySKUPage(BasePage):
         menu = self.page.locator(".el-dropdown-menu__item:visible").first
         menu.wait_for(state="visible", timeout=10000)
 
-        clicked = self.page.evaluate(
-            """() => {
+        clicked = self.page.evaluate("""() => {
                 const items = Array.from(document.querySelectorAll('.el-dropdown-menu__item'))
                     .filter(item => {
                         const rect = item.getBoundingClientRect();
@@ -130,8 +132,7 @@ class InventorySKUPage(BasePage):
                     }
                 }
                 return { clicked: false, visibleTexts: items.map(item => item.textContent || "") };
-            }"""
-        )
+            }""")
 
         if not clicked.get("clicked"):
             raise ValueError(f"未找到可见的导出当前搜索库存SKU菜单项: {clicked}")
@@ -144,9 +145,7 @@ class InventorySKUPage(BasePage):
             # while closing the dropdown. Reopen it and use a native locator
             # click once before treating navigation as a real failure.
             self.click_export()
-            retry_item = self.page.locator(
-                '.el-dropdown-menu__item:visible:has-text("导出当前搜索的库存SKU")'
-            ).first
+            retry_item = self.page.locator('.el-dropdown-menu__item:visible:has-text("导出当前搜索的库存SKU")').first
             retry_item.wait_for(state="visible", timeout=10000)
             retry_item.click(force=True)
             self._wait_for_inventory_export_navigation(timeout=30000)
@@ -272,7 +271,8 @@ class InventorySKUPage(BasePage):
         return count == 0
 
     @allure.step("等待搜索结果加载")
-    def wait_for_search_results(self, timeout: int = 30000) -> None:
+    def wait_for_search_results(self, timeout: int | None = None) -> None:
+        timeout = int((timeout / 1000) if timeout is not None else self.SEARCH_TIMEOUT_SECONDS) * 1000
         try:
             self._wait_for_loading_finished(timeout)
             self.page.locator(
@@ -355,9 +355,7 @@ class InventorySKUPage(BasePage):
         )
 
     def _selected_row_count(self) -> int:
-        return int(
-            self.page.evaluate(
-                """() => {
+        return int(self.page.evaluate("""() => {
                     const clickableOf = (el) =>
                         el.closest('label.el-checkbox')
                         || el.closest('.el-checkbox')
@@ -399,15 +397,10 @@ class InventorySKUPage(BasePage):
                         }
                     }
                     return rows.size;
-                }"""
-            )
-            or 0
-        )
+                }""") or 0)
 
     def _header_checkbox_checked(self) -> bool:
-        return bool(
-            self.page.evaluate(
-                """() => {
+        return bool(self.page.evaluate("""() => {
                     const clickableOf = (el) =>
                         el.closest('label.el-checkbox')
                         || el.closest('.el-checkbox')
@@ -444,9 +437,7 @@ class InventorySKUPage(BasePage):
                         || header.classList.contains('is-checked')
                         || !!header.closest('.is-checked')
                         || header.getAttribute('aria-checked') === 'true';
-                }"""
-            )
-        )
+                }"""))
 
     @allure.step("Select all inventory SKU rows on current page")
     def select_all_current_page(self) -> None:
@@ -572,9 +563,11 @@ class InventorySKUPage(BasePage):
 
     def _click_page_size_option(self, page_size: int) -> bool:
         option_pattern = re.compile(rf"^\s*{page_size}\s*(条\s*/\s*页|/page|/页)?\s*$", re.IGNORECASE)
-        option = self.page.locator(
-            ".el-select-dropdown__item:visible, .ant-select-item-option:visible"
-        ).filter(has_text=option_pattern).first
+        option = (
+            self.page.locator(".el-select-dropdown__item:visible, .ant-select-item-option:visible")
+            .filter(has_text=option_pattern)
+            .first
+        )
         if option.count() > 0:
             option.click(timeout=10000)
             return True
@@ -596,11 +589,9 @@ class InventorySKUPage(BasePage):
 
     def _get_page_size_options_text(self) -> list[str]:
         try:
-            return self.page.evaluate(
-                """() => Array.from(document.querySelectorAll(
+            return self.page.evaluate("""() => Array.from(document.querySelectorAll(
                     '.el-select-dropdown__item, .ant-select-item-option'
-                )).map(node => (node.textContent || '').trim()).filter(Boolean)"""
-            )
+                )).map(node => (node.textContent || '').trim()).filter(Boolean)""")
         except Exception:
             return []
 
@@ -625,9 +616,11 @@ class InventorySKUPage(BasePage):
         total_pages = self.get_total_pages()
         if page_num < 1 or page_num > total_pages:
             raise ValueError(f"Target page {page_num} exceeds total pages {total_pages}")
-        page_button = self.page.locator(
-            f".el-pager li, .ant-pagination-item-{page_num}"
-        ).filter(has_text=re.compile(rf"^\s*{page_num}\s*$")).first
+        page_button = (
+            self.page.locator(f".el-pager li, .ant-pagination-item-{page_num}")
+            .filter(has_text=re.compile(rf"^\s*{page_num}\s*$"))
+            .first
+        )
         if page_button.count() > 0:
             page_button.click(timeout=10000)
         else:
@@ -658,12 +651,10 @@ class InventorySKUPage(BasePage):
         next_btn = self.page.locator(".el-pagination .btn-next, .ant-pagination-next").first
         if next_btn.count() == 0:
             raise ValueError("Next page button was not found")
-        disabled = next_btn.evaluate(
-            """node => node.disabled
+        disabled = next_btn.evaluate("""node => node.disabled
                 || node.getAttribute('aria-disabled') === 'true'
                 || node.classList.contains('is-disabled')
-                || node.classList.contains('disabled')"""
-        )
+                || node.classList.contains('disabled')""")
         if disabled:
             raise ValueError("Next page button is disabled")
         next_btn.click(timeout=10000)
@@ -684,8 +675,7 @@ class InventorySKUPage(BasePage):
     @allure.step("Get current inventory SKU page number")
     def get_current_page(self) -> int:
         try:
-            page = self.page.evaluate(
-                """() => {
+            page = self.page.evaluate("""() => {
                 const pagination = document.querySelector('.el-pagination');
                 if (pagination && pagination.__vue__) {
                     const vm = pagination.__vue__;
@@ -703,8 +693,7 @@ class InventorySKUPage(BasePage):
                     if (!isNaN(n)) return n;
                 }
                 return 1;
-            }"""
-            )
+            }""")
             return int(page) if page else 1
         except Exception:
             return 1
@@ -712,8 +701,7 @@ class InventorySKUPage(BasePage):
     @allure.step("Get total inventory SKU pages")
     def get_total_pages(self) -> int:
         try:
-            pages = self.page.evaluate(
-                """() => {
+            pages = self.page.evaluate("""() => {
                 const pagination = document.querySelector('.el-pagination');
                 if (!pagination) return 1;
                 const maxInput = pagination.querySelector('.el-pagination__jump input[max]');
@@ -733,8 +721,7 @@ class InventorySKUPage(BasePage):
                 const totalCount = parseInt((totalText.match(/\\d+/) || ['0'])[0], 10);
                 const pageSize = parseInt((sizeText.match(/\\d+/) || ['20'])[0], 10);
                 return totalCount > 0 && pageSize > 0 ? Math.ceil(totalCount / pageSize) : 1;
-            }"""
-            )
+            }""")
             return int(pages) if pages else 1
         except Exception:
             return 1
@@ -742,9 +729,7 @@ class InventorySKUPage(BasePage):
     @allure.step("Get visible inventory SKU row count")
     def get_current_page_row_count(self) -> int:
         try:
-            checkbox_rows = int(
-                self.page.evaluate(
-                    """() => {
+            checkbox_rows = int(self.page.evaluate("""() => {
                     const clickableOf = (el) =>
                         el.closest('label.el-checkbox')
                         || el.closest('.el-checkbox')
@@ -772,10 +757,7 @@ class InventorySKUPage(BasePage):
                         unique.push(clickable);
                     }
                     return Math.max(unique.length - 1, 0);
-                }"""
-                )
-                or 0
-            )
+                }""") or 0)
             if checkbox_rows > 0:
                 return checkbox_rows
         except Exception:

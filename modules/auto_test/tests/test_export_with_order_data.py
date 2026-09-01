@@ -73,9 +73,7 @@ class TestExportWithOrderData:
 
         file_verify = SalesOrderFacade.verify_export_file(export_result["file_path"])
         assert file_verify["valid"], f"导出文件校验失败: {file_verify}"
-        consistency = SalesOrderFacade.verify_export_order_consistency(
-            export_result["file_path"], page_order_numbers
-        )
+        consistency = SalesOrderFacade.verify_export_order_consistency(export_result["file_path"], page_order_numbers)
         assert consistency["success"], f"导出顺序不一致: {consistency}"
 
         print("\n" + "=" * 70)
@@ -129,9 +127,7 @@ class TestExportWithOrderData:
 
         assert export_result["success"], f"导出失败: {export_result.get('error')}"
         print(f"\n✅ Export successful: {export_result['file_path']}")
-        consistency = SalesOrderFacade.verify_export_order_consistency(
-            export_result["file_path"], page_order_numbers
-        )
+        consistency = SalesOrderFacade.verify_export_order_consistency(export_result["file_path"], page_order_numbers)
         assert consistency["success"], f"导出顺序不一致: {consistency}"
 
         print("\n" + "=" * 70)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import time
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -16,11 +17,14 @@ def protected_patterns(root: Path) -> list[str]:
     patterns: list[str] = []
     keep_files = [root / ".keep"]
     if root.is_dir():
-        keep_files.extend(
-            keep_file
-            for keep_file in root.rglob(".keep")
-            if ".runtime" not in keep_file.relative_to(root).parts[:-1]
-        )
+        for directory, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+            dirnames[:] = [name for name in dirnames if not (Path(directory) / name).is_symlink()]
+            # Pytest and browser runs may create isolated nested runtime
+            # roots. They are independent sandboxes and must not contribute
+            # their .keep rules to the project runtime cleaner.
+            dirnames[:] = [name for name in dirnames if not (Path(directory) != root and name == ".runtime")]
+            if ".keep" in filenames:
+                keep_files.append(Path(directory) / ".keep")
 
     for keep_file in sorted(set(keep_files)):
         if not keep_file.is_file() or keep_file.is_symlink():
@@ -56,26 +60,38 @@ def clean_runtime(keep_days: int = 14, root: Path | None = None, *, dry_run: boo
     cutoff = time.time() - keep_days * 86400
     removed: list[Path] = []
     patterns = protected_patterns(runtime_root)
-    for kind in RUNTIME_KINDS:
+    for kind in sorted(RUNTIME_KINDS):
         directory = runtime_root / kind
         if not directory.is_dir():
             continue
-        for path in directory.rglob("*"):
-            if not path.is_file() or path.is_symlink() or path.name == ".keep":
-                continue
-            if ".runtime" in path.relative_to(runtime_root).parts:
-                continue
-            resolved = path.resolve()
-            if not _is_within(resolved, runtime_root):
-                # Never follow or delete a link that resolves outside .runtime.
-                continue
-            relative = path.relative_to(runtime_root).as_posix()
-            if any(fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(path.name, pattern) for pattern in patterns):
-                continue
-            if path.stat().st_mtime < cutoff:
-                removed.append(path)
-                if not dry_run:
-                    path.unlink()
+        for directory_name, dirnames, filenames in os.walk(directory, topdown=True, followlinks=False):
+            current_dir = Path(directory_name)
+            # Do not recurse through symlinked directories. A runtime cleaner
+            # must never turn a link into an escape hatch outside .runtime.
+            dirnames[:] = [name for name in dirnames if not (current_dir / name).is_symlink()]
+            for filename in filenames:
+                path = current_dir / filename
+                if path.name == ".keep" or path.is_symlink() or not path.is_file():
+                    continue
+                resolved = path.resolve()
+                if not _is_within(resolved, runtime_root):
+                    continue
+                relative = path.relative_to(runtime_root).as_posix()
+                if any(
+                    fnmatch.fnmatch(relative, pattern) or fnmatch.fnmatch(path.name, pattern) for pattern in patterns
+                ):
+                    continue
+                try:
+                    is_expired = path.stat().st_mtime < cutoff
+                except FileNotFoundError:
+                    continue
+                if is_expired:
+                    removed.append(path)
+                    if not dry_run:
+                        try:
+                            path.unlink()
+                        except FileNotFoundError:
+                            pass
     return removed
 
 

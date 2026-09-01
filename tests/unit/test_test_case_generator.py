@@ -6,6 +6,7 @@ from modules.trae_test.utils.test_case_generator import (
     generate_cases,
 )
 from modules.trae_test.utils.template_builder import ALL_FIELDS
+from modules.trae_test.utils.runtime_quality import read_runtime_quality
 
 
 class TestTestCaseGenerator:
@@ -125,8 +126,14 @@ class TestTestCaseGenerator:
 
         cases = generator.generate_cases("测试")
         for case in cases:
-            case.update({"原始评分": 90, "优化后评分": 90, "最终评分": 90, "质量评分": 90,
-                         "最终审核通过": True, "用例状态": "正常"})
+            case["质量评分"] = 90
+            case["用例状态"] = "正常"
+            runtime = read_runtime_quality(case)
+            runtime.final_score = 90
+            runtime.final_audit_passed = True
+            runtime.needs_human_review = False
+            case["_runtime_quality"] = runtime.to_dict()
+            case["_runtime_quality_version"] = "1.0"
         output_path = generator.export_to_excel(cases, str(tmp_path / "output.xlsx"))
 
         mock_excel_generator.generate.assert_called_once()
@@ -142,8 +149,10 @@ class TestTestCaseGenerator:
         generator = GeneratorUnderTest(retriever=mock_retriever)
         generator.excel_generator = mock_excel_generator
 
-        with patch("modules.trae_test.orchestrator.audit_gateway.AuditGateway") as gateway_cls, \
-             patch("modules.trae_test.utils.test_case_generator.TestCaseScoreEngine") as score_cls:
+        with (
+            patch("modules.trae_test.orchestrator.audit_gateway.AuditGateway") as gateway_cls,
+            patch("modules.trae_test.utils.test_case_generator.TestCaseScoreEngine") as score_cls,
+        ):
             gateway_cls.return_value.audit.return_value.passed = True
             gateway_cls.return_value.audit.return_value.errors = []
             score_cls.return_value.score.return_value = 90

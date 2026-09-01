@@ -10,7 +10,6 @@ from modules.trae_test.orchestrator.workflow_state_machine import (
     WorkflowStateMachine,
 )
 
-
 pytestmark = pytest.mark.unit
 
 

@@ -6,7 +6,6 @@ import pytest
 from modules.trae_test.core.migration import migrator
 from modules.trae_test.core.migration.schema import KBChunk, KBFile
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -168,7 +167,9 @@ def test_migrate_chunks_small_large_missing_and_failure_paths(tmp_path, monkeypa
     original, _, _ = _patch_dirs(monkeypatch, tmp_path)
     small = original / "sample.json"
     small.write_text(json.dumps({"a": 1}), encoding="utf-8")
-    kb_file = KBFile(title="sample", file_id="sample", original_hash=migrator._compute_sha256(str(small)), chunk_count=0)
+    kb_file = KBFile(
+        title="sample", file_id="sample", original_hash=migrator._compute_sha256(str(small)), chunk_count=0
+    )
     kb_file.id = 7
     session = FakeSession(existing_file=kb_file)
     monkeypatch.setattr(migrator, "get_session", lambda: session)
@@ -182,7 +183,9 @@ def test_migrate_chunks_small_large_missing_and_failure_paths(tmp_path, monkeypa
 
     large = original / "large.json"
     large.write_text(json.dumps({f"k{i}": "x" * 10_000 for i in range(6)}), encoding="utf-8")
-    large_file = KBFile(title="large", file_id="large", original_hash=migrator._compute_sha256(str(large)), chunk_count=0)
+    large_file = KBFile(
+        title="large", file_id="large", original_hash=migrator._compute_sha256(str(large)), chunk_count=0
+    )
     large_file.id = 8
     monkeypatch.setattr(migrator, "get_session", lambda: FakeSession(existing_file=large_file))
     assert migrator.migrate_chunks("large.json")["chunk_count"] >= 2
@@ -197,7 +200,9 @@ def test_migrate_all_and_verify_all(tmp_path, monkeypatch):
     (original / "sample.json").write_text(json.dumps({"requirements": ["R"]}), encoding="utf-8")
     (original / "second.json").write_text(json.dumps({"rules": ["Rule"]}), encoding="utf-8")
     calls = []
-    monkeypatch.setattr(migrator, "migrate_file", lambda fname: calls.append(("file", fname)) or {"success": True, "phases": {}})
+    monkeypatch.setattr(
+        migrator, "migrate_file", lambda fname: calls.append(("file", fname)) or {"success": True, "phases": {}}
+    )
     monkeypatch.setattr(migrator, "migrate_chunks", lambda fname: calls.append(("chunks", fname)) or {"success": True})
 
     result = migrator.migrate_all()

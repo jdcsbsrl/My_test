@@ -16,8 +16,9 @@ class TestAuditEngine:
 
         for target in test_targets:
             audit_types = engine._auto_select_audit_types(target)
-            assert AuditType.ALL not in audit_types, \
-                f"_auto_select_audit_types({type(target).__name__}) 返回了 AuditType.ALL"
+            assert (
+                AuditType.ALL not in audit_types
+            ), f"_auto_select_audit_types({type(target).__name__}) 返回了 AuditType.ALL"
 
     def test_audit_all_no_recursion(self):
         """测试 _auto_select_audit_types 返回多种类型时不会递归"""
@@ -67,7 +68,25 @@ class TestAuditEngine:
         workbook = Workbook()
         sheet = workbook.active
         sheet.append(ALL_FIELDS)
-        sheet.append(["产品 - 产品中心 - 库存SKU", "库存SKU用例", "100", "条件", "步骤", "结果", "功能", "正常", "中", "测试人", "P1", "是", "是", "库存知识", 90])
+        sheet.append(
+            [
+                "产品 - 产品中心 - 库存SKU",
+                "库存SKU用例",
+                "100",
+                "条件",
+                "步骤",
+                "结果",
+                "功能",
+                "正常",
+                "中",
+                "测试人",
+                "P1",
+                "是",
+                "是",
+                "库存知识",
+                90,
+            ]
+        )
         workbook.save(path)
         monkeypatch.setattr(ExcelGenerator, "validate_excel", staticmethod(lambda _path: (True, "")))
 

@@ -1,5 +1,7 @@
 """测试审核日志持久化"""
 
+import pytest
+
 from modules.trae_test.orchestrator.audit_logger import AuditLogger
 from modules.trae_test.orchestrator.audit_models import AuditResult
 
@@ -24,6 +26,20 @@ class TestAuditLogger:
         assert len(logs) >= 1
         assert logs[0]["passed"] is False
 
+    @pytest.mark.parametrize("limit", [True, 0, -1, 10001, "10"])
+    def test_query_rejects_invalid_limit(self, limit):
+        logger = object.__new__(AuditLogger)
+
+        with pytest.raises((TypeError, ValueError)):
+            logger.query(limit=limit)
+
+    @pytest.mark.parametrize("offset", [True, -1, "0"])
+    def test_query_rejects_invalid_offset(self, offset):
+        logger = object.__new__(AuditLogger)
+
+        with pytest.raises((TypeError, ValueError)):
+            logger.query(offset=offset)
+
     def test_log_passed_result(self):
         """测试记录通过的审核结果"""
         logger = AuditLogger()
@@ -46,7 +62,7 @@ class TestAuditLogger:
         """测试 to_storage_dict 序列化所有字段"""
         result = AuditResult()
         result.issues.append(
-            AuditResult.__annotations__.get('issues', list).__args__[0](
+            AuditResult.__annotations__.get("issues", list).__args__[0](
                 severity="manual_review",
                 rule_id="REVIEW_001",
                 category="approval",

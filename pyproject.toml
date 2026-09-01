@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "test-erp"
 version = "1.0.0"
@@ -49,9 +53,9 @@ dependencies = [
     # 日志和报告
     "loguru>=0.7.2",
     # 代码质量
-    "ruff>=0.3.0",
-    "black>=24.0.0",
-    "mypy>=1.9.0",
+    "ruff==0.15.13",
+    "black==26.3.1",
+    "mypy==2.1.0",
     # 其他扩展
     "pytest-bdd>=7.0.0",
     "pytest-mock>=3.12.0",
@@ -69,21 +73,18 @@ ci = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/test-erp/test-erp"
-Repository = "https://github.com/test-erp/test-erp"
+Homepage = "https://github.com/jdcsbsrl/My_test"
+Repository = "https://github.com/jdcsbsrl/My_test"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = [
-    "modules.trae_test",
-    "modules.auto_test",
-    "modules.auto_test.core",
-    "modules.auto_test.api",
-    "modules.auto_test.pages",
-    "modules.auto_test.drivers",
-    "modules.auto_test.facades",
-    "modules.trae_test.orchestrator",
+    "modules.trae_test*",
+    "modules.auto_test*",
+    "fixtures*",
 ]
+exclude = ["modules.auto_test.tests*"]
+namespaces = true
 
 [tool.black]
 line-length = 120

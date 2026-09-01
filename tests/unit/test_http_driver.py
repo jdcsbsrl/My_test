@@ -5,7 +5,6 @@ import pytest
 
 from modules.auto_test.drivers.http_driver import HttpDriver
 
-
 pytestmark = pytest.mark.unit
 
 

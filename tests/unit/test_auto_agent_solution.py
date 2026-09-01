@@ -2,7 +2,6 @@ import pytest
 
 from modules.trae_test.orchestrator.auto_agent import AutoAgent, ConfirmationService, RiskLevel
 
-
 pytestmark = pytest.mark.unit
 
 

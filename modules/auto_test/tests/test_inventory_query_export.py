@@ -9,6 +9,8 @@ from playwright.sync_api import Page
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.inventory_sku_page import InventorySKUPage
 
+SEARCH_TIMEOUT_SECONDS = InventorySKUPage.SEARCH_TIMEOUT_SECONDS
+
 
 @pytest.mark.regression
 @pytest.mark.ui
@@ -41,7 +43,7 @@ class TestInventoryQuery:
         response_time = sku_page.click_search()
         count = sku_page.get_result_count()
 
-        assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         assert count > 0, "无条件搜索应返回至少一条库存SKU"
         print(f"\n✅ 无条件搜索成功 - 响应时间: {response_time:.2f}秒, 结果数: {count}")
 
@@ -54,7 +56,7 @@ class TestInventoryQuery:
         sku_page.fill_sku_code("TEST")
         response_time = sku_page.click_search()
 
-        assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         print(f"\n✅ SKU编码搜索成功 - 响应时间: {response_time:.2f}秒")
 
     def test_search_by_invalid_sku_code(self, logged_in_page: Page) -> None:
@@ -68,7 +70,7 @@ class TestInventoryQuery:
             sku_page.click_reset()
             sku_page.fill_sku_code(invalid_input)
             response_time = sku_page.click_search()
-            assert response_time < 30, f"无效输入'{invalid_input}'响应时间过长: {response_time}秒"
+            assert response_time < SEARCH_TIMEOUT_SECONDS, f"无效输入'{invalid_input}'响应时间过长: {response_time}秒"
             print(f"\n✅ 无效输入 '{invalid_input}' 处理成功")
 
     def test_search_edge_cases(self, logged_in_page: Page) -> None:
@@ -82,7 +84,9 @@ class TestInventoryQuery:
             sku_page.click_reset()
             sku_page.fill_sku_code(edge_case)
             response_time = sku_page.click_search()
-            assert response_time < 30, f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
+            assert (
+                response_time < SEARCH_TIMEOUT_SECONDS
+            ), f"边缘输入'{edge_case[:20]}...'响应时间过长: {response_time}秒"
             print(f"\n✅ 边缘输入 '{edge_case[:20]}...' 处理成功")
 
     def test_search_result_count(self, logged_in_page: Page) -> None:
@@ -141,7 +145,7 @@ class TestInventoryExport:
 
         print("\n=== 搜索前页面状态 ===")
         body_text = logged_in_page.text_content("body")[:500]
-        print(f"页面文本片段: {body_text}")
+        print(f"页面文本已读取，长度: {len(body_text)}")
 
         sku_page.click_reset()
         sku_page.wait_for_search_results()
@@ -153,7 +157,7 @@ class TestInventoryExport:
         sku_page.wait_for_search_results()
 
         actual_value = sku_input.first.input_value() if sku_input.count() > 0 else ""
-        print(f"输入框实际值: '{actual_value}'")
+        print(f"输入框实际值长度: {len(actual_value)}")
 
         search_btns = logged_in_page.locator('button:has-text("搜索")').all()
         print(f"搜索按钮数量: {len(search_btns)}")
@@ -165,9 +169,9 @@ class TestInventoryExport:
         print(f"搜索结果数: {count}")
 
         body_text = logged_in_page.text_content("body")[:500]
-        print(f"搜索后页面文本片段: {body_text}")
+        print(f"搜索后页面文本已读取，长度: {len(body_text)}")
 
-        assert response_time < 30, f"响应时间过长: {response_time}秒"
+        assert response_time < SEARCH_TIMEOUT_SECONDS, f"响应时间过长: {response_time}秒"
         assert count > 0, f"搜索结果数应为正数，实际为: {count}"
 
         # 自定义表格组件缺少<thead>，改用页面文本内容检查
@@ -209,13 +213,13 @@ class TestInventoryExport:
                 row_values = []
                 for header in headers[:5]:
                     row_values.append(str(row.get(header, "")).ljust(20))
-                print(f"{i+1:2d}. {' | '.join(row_values)}")
+                print(f"{i+1:2d}. <redacted row values, {len(row_values)} columns>")
 
         sku_page.select_export_current_search()
 
         exported = export_page.wait_for_export_page(timeout=30000)
         assert exported, "未成功跳转到导出页面"
-        print(f"\n✅ 已跳转到导出页面: {export_page.page.url}")
+        print("\n✅ 已跳转到同源导出页面")
 
         export_page.select_all_fields(fast_mode=True)
         print("\n✅ 已选择所有导出字段")
@@ -230,9 +234,9 @@ class TestInventoryExport:
         print(f"   - 文件名: {download_result['filename']}")
         print(f"   - 文件路径: {download_result['file_path']}")
         print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
-        assert download_result["file_path"] and os.path.exists(download_result["file_path"]), (
-            f"导出文件不存在: {download_result['file_path']}"
-        )
+        assert download_result["file_path"] and os.path.exists(
+            download_result["file_path"]
+        ), f"导出文件不存在: {download_result['file_path']}"
 
     def test_export_with_empty_results_disabled(self, logged_in_page: Page) -> None:
         """Test that export is disabled when search returns no results."""

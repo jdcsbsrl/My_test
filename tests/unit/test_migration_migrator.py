@@ -13,7 +13,6 @@ from modules.trae_test.core.migration.schema import (
     KBTestCase,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -317,7 +316,11 @@ def test_verify_all_reports_matches_mismatches_counts_and_missing_dir(tmp_path, 
     matched_hash = migrator._compute_sha256(str(original / "matched.json"))
     session = FakeSession(
         {
-            KBFile: FakeQuery(first_value=None, all_value=[SimpleNamespace(original_hash=matched_hash, title="matched")], count_value=3),
+            KBFile: FakeQuery(
+                first_value=None,
+                all_value=[SimpleNamespace(original_hash=matched_hash, title="matched")],
+                count_value=3,
+            ),
             KBRequirement: FakeQuery(count_value=4),
             KBBusinessRule: FakeQuery(count_value=5),
             KBProblem: FakeQuery(count_value=6),
@@ -351,7 +354,9 @@ def test_create_all_tables_uses_engine_with_checkfirst(monkeypatch):
     engine = object()
     create_all_calls = []
     monkeypatch.setattr(init_db, "get_engine", lambda: engine)
-    monkeypatch.setattr(init_db.Base.metadata, "create_all", lambda *args, **kwargs: create_all_calls.append((args, kwargs)))
+    monkeypatch.setattr(
+        init_db.Base.metadata, "create_all", lambda *args, **kwargs: create_all_calls.append((args, kwargs))
+    )
 
     init_db.create_all_tables()
 

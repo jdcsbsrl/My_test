@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -30,11 +29,7 @@ def test_agents_md_exists_and_uses_utf8():
 
 def test_agents_md_relative_links_exist_and_heading_anchors_resolve():
     content = _read_agents_md()
-    headings = {
-        _slugify_heading(line)
-        for line in content.splitlines()
-        if line.startswith("#")
-    }
+    headings = {_slugify_heading(line) for line in content.splitlines() if line.startswith("#")}
     links = re.findall(r"\[[^\]]+\]\(([^)]+)\)", content)
 
     assert links, "AGENTS.md should contain index links"
@@ -65,9 +60,7 @@ def test_agents_md_markdown_blocks_and_tables_are_structurally_valid():
     assert code_fence_count % 2 == 0
 
     invalid_table_rows = [
-        (index, line)
-        for index, line in enumerate(lines, start=1)
-        if line.startswith("|") and line.count("|") < 3
+        (index, line) for index, line in enumerate(lines, start=1) if line.startswith("|") and line.count("|") < 3
     ]
     assert invalid_table_rows == []
 

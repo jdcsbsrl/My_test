@@ -16,7 +16,6 @@ from .audit_models import AuditIssue, AuditResult
 from .audit_rules import RuleManager
 from .config import AuditConfig, AuditType
 
-
 # 审核器类型标识
 TEST_CASE_AUDITOR = "test_case"
 CODE_AUDITOR = "code"
@@ -164,15 +163,23 @@ class AuditEngine:
                         workbook = load_workbook(target, read_only=True, data_only=True)
                         sheet = workbook.active
                         rows = list(sheet.iter_rows(values_only=True))
-                        headers = [str(value).strip() if value is not None else "" for value in (rows[0] if rows else ())]
+                        headers = [
+                            str(value).strip() if value is not None else "" for value in (rows[0] if rows else ())
+                        ]
                         cases = [
-                            {headers[index]: row[index] for index in range(min(len(headers), len(row))) if headers[index]}
+                            {
+                                headers[index]: row[index]
+                                for index in range(min(len(headers), len(row)))
+                                if headers[index]
+                            }
                             for row in rows[1:]
                             if any(value not in (None, "") for value in row)
                         ]
                         workbook.close()
                         if not cases:
-                            combined_result.add_error("TEST_CASE_CONTENT_EMPTY", "Excel文件没有可审核的测试用例数据", target)
+                            combined_result.add_error(
+                                "TEST_CASE_CONTENT_EMPTY", "Excel文件没有可审核的测试用例数据", target
+                            )
                         else:
                             content_result = self._get_auditor(TEST_CASE_AUDITOR).audit(
                                 cases,
@@ -228,9 +235,7 @@ class AuditEngine:
                 for issue in result.issues:
                     combined_result.issues.append(issue)
                 combined_result.suggestions.extend(result.suggestions)
-                combined_result.passed = all(
-                    i.severity != "error" for i in combined_result.issues
-                )
+                combined_result.passed = all(i.severity != "error" for i in combined_result.issues)
 
             except AuditFailedException:
                 # AuditFailedException 仍然传播
@@ -238,13 +243,15 @@ class AuditEngine:
             except Exception as e:
                 # 修复：普通的 Exception 不再降级为 warning
                 # 而是记录为 error（但不同于 AuditFailedException，不阻断流程）
-                combined_result.issues.append(AuditIssue(
-                    severity="error",
-                    rule_id=f"AUDIT_{audit_type.value.upper()}_ERROR",
-                    category="system",
-                    message=f"执行{audit_type.value}审核时出现系统错误: {str(e)}",
-                    confidence=1.0,
-                ))
+                combined_result.issues.append(
+                    AuditIssue(
+                        severity="error",
+                        rule_id=f"AUDIT_{audit_type.value.upper()}_ERROR",
+                        category="system",
+                        message=f"执行{audit_type.value}审核时出现系统错误: {str(e)}",
+                        confidence=1.0,
+                    )
+                )
                 combined_result.passed = False
 
         return combined_result

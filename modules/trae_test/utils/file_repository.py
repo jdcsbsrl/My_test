@@ -99,7 +99,14 @@ class FileRepository:
             markdown_path = os.path.join(self.original_dir, f"{file_title}.md")
             if os.path.exists(markdown_path):
                 with open(markdown_path, encoding="utf-8") as f:
-                    return [{"chunk_index": 0, "total_chunks": 1, "data": {"title": file_title, "raw_markdown": f.read()}, "source": "original"}]
+                    return [
+                        {
+                            "chunk_index": 0,
+                            "total_chunks": 1,
+                            "data": {"title": file_title, "raw_markdown": f.read()},
+                            "source": "original",
+                        }
+                    ]
         return chunks
 
     def get_chunk_by_id(self, file_title: str, chunk_index: int) -> dict[str, Any] | None:

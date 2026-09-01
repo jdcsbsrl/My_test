@@ -1,7 +1,5 @@
 """SKU Search Regression Tests - Validate search functionality."""
 
-import os
-
 import pytest
 from playwright.sync_api import Browser, Page
 

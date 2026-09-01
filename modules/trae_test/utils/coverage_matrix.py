@@ -41,12 +41,7 @@ class CoverageMatrix:
 
     def merge(self, other: "CoverageMatrix") -> "CoverageMatrix":
         """合并需求级矩阵，保持字段顺序和条目顺序稳定。"""
-        return CoverageMatrix(
-            **{
-                name: [*getattr(self, name), *getattr(other, name)]
-                for name in self.field_names()
-            }
-        )
+        return CoverageMatrix(**{name: [*getattr(self, name), *getattr(other, name)] for name in self.field_names()})
 
     def missing_from(self, covered: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
         """返回各维度尚未被用例覆盖的条目。"""

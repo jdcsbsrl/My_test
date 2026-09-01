@@ -95,13 +95,13 @@ class TestSalesOrderExportSort:
         sales_order_page.wait_for_sort_complete()
 
         page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
-        print(f"\n✅ 页面排序后订单号（付款时间升序）: {page_order_numbers[:10]}...")
+        print(f"\n✅ 页面排序后订单号（付款时间升序）: {len(page_order_numbers)} found")
         assert len(page_order_numbers) > 0, "页面未获取到订单号"
 
         sales_order_page.select_export_current_search()
         assert export_page.wait_for_export_page(timeout=30000), "Export page failed to load"
 
-        print(f"\n✅ 已导航到导出页面: {export_page.get_current_url()}")
+        print("\n✅ 已导航到同源导出页面")
 
         template_selected = export_page.select_export_template(EXPORT_TEMPLATE)
         if not template_selected:
@@ -120,7 +120,7 @@ class TestSalesOrderExportSort:
             print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
 
             export_order_numbers = read_excel_order_numbers(download_result["file_path"], limit=50)
-            print(f"\n✅ 导出文件订单号: {export_order_numbers[:10]}...")
+            print(f"\n✅ 导出文件订单号: {len(export_order_numbers)} found")
 
             assert export_order_numbers, "导出文件应包含 Order Id 列和订单数据"
             print("\n✅ 付款时间升序导出成功，已读取 Order Id 数据")
@@ -143,13 +143,13 @@ class TestSalesOrderExportSort:
         sales_order_page.wait_for_sort_complete()
 
         page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
-        print(f"\n✅ 页面排序后订单号（付款时间降序）: {page_order_numbers[:10]}...")
+        print(f"\n✅ 页面排序后订单号（付款时间降序）: {len(page_order_numbers)} found")
         assert len(page_order_numbers) > 0, "页面未获取到订单号"
 
         sales_order_page.select_export_current_search()
         assert export_page.wait_for_export_page(timeout=30000), "Export page failed to load"
         logged_in_page.wait_for_load_state("networkidle")
-        print(f"\n✅ 已导航到导出页面: {export_page.get_current_url()}")
+        print("\n✅ 已导航到同源导出页面")
 
         template_selected = export_page.select_export_template(EXPORT_TEMPLATE)
         if not template_selected:
@@ -168,7 +168,7 @@ class TestSalesOrderExportSort:
             print(f"   - 文件大小: {download_result['file_size']}字节 ({download_result['file_size']/1024:.2f}KB)")
 
             export_order_numbers = read_excel_order_numbers(download_result["file_path"], limit=50)
-            print(f"\n✅ 导出文件订单号: {export_order_numbers[:10]}...")
+            print(f"\n✅ 导出文件订单号: {len(export_order_numbers)} found")
 
             assert export_order_numbers, "导出文件应包含 Order Id 列和订单数据"
             print("\n✅ 付款时间降序导出成功，已读取 Order Id 数据")

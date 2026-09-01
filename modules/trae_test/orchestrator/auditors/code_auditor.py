@@ -104,7 +104,7 @@ class CodeAuditor:
                 if isinstance(node, ast.Import):
                     pass  # 基础导入，无问题
                 elif isinstance(node, ast.ImportFrom):
-                    if node.module and node.module.startswith("_"):
+                    if node.module and node.module != "__future__" and node.module.startswith("_"):
                         result.add_warning(
                             "CODE_PRIVATE_IMPORT",
                             f"导入了私有模块: {node.module}",
@@ -160,7 +160,7 @@ class CodeAuditor:
                 tree = ast.parse(code)
                 for node in ast.walk(tree):
                     if isinstance(node, ast.ImportFrom):
-                        if node.module and node.module.startswith("_"):
+                        if node.module and node.module != "__future__" and node.module.startswith("_"):
                             result.add_warning(
                                 "CODE_PRIVATE_IMPORT",
                                 f"导入了私有模块: {node.module}",

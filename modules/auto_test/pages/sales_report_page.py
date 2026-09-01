@@ -173,8 +173,7 @@ class SalesReportPage(BasePage):
         self.page.keyboard.press("Escape")
 
     def sku_create_date_values(self) -> list[str]:
-        return self.page.evaluate(
-            """() => {
+        return self.page.evaluate("""() => {
                 const items = Array.from(document.querySelectorAll('.el-form-item'));
                 const item = items.find((el) => {
                     const label = el.querySelector('.el-form-item__label');
@@ -182,8 +181,7 @@ class SalesReportPage(BasePage):
                 });
                 if (!item) return [];
                 return Array.from(item.querySelectorAll('input')).map((input) => input.value);
-            }"""
-        )
+            }""")
 
     def select_dropdown_by_label(self, label_text: str, option_text: str) -> bool:
         try:
@@ -191,9 +189,9 @@ class SalesReportPage(BasePage):
             form_item.locator(".el-select__wrapper, .el-cascader, .store-select-trigger").first.click(
                 force=True, timeout=10000
             )
-            option = self.page.locator("li.el-select-dropdown__item, .el-cascader-node").filter(
-                has_text=option_text
-            ).first
+            option = (
+                self.page.locator("li.el-select-dropdown__item, .el-cascader-node").filter(has_text=option_text).first
+            )
             option.wait_for(state="visible", timeout=10000)
             option.click(force=True, timeout=10000)
             self.page.keyboard.press("Escape")
@@ -403,9 +401,7 @@ class SalesReportPage(BasePage):
         return self.numeric_column_values(column_name)
 
     def numeric_column_values(self, column_name: str, limit: int = 20) -> list[float]:
-        mapped_values = self._parse_numeric_values(
-            row.get(column_name, "") for row in self.visible_rows(limit=limit)
-        )
+        mapped_values = self._parse_numeric_values(row.get(column_name, "") for row in self.visible_rows(limit=limit))
         if mapped_values:
             return mapped_values
 
@@ -498,9 +494,9 @@ class SalesReportPage(BasePage):
                 timeout=15000,
             )
             after = self.expanded_row_count()
-            after_body = self.page.locator(
-                ".vxe-table--body-wrapper, .el-table__body-wrapper"
-            ).first.inner_text(timeout=5000)
+            after_body = self.page.locator(".vxe-table--body-wrapper, .el-table__body-wrapper").first.inner_text(
+                timeout=5000
+            )
             expanded_class_count = self.page.locator(
                 ".row--expanded:visible, .is--expanded:visible, .p-6px .vxe-table:visible"
             ).count()
@@ -509,8 +505,7 @@ class SalesReportPage(BasePage):
                 f"expanded_class_count={expanded_class_count}"
             )
             return after
-        clicked = self.page.evaluate(
-            """() => {
+        clicked = self.page.evaluate("""() => {
                 const visible = (el) => {
                     const rect = el.getBoundingClientRect();
                     const style = window.getComputedStyle(el);
@@ -538,8 +533,7 @@ class SalesReportPage(BasePage):
                 const clickTarget = target.querySelector('.vxe-table--expand-btn') || target;
                 clickTarget.click();
                 return true;
-            }"""
-        )
+            }""")
         if not clicked:
             raise ValueError("No expandable row control was found")
         # The detail request is asynchronous; yield to the browser event loop
@@ -600,9 +594,7 @@ class SalesReportPage(BasePage):
         )
 
     def has_expand_control(self) -> bool:
-        return bool(
-            self.page.evaluate(
-                """() => Array.from(document.querySelectorAll(
+        return bool(self.page.evaluate("""() => Array.from(document.querySelectorAll(
                     '.vxe-table--expanded, .vxe-cell--wrapper:has(.vxe-table--expand-btn), '
                     + '.vxe-table--expand-btn.vxe-table-icon-arrow-right, '
                     + '.el-table__expand-icon, .vxe-icon-caret-right, .vxe-cell--expand-icon, '
@@ -615,9 +607,7 @@ class SalesReportPage(BasePage):
                         && !el.className.includes('fixed--hidden')
                         && style.display !== 'none'
                         && style.visibility !== 'hidden';
-                })"""
-            )
-        )
+                })"""))
 
     def expanded_row_count(self) -> int:
         return self.page.locator(
@@ -627,8 +617,7 @@ class SalesReportPage(BasePage):
         ).count()
 
     def export_menu_options(self) -> list[str]:
-        return self.page.evaluate(
-            """() => Array.from(document.querySelectorAll('button'))
+        return self.page.evaluate("""() => Array.from(document.querySelectorAll('button'))
                 .filter((el) => {
                     const rect = el.getBoundingClientRect();
                     const style = window.getComputedStyle(el);
@@ -636,8 +625,7 @@ class SalesReportPage(BasePage):
                         && style.display !== 'none' && style.visibility !== 'hidden';
                 })
                 .map((el) => (el.innerText || el.textContent || '').trim())
-                .filter((text) => text.includes('导出'))"""
-        )
+                .filter((text) => text.includes('导出'))""")
 
     def export_by_menu_text(self, menu_text: str, download_dir: str, timeout: int = 60000) -> dict[str, Any]:
         Path(download_dir).mkdir(parents=True, exist_ok=True)
@@ -655,8 +643,7 @@ class SalesReportPage(BasePage):
         self.page.on("download", on_download)
         self.page.on("response", on_response)
         try:
-            clicked = self.page.evaluate(
-                """() => {
+            clicked = self.page.evaluate("""() => {
                     const visible = (el) => {
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
@@ -669,8 +656,7 @@ class SalesReportPage(BasePage):
                     if (!button) return false;
                     button.click();
                     return true;
-                }"""
-            )
+                }""")
             if not clicked:
                 raise ValueError("Export button not found")
             deadline = time.time() + timeout / 1000

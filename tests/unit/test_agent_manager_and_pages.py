@@ -10,8 +10,8 @@ from modules.auto_test.pages.base_page import BasePage
 from modules.auto_test.pages.export_page import ExportPage
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.login_page import LoginPage
+from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
 from modules.trae_test.orchestrator.agent_manager import AgentContext, AgentManager, DomainMetadata
-
 
 pytestmark = pytest.mark.unit
 
@@ -155,8 +155,8 @@ class FakeLocator:
     def select_option(self, value):
         self.calls.append(("select", value))
 
-    def wait_for(self, timeout=0):
-        self.calls.append(("wait", timeout))
+    def wait_for(self, timeout=0, state=None):
+        self.calls.append(("wait", timeout, state))
 
     def text_content(self):
         return "text"
@@ -218,6 +218,9 @@ class FakePage:
     def title(self):
         return "Page Title"
 
+    def reload(self, wait_until="load", timeout=0):
+        self.calls.append(("reload", wait_until, timeout))
+
 
 class FakeEvaluatePage(FakePage):
     def __init__(self):
@@ -234,8 +237,98 @@ class FakeEvaluatePage(FakePage):
 
 
 class TestBaseAndExportPage:
+    def test_wait_for_business_ready_uses_business_selector(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        base = BasePage(page)
+
+        base.wait_for_business_ready(['button:visible:has-text("搜索")'], page_name="库存SKU页面")
+
+        assert any(call[0] == "locator" and "搜索" in call[1] for call in page.calls)
+        assert ("reload", "domcontentloaded", 60000) not in page.calls
+
+    def test_wait_for_business_ready_reloads_once_after_timeout(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        locator = FakeLocator()
+        calls = {"count": 0}
+
+        def wait_for(timeout=0, state=None):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise base_page_module.PlaywrightTimeoutError("not ready")
+
+        locator.wait_for = wait_for
+        page.locators['button:visible:has-text("搜索")'] = locator
+        base = BasePage(page)
+
+        base.wait_for_business_ready(['button:visible:has-text("搜索")'], page_name="库存SKU页面")
+
+        assert calls["count"] == 2
+        assert ("reload", "domcontentloaded", 60000) in page.calls
+
+    def test_wait_for_business_ready_supports_bounded_second_route_retry(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        locator = FakeLocator()
+        calls = {"count": 0}
+
+        def wait_for(timeout=0, state=None):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise base_page_module.PlaywrightTimeoutError("not ready")
+
+        locator.wait_for = wait_for
+        page.locators['button:visible:has-text("搜索")'] = locator
+        base = BasePage(page)
+
+        base.wait_for_business_ready(
+            ['button:visible:has-text("搜索")'],
+            page_name="库存SKU页面",
+            max_route_retries=2,
+        )
+
+        assert calls["count"] == 3
+        assert page.calls.count(("reload", "domcontentloaded", 60000)) == 2
+
+    def test_sales_export_payload_business_error_includes_trace_id(self):
+        result = SalesOrderExportPage._business_error_from_export_payload(
+            {"code": 500, "message": "未知异常，请联系IT。tlogtraceid = abc-123", "data": None},
+            http_status=200,
+        )
+
+        assert result == {
+            "error": "导出接口业务失败: code=500, message=未知异常，请联系IT。tlogtraceid = abc-123",
+            "trace_id": "abc-123",
+        }
+
+    def test_sales_export_payload_success_and_http_error(self):
+        assert SalesOrderExportPage._business_error_from_export_payload({"code": 200}) is None
+        assert SalesOrderExportPage._business_error_from_export_payload({}, http_status=503) == {
+            "error": "导出接口 HTTP 503",
+            "trace_id": None,
+        }
+
+    def test_sales_export_ready_accepts_template_input_control(self):
+        page = FakePage()
+        page.locators[".el-select:visible"] = FakeLocator(".el-select:visible", count=0)
+        page.locators[".ant-select:visible"] = FakeLocator(".ant-select:visible", count=0)
+        page.locators['button:has-text("实时导出"):visible'] = FakeLocator(
+            'button:has-text("实时导出"):visible', count=0
+        )
+        page.locators['button:has-text("非实时导出"):visible'] = FakeLocator(
+            'button:has-text("非实时导出"):visible', count=0
+        )
+
+        export_page = SalesOrderExportPage(page)
+
+        assert export_page._export_controls_ready()
+        assert any("选择导出模板" in call[1] for call in page.calls if call[0] == "locator")
+
     def test_base_page_wrappers_and_navigation(self, monkeypatch):
-        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test/index"))
+        monkeypatch.setattr(
+            base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test/index")
+        )
         monkeypatch.setattr(base_page_module.allure.attach, "file", lambda *args, **kwargs: None)
         page = FakePage()
         base = BasePage(page)
@@ -309,6 +402,15 @@ class TestBaseAndExportPage:
 
         assert export_page.select_field("产品名称") is False
         assert any("fieldName" in script for script, _ in page.evaluated_scripts)
+
+    def test_inventory_deselect_verifies_selected_field_state(self, monkeypatch):
+        page = FakeEvaluatePage()
+        export_page = InventoryExportPage(page)
+        monkeypatch.setattr(export_page, "wait_for_field_options", lambda timeout=30000: True)
+        monkeypatch.setattr(export_page, "wait_for_loading_complete", lambda timeout=10000: None)
+
+        assert export_page.deselect_all_fields() == 1
+        assert any('input[type="checkbox"]:checked' in script for script, _ in page.evaluated_scripts)
 
     def test_inventory_field_group_locator_fallback_uses_expansion_candidates(self, monkeypatch):
         page = FakePage()

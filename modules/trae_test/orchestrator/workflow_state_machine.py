@@ -236,9 +236,7 @@ class WorkflowStateMachine:
         messages = []
 
         # 检查是否有 manual_review 级别的问题
-        has_manual_review = any(
-            issue.severity == "manual_review" for issue in audit_result.issues
-        )
+        has_manual_review = any(issue.severity == "manual_review" for issue in audit_result.issues)
 
         # 检查是否通过
         if audit_result.passed:

@@ -23,9 +23,6 @@ build/
 # ========== 测试和报告（敏感数据）==========
 .runtime/**
 !.runtime/.keep
-!.runtime/**/
-!.runtime/**/.keep
-.runtime/tmp/**
 tmp*/
 pytest-of-*/
 modules/auto_test/reports/

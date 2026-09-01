@@ -40,7 +40,9 @@ class FileManagementService:
             old_chunks.append(backup)
         return snapshot_dir, old_chunks, old_target or None
 
-    def _restore_snapshot(self, snapshot_dir: str, target_path: str, old_chunks: list[str], old_target: str | None, file_title: str) -> None:
+    def _restore_snapshot(
+        self, snapshot_dir: str, target_path: str, old_chunks: list[str], old_target: str | None, file_title: str
+    ) -> None:
         """Restore original and chunks; best effort with explicit cleanup."""
         if old_target:
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
@@ -101,12 +103,12 @@ class FileManagementService:
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             shutil.copy2(file_path, target_path)
             if auto_process:
-                    monitor = kb_monitor_module.KnowledgeBaseMonitor()
-                    process_result = monitor.process_file_complete(target_path)
-                    result["process_result"] = process_result
-                    if not process_result.get("success", False):
-                        result["error"] = process_result.get("error", "处理失败")
-                        return result
+                monitor = kb_monitor_module.KnowledgeBaseMonitor()
+                process_result = monitor.process_file_complete(target_path)
+                result["process_result"] = process_result
+                if not process_result.get("success", False):
+                    result["error"] = process_result.get("error", "处理失败")
+                    return result
 
             meta = metadata_manager_module.MetadataManager(self.kb_base_dir)
             registry_result = meta.scan_and_register_all()
@@ -124,7 +126,7 @@ class FileManagementService:
             result["error"] = str(e)
             return result
         finally:
-            if 'snapshot_dir' in locals():
+            if "snapshot_dir" in locals():
                 if not result["success"]:
                     try:
                         self._restore_snapshot(snapshot_dir, target_path, old_chunks, old_target, file_title)
@@ -196,7 +198,7 @@ class FileManagementService:
             result["error"] = str(e)
             return result
         finally:
-            if 'snapshot_dir' in locals():
+            if "snapshot_dir" in locals():
                 if not result["success"]:
                     try:
                         self._restore_snapshot(snapshot_dir, target_path, old_chunks, old_target, file_title)

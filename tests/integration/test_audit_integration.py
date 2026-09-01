@@ -220,6 +220,7 @@ class TestAuditAgentReliability:
     def test_audit_always_returns_result(self):
         """测试审核总是返回结果对象（禁用硬阻断模式）"""
         from modules.trae_test.orchestrator.config import AuditConfig
+
         config = AuditConfig(enforce_hard_block=False)
         agent = AuditAgent(config=config)
 

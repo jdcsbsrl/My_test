@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -14,8 +13,7 @@ def _read(name: str) -> str:
 
 def test_quality_gate_documents_use_85_and_reject_lower_scores():
     content = "\n".join(
-        _read(name)
-        for name in ("AGENT_RULES.md", "TRAE_TEST_WORKFLOW.md", "PROJECT_ARTIFACT_PLACEMENT.md")
+        _read(name) for name in ("AGENT_RULES.md", "TRAE_TEST_WORKFLOW.md", "PROJECT_ARTIFACT_PLACEMENT.md")
     )
 
     assert "最终评分 < 85" in content

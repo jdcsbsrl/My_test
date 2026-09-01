@@ -12,7 +12,6 @@ from modules.auto_test.core.config_manager import get_config
 from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.pages.sales_report_page import SalesReportPage
 
-
 REPORT_DIR = Path(".runtime/reports/sales_report_regression")
 QUERY_DETAIL_JSONL = REPORT_DIR / "query_detail.jsonl"
 QUERY_DETAIL_MD = REPORT_DIR / "query_detail_report.md"

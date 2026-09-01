@@ -19,11 +19,16 @@ class EnvironmentType(Enum):
 
     @classmethod
     def is_allowed(cls, env: str) -> bool:
-        return env.lower() in [cls.TEST.value, cls.TEST_ENV.value, cls.UAT.value]
+        return cls.normalize(env) in {cls.TEST.value, cls.TEST_ENV.value, cls.UAT.value}
 
     @classmethod
     def is_production(cls, env: str) -> bool:
-        return env.lower() == cls.PRODUCTION.value
+        return cls.normalize(env) == cls.PRODUCTION.value
+
+    @classmethod
+    def normalize(cls, env: str | None) -> str:
+        """Return the canonical, safely comparable environment name."""
+        return str(env or "").strip().lower()
 
 
 class EnvironmentSecurityError(Exception):
@@ -104,9 +109,7 @@ class ConfigManager:
             for candidate in (
                 self._config.get("base_url"),
                 self._config.get("api_base_url"),
-                self._config.get("api", {}).get("base_url")
-                if isinstance(self._config.get("api", {}), dict)
-                else None,
+                self._config.get("api", {}).get("base_url") if isinstance(self._config.get("api", {}), dict) else None,
             ):
                 if candidate:
                     origin = self._origin_from_url(str(candidate))
@@ -128,11 +131,7 @@ class ConfigManager:
         ui_url = str(self._config.get("base_url") or f"{origin}{ui_path}").strip()
         api_url = str(
             self._config.get("api_base_url")
-            or (
-                self._config.get("api", {}).get("base_url")
-                if isinstance(self._config.get("api", {}), dict)
-                else None
-            )
+            or (self._config.get("api", {}).get("base_url") if isinstance(self._config.get("api", {}), dict) else None)
             or f"{origin}{api_path}"
         ).strip()
         self._validate_same_origin(ui_url, origin, "base_url")
@@ -148,16 +147,28 @@ class ConfigManager:
     def _build_environment_config(env: str) -> dict[str, Any]:
         """Build a secrets-free CI configuration when private YAML is not checked in."""
         prefix = "UAT" if env == "uat" else "TEST"
-        origin = os.getenv(f"{prefix}_WEB_API_BASE_URL", "")
+        api_value = os.getenv(f"{prefix}_WEB_API_BASE_URL", "").strip()
         default_ui_path = "/oms-uat-ui" if env == "uat" else "/oms-ui"
         default_api_path = "/oms-uat-api" if env == "uat" else "/oms-api"
+        parsed_api = urlparse(api_value)
+        origin = ConfigManager._origin_from_url(api_value)
+        if api_value and not origin:
+            # Preserve the invalid value so the normal validator can return a
+            # safe, consistent configuration error without silently falling
+            # back to another endpoint.
+            origin = api_value
+        if origin and parsed_api.path not in {"", "/"} and not parsed_api.query and not parsed_api.fragment:
+            api_base_url = api_value.rstrip("/")
+        else:
+            api_base_url = f"{origin}{default_api_path}"
         return {
             "origin": origin,
             "ui_path": default_ui_path,
             "api_path": default_api_path,
             "base_url": os.getenv(f"{prefix}_WEB_BASE_URL") or f"{origin}{default_ui_path}",
+            "api_base_url": api_base_url,
             "api": {
-                "base_url": f"{origin}{default_api_path}",
+                "base_url": api_base_url,
                 "timeout": 30,
                 "retries": 3,
                 "verify_ssl": True,
@@ -173,6 +184,7 @@ class ConfigManager:
         }
 
     def _validate_environment(self, env: str) -> None:
+        env = EnvironmentType.normalize(env)
         if not EnvironmentType.is_allowed(env):
             raise EnvironmentSecurityError(
                 f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"
@@ -218,10 +230,19 @@ class ConfigManager:
     def _normalize_origin(cls, value: str, *, field: str = "endpoint") -> str:
         origin = cls._origin_from_url(value)
         parsed = urlparse(value.strip())
-        if not origin or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
-            raise ValueError(f"Invalid {field}: {value!r}")
+        if (
+            not origin
+            or parsed.username
+            or parsed.password
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                f"Invalid {field}: expected an HTTP(S) origin without path, query, fragment, or credentials"
+            )
         if parsed.scheme != "https" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise EnvironmentSecurityError(f"HTTPS is required for non-local {field}: {value!r}")
+            raise EnvironmentSecurityError(f"HTTPS is required for non-local {field}")
         return origin
 
     def _allowed_origins(self) -> set[str]:
@@ -373,6 +394,7 @@ def get_config(env: str | None = None) -> ConfigManager:
 
 
 def validate_environment(env: str) -> None:
+    env = EnvironmentType.normalize(env)
     if not EnvironmentType.is_allowed(env):
         raise EnvironmentSecurityError(
             f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"

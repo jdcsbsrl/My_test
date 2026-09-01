@@ -2,7 +2,6 @@ import os
 import re
 from pathlib import Path
 
-
 CHUNK_FILENAME_PATTERN = re.compile(r".+_chunk_\d+\.json$")
 
 

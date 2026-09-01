@@ -22,14 +22,21 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 try:
-    from openpyxl import Workbook, load_workbook
+    from openpyxl import load_workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
     from openpyxl.worksheet.worksheet import Worksheet
 except ImportError:
     raise ImportError("openpyxl未安装，请运行: pip install openpyxl")
 
-from .template_builder import ALL_FIELDS as TEMPLATE_FIELDS, _template_header_matches, get_default_template_path
+from .template_builder import (
+    ALL_FIELDS as TEMPLATE_FIELDS,
+    RUNTIME_FIELDS as TEMPLATE_RUNTIME_FIELDS,
+    _template_header_matches,
+    ensure_template,
+    get_default_template_path,
+    validate_case_fields,
+)
 from .workspace_manager import workspace_manager
 
 
@@ -37,25 +44,10 @@ class ExcelGenerator:
     """统一Excel生成器"""
 
     # 15字段标准顺序（单一定义源：template_builder.ALL_FIELDS）
-    STANDARD_FIELDS = list(TEMPLATE_FIELDS)
+    STANDARD_FIELDS = TEMPLATE_FIELDS
     QUALITY_FIELD = "质量评分"
     # 评分、审核和重生轨迹只存在于运行时对象，不得扩展正式 Excel 表头。
-    RUNTIME_FIELDS = {
-        "原始评分",
-        "优化后评分",
-        "最终评分",
-        "最终审核通过",
-        "是否冷启动评分",
-        "评分置信度",
-        "评分历史",
-        "优化次数",
-        "评分门槛",
-        "最终评分是否达标",
-        "regeneration_count",
-        "last_regenerated_at",
-        "execution_count",
-        "用例ID",
-    }
+    RUNTIME_FIELDS = TEMPLATE_RUNTIME_FIELDS
 
     # 列宽配置
     COLUMN_WIDTHS = {
@@ -94,7 +86,13 @@ class ExcelGenerator:
     MAX_FILE_SIZE = 10 * 1024 * 1024
 
     @classmethod
-    def generate(cls, cases: list[dict[str, Any]], output_path: str = "", requirement_name: str = "未命名需求", extra_fields: list[str] | None = None) -> str:
+    def generate(
+        cls,
+        cases: list[dict[str, Any]],
+        output_path: str = "",
+        requirement_name: str = "未命名需求",
+        extra_fields: list[str] | None = None,
+    ) -> str:
         """生成Excel文件（便捷方法）
 
         Args:
@@ -106,7 +104,12 @@ class ExcelGenerator:
         Returns:
             str: 生成的Excel文件路径
         """
-        return cls.generate_excel(test_cases=cases, output_path=output_path or None, requirement_name=requirement_name, extra_fields=extra_fields)
+        return cls.generate_excel(
+            test_cases=cases,
+            output_path=output_path or None,
+            requirement_name=requirement_name,
+            extra_fields=extra_fields,
+        )
 
     @classmethod
     def execute(cls, input_data=None, **kwargs):
@@ -147,7 +150,10 @@ class ExcelGenerator:
         extra_fields = kwargs.get("extra_fields")
 
         return cls.generate_excel(
-            test_cases=input_data, requirement_name=requirement_name, requirement_id=requirement_id, extra_fields=extra_fields
+            test_cases=input_data,
+            requirement_name=requirement_name,
+            requirement_id=requirement_id,
+            extra_fields=extra_fields,
         )
 
     @classmethod
@@ -190,11 +196,17 @@ class ExcelGenerator:
                 sub_dir=None,
             )
 
-        # 生成Excel文件
-        if Path(cls.TEMPLATE_PATH).exists():
-            cls._generate_from_template(test_cases, output_path, extra_fields)
+        # 正式导出只允许从仓库固定模板复制；禁止缺失时运行时创建或覆盖 fixtures。
+        template_path = ensure_template()
+        output = Path(output_path)
+        fixture_root = Path(template_path).resolve().parents[1]
+        try:
+            output.resolve().relative_to(fixture_root)
+        except ValueError:
+            pass
         else:
-            cls._generate_new(test_cases, output_path, extra_fields)
+            raise ValueError("导出目标不能位于fixtures目录，禁止覆盖固定模板或样本")
+        cls._generate_from_template(test_cases, output, extra_fields, template_path=template_path)
 
         return str(output_path)
 
@@ -212,38 +224,11 @@ class ExcelGenerator:
         if not test_cases:
             raise ValueError("测试用例列表不能为空")
 
-        cls._get_effective_fields(extra_fields)
-
         for idx, case in enumerate(test_cases, start=1):
             if not isinstance(case, dict):
                 raise ValueError(f"第{idx}条用例必须是对象，实际类型: {type(case).__name__}")
-
-            unknown_fields = {
-                field
-                for field in set(case) - set(cls.STANDARD_FIELDS) - cls.RUNTIME_FIELDS
-                if not str(field).startswith("_runtime_")
-            }
-            if unknown_fields:
-                names = ", ".join(sorted(str(field) for field in unknown_fields))
-                raise ValueError(f"第{idx}条用例包含未定义字段: {names}")
-
-            for field in cls.STANDARD_FIELDS:
-                if field not in case:
-                    raise ValueError(f"第{idx}条用例缺少字段: {field}")
-
-                value = case[field]
-                if field == cls.QUALITY_FIELD:
-                    if isinstance(value, bool) or not isinstance(value, (int, float)):
-                        raise ValueError(f"第{idx}条用例字段'{field}'必须是0-100数字")
-                    if not 0 <= value <= 100:
-                        raise ValueError(f"第{idx}条用例字段'{field}'必须在0-100之间")
-                elif not isinstance(value, str):
-                    raise ValueError(f"第{idx}条用例字段'{field}'必须是字符串")
-
-            # 检查用例名称
-            case_name = case.get("用例名称", "").strip()
-            if not case_name:
-                raise ValueError(f"第{idx}条用例缺少用例名称")
+            validate_case_fields(case, item_label=f"第{idx}条用例")
+        cls._get_effective_fields(extra_fields)
 
     @classmethod
     def _write_header_with_style(cls, ws: Worksheet, extra_fields: list[str] | None = None) -> None:
@@ -271,7 +256,9 @@ class ExcelGenerator:
             ws.column_dimensions[col_letter].width = cls.COLUMN_WIDTHS.get(field, 20)
 
     @classmethod
-    def _write_case_row_with_style(cls, ws: Worksheet, row_num: int, case: dict[str, Any], extra_fields: list[str] | None = None) -> None:
+    def _write_case_row_with_style(
+        cls, ws: Worksheet, row_num: int, case: dict[str, Any], extra_fields: list[str] | None = None
+    ) -> None:
         """写入带样式的单行测试用例
 
         Args:
@@ -297,7 +284,13 @@ class ExcelGenerator:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
 
     @classmethod
-    def _generate_from_template(cls, test_cases: list[dict[str, str]], output_path: Path, extra_fields: list[str] | None = None) -> None:
+    def _generate_from_template(
+        cls,
+        test_cases: list[dict[str, str]],
+        output_path: Path,
+        extra_fields: list[str] | None = None,
+        template_path: str | None = None,
+    ) -> None:
         """从模板生成Excel文件
 
         Args:
@@ -305,7 +298,7 @@ class ExcelGenerator:
             output_path: 输出文件路径
             extra_fields: 额外字段列表（可选）
         """
-        wb, ws = cls._load_or_create_workbook(output_path, cls.TEMPLATE_PATH, extra_fields)
+        wb, ws = cls._load_or_create_workbook(output_path, template_path, extra_fields)
         try:
             cls._write_test_cases_with_style(ws, test_cases, extra_fields)
             wb.save(output_path)
@@ -316,28 +309,16 @@ class ExcelGenerator:
                 pass
 
     @classmethod
-    def _generate_new(cls, test_cases: list[dict[str, str]], output_path: Path, extra_fields: list[str] | None = None) -> None:
-        """创建新的Excel文件（无模板时）
-
-        Args:
-            test_cases: 测试用例列表
-            output_path: 输出文件路径
-            extra_fields: 额外字段列表（可选）
-        """
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "测试用例"
-
-        cls._write_header_with_style(ws, extra_fields)
-
-        cls._write_test_cases_with_style(ws, test_cases, extra_fields)
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        wb.save(output_path)
-        wb.close()
+    def _generate_new(
+        cls, test_cases: list[dict[str, str]], output_path: Path, extra_fields: list[str] | None = None
+    ) -> None:
+        """兼容旧接口，但不允许绕过固定模板来源。"""
+        raise RuntimeError("禁止无模板生成Excel；必须使用fixtures/templates/测试用例模板.xlsx")
 
     @classmethod
-    def _write_test_cases_with_style(cls, ws: Worksheet, test_cases: list[dict[str, str]], extra_fields: list[str] | None = None) -> None:
+    def _write_test_cases_with_style(
+        cls, ws: Worksheet, test_cases: list[dict[str, str]], extra_fields: list[str] | None = None
+    ) -> None:
         """将测试用例写入工作表（带样式）
 
         Args:
@@ -469,7 +450,9 @@ class ExcelGenerator:
         return f"TC-{uuid.uuid4().hex[:8].upper()}"
 
     @classmethod
-    def _load_or_create_workbook(cls, output_path: Path | str, template_path: str | None = None, extra_fields: list[str] | None = None) -> tuple[Any, Any]:
+    def _load_or_create_workbook(
+        cls, output_path: Path | str, template_path: str | None = None, extra_fields: list[str] | None = None
+    ) -> tuple[Any, Any]:
         """加载模板或创建工作簿，返回 (wb, ws)
 
         Args:
@@ -481,26 +464,34 @@ class ExcelGenerator:
             tuple[Any, Any]: (workbook, worksheet)
         """
         output_path = Path(output_path)
-        if template_path and Path(template_path).exists():
-            if not _template_header_matches(template_path):
-                raise ValueError(f"模板表头不符合15字段契约: {template_path}")
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(template_path, output_path)
-            wb = load_workbook(output_path)
-            ws = wb["测试用例"]
-            if ws.max_row > 1:
-                ws.delete_rows(2, ws.max_row - 1)
-            cls._write_header_with_style(ws, extra_fields)
+        canonical = Path(get_default_template_path()).resolve()
+        source = Path(template_path or canonical).resolve()
+        if source != canonical:
+            raise ValueError("正式Excel只允许使用唯一固定模板来源")
+        if not _template_header_matches(str(source)):
+            raise ValueError(f"模板表头不符合15字段契约: {source}")
+        try:
+            output_path.resolve().relative_to(source.parents[1])
+        except ValueError:
+            pass
         else:
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "测试用例"
-            cls._write_header_with_style(ws, extra_fields)
+            raise ValueError("导出目标不能位于fixtures目录，禁止覆盖固定模板或样本")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, output_path)
+        wb = load_workbook(output_path)
+        ws = wb["测试用例"]
+        if ws.max_row > 1:
+            ws.delete_rows(2, ws.max_row - 1)
+        cls._write_header_with_style(ws, extra_fields)
         return wb, ws
 
     @classmethod
     def export_cases(
-        cls, cases: list[dict[str, Any]], output_path: str, template_path: str = None, extra_fields: list[str] | None = None
+        cls,
+        cases: list[dict[str, Any]],
+        output_path: str,
+        template_path: str = None,
+        extra_fields: list[str] | None = None,
     ) -> dict[str, Any]:
         """导出测试用例到Excel（支持文件大小限制）
 
@@ -517,10 +508,15 @@ class ExcelGenerator:
             return {"success": False, "error": "无测试用例可导出"}
 
         try:
+            if (
+                template_path is not None
+                and Path(template_path).resolve() != Path(get_default_template_path()).resolve()
+            ):
+                raise ValueError("正式Excel只允许使用唯一固定模板来源")
             cls._validate_test_cases(cases, extra_fields)
 
             output_path = Path(output_path)
-            wb, ws = cls._load_or_create_workbook(output_path, template_path, extra_fields)
+            wb, ws = cls._load_or_create_workbook(output_path, get_default_template_path(), extra_fields)
 
             try:
                 for row_idx, case in enumerate(cases, start=2):
@@ -552,7 +548,9 @@ class ExcelGenerator:
             return {"success": False, "error": str(e)}
 
     @classmethod
-    def export_single_case(cls, case: dict[str, Any], output_path: str, extra_fields: list[str] | None = None) -> dict[str, Any]:
+    def export_single_case(
+        cls, case: dict[str, Any], output_path: str, extra_fields: list[str] | None = None
+    ) -> dict[str, Any]:
         """单例导出模式
 
         Args:
@@ -567,7 +565,12 @@ class ExcelGenerator:
 
     @classmethod
     def batch_export(
-        cls, cases: list[dict[str, Any]], output_dir: str, batch_size: int = 100, requirement_name: str = "未命名需求", extra_fields: list[str] | None = None
+        cls,
+        cases: list[dict[str, Any]],
+        output_dir: str,
+        batch_size: int = 100,
+        requirement_name: str = "未命名需求",
+        extra_fields: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """批量导出模式
 
@@ -635,11 +638,13 @@ class ExcelGenerator:
                 case_name = str(ws.cell(row=row, column=name_col + 1).value or "")
                 steps = str(ws.cell(row=row, column=steps_col + 1).value or "")
                 expected = str(ws.cell(row=row, column=expected_col + 1).value or "")
-                results.append({
-                    "case_name": case_name,
-                    "steps": steps.strip(),
-                    "expected_result": expected.strip(),
-                })
+                results.append(
+                    {
+                        "case_name": case_name,
+                        "steps": steps.strip(),
+                        "expected_result": expected.strip(),
+                    }
+                )
             return results
         finally:
             if wb is not None:

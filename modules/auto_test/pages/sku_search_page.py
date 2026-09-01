@@ -18,8 +18,13 @@ class SKUSearchPage(BasePage):
     @allure.step("导航到SKU搜索页面")
     def navigate_to_search_page(self) -> None:
         self.navigate_to(self.search_url)
-        self.wait_for_load_state("domcontentloaded")
-        self.page.locator("input, button, table, [role='table']").first.wait_for(state="attached", timeout=30000)
+        self.wait_for_business_ready(
+            [
+                'button:visible:has-text("搜索")',
+                'input[placeholder*="SKU"]:visible',
+            ],
+            page_name="SKU搜索页面",
+        )
         logger.info("导航到SKU搜索页面")
 
     @allure.step("设置产品品类: {category}")
@@ -310,7 +315,9 @@ class SKUSearchPage(BasePage):
         finally:
             self.page.keyboard.press("Escape")
 
-    def get_first_available_dropdown_option(self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)) -> str:
+    def get_first_available_dropdown_option(
+        self, placeholder: str, excluded_options: tuple[str, ...] = ("全部",)
+    ) -> str:
         """Get the first usable option from the dropdown opened for this placeholder."""
         excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
         options = []
@@ -340,7 +347,9 @@ class SKUSearchPage(BasePage):
             self.page.keyboard.press("Escape")
             self.wait_for_poll_interval(1000)
 
-        raise ValueError(f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}")
+        raise ValueError(
+            f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}"
+        )
 
     def _dropdown_selectors(self, placeholder: str) -> list[str]:
         return [
@@ -369,14 +378,12 @@ class SKUSearchPage(BasePage):
                     return True
             except Exception:
                 continue
-        debug_controls = self.page.evaluate(
-            """() => ({
+        debug_controls = self.page.evaluate("""() => ({
                 labels: Array.from(document.querySelectorAll('label')).slice(0, 30).map(e => e.textContent.trim()),
                 placeholders: Array.from(document.querySelectorAll('input')).slice(0, 40).map(e => e.placeholder),
                 selects: Array.from(document.querySelectorAll('.el-select, .ant-select')).slice(0, 30)
                     .map(e => e.textContent.trim())
-            })"""
-        )
+            })""")
         logger.error("下拉选择器诊断: {}", debug_controls)
         return False
 
@@ -393,21 +400,18 @@ class SKUSearchPage(BasePage):
                     return True
             except Exception:
                 continue
-        debug_controls = self.page.evaluate(
-            """() => ({
+        debug_controls = self.page.evaluate("""() => ({
                 labels: Array.from(document.querySelectorAll('label')).slice(0, 30).map(e => e.textContent.trim()),
                 placeholders: Array.from(document.querySelectorAll('input')).slice(0, 40).map(e => e.placeholder),
                 selects: Array.from(document.querySelectorAll('.el-select, .ant-select')).slice(0, 30)
                     .map(e => e.textContent.trim())
-            })"""
-        )
+            })""")
         logger.error("下拉选择器诊断: {}", debug_controls)
         return False
 
     def _latest_visible_dropdown(self):
         dropdown_selector = (
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden):visible, "
-            ".el-select-dropdown:visible"
+            ".ant-select-dropdown:not(.ant-select-dropdown-hidden):visible, " ".el-select-dropdown:visible"
         )
         dropdowns = self.page.locator(dropdown_selector)
         count = dropdowns.count()
@@ -416,15 +420,12 @@ class SKUSearchPage(BasePage):
         return dropdowns.nth(count - 1)
 
     def _latest_visible_dropdown(self):
-        dropdowns = self.page.locator(
-            ".ant-select-dropdown:not(.ant-select-dropdown-hidden), .el-select-dropdown"
-        )
+        dropdowns = self.page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden), .el-select-dropdown")
         candidates = []
         for index in range(dropdowns.count()):
             dropdown = dropdowns.nth(index)
             try:
-                info = dropdown.evaluate(
-                    """element => {
+                info = dropdown.evaluate("""element => {
                         const rect = element.getBoundingClientRect();
                         const style = window.getComputedStyle(element);
                         const optionCount = element.querySelectorAll(
@@ -435,8 +436,7 @@ class SKUSearchPage(BasePage):
                             zIndex: Number.parseInt(style.zIndex || '0', 10) || 0,
                             optionCount
                         };
-                    }"""
-                )
+                    }""")
                 if info.get("visible") and info.get("optionCount", 0) > 0:
                     candidates.append((info.get("zIndex", 0), index, dropdown))
             except Exception:
