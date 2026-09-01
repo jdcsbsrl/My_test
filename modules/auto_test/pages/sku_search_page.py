@@ -122,6 +122,7 @@ class SKUSearchPage(BasePage):
         for button_name in ("查询", "搜索"):
             search_btn = self.page.get_by_role("button", name=button_name, exact=True)
             if search_btn.count() > 0 and search_btn.first.is_visible():
+                expect(search_btn.first).to_be_enabled(timeout=60000)
                 search_btn.first.click(timeout=10000)
                 self._wait_for_table_update()
                 elapsed = time.time() - start_time
@@ -165,11 +166,22 @@ class SKUSearchPage(BasePage):
                 reset_btn = self.page.locator(selector)
                 if reset_btn.count() > 0 and reset_btn.is_visible():
                     reset_btn.click()
+                    self._wait_for_search_button_ready()
                     logger.info(f"已重置搜索条件: {selector}")
                     return
             except Exception:
                 continue
         logger.warning("未找到重置按钮")
+
+    def _wait_for_search_button_ready(self, timeout: int = 60000) -> None:
+        """Wait until the search action is no longer blocked by an async load."""
+        for button_name in ("查询", "搜索"):
+            search_btn = self.page.get_by_role("button", name=button_name, exact=True)
+            if search_btn.count() == 0 or not search_btn.first.is_visible():
+                continue
+            expect(search_btn.first).to_be_enabled(timeout=timeout)
+            return
+        raise ValueError("未找到搜索按钮")
 
     @allure.step("点击确定按钮（高级搜索）")
     def click_confirm(self) -> None:
@@ -515,6 +527,7 @@ class SKUSearchPage(BasePage):
 
         if not clicked:
             if value == "全部":
+                self._wait_for_search_button_ready()
                 logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
                 return
             raise ValueError(f"未找到下拉选择器: {placeholder}")
@@ -530,16 +543,19 @@ class SKUSearchPage(BasePage):
             raise ValueError(f"下拉选择器“{placeholder}”中未加载可见选项")
 
         if self._click_visible_dropdown_option(value):
+            self._wait_for_search_button_ready()
             return
 
         fuzzy_option = self._find_unique_fuzzy_dropdown_option(value)
         if fuzzy_option and self._click_visible_dropdown_option(fuzzy_option):
             logger.info("模糊匹配下拉选项: {} -> {}", value, fuzzy_option)
+            self._wait_for_search_button_ready()
             return
 
         self._log_dropdown_options_not_found(placeholder, value)
         self.page.keyboard.press("Escape")
         if value == "全部":
+            self._wait_for_search_button_ready()
             logger.info("{} 使用重置后的无筛选状态表示“全部”", placeholder)
             return
         raise ValueError(f"下拉选择器“{placeholder}”中未找到选项: {value}")
