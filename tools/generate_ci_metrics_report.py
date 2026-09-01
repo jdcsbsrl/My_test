@@ -67,9 +67,7 @@ def build_metrics(jobs: list[dict[str, Any]], logs: str, repository: str, run_id
         if seconds is not None:
             durations.append(seconds)
         failed_steps = [
-            str(step.get("name", "未命名步骤"))
-            for step in job.get("steps", [])
-            if step.get("conclusion") == "failure"
+            str(step.get("name", "未命名步骤")) for step in job.get("steps", []) if step.get("conclusion") == "failure"
         ]
         job_rows.append(
             {
@@ -82,9 +80,7 @@ def build_metrics(jobs: list[dict[str, Any]], logs: str, repository: str, run_id
         )
 
     category_counts = {
-        category: len(pattern.findall(logs))
-        for category, pattern in CATEGORY_PATTERNS.items()
-        if pattern.search(logs)
+        category: len(pattern.findall(logs)) for category, pattern in CATEGORY_PATTERNS.items() if pattern.search(logs)
     }
     category_counts = dict(sorted(category_counts.items(), key=lambda item: (-item[1], item[0])))
 

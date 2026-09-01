@@ -150,7 +150,9 @@ jobs:
             --cov-fail-under=60
       - name: Scan unit test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
       - name: Upload unit test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -193,7 +195,9 @@ jobs:
           pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir .runtime/reports/allure-results
       - name: Scan integration test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -276,7 +280,9 @@ jobs:
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
       - name: Scan UI test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
@@ -358,7 +364,9 @@ jobs:
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
       - name: Scan inventory UI test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
         env:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
@@ -395,7 +403,9 @@ jobs:
           merge-multiple: true
           path: .runtime/reports/allure-results/
       - name: Scan merged Allure results for secrets
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports/allure-results
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          python tools/scan_sensitive_artifacts.py .runtime/reports/allure-results
       - name: Validate Allure results
         run: |
           RESULT_COUNT=$(find .runtime/reports/allure-results -name '*-result.json' -type f | wc -l)
@@ -438,6 +448,7 @@ jobs:
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     timeout-minutes: 10
     steps:
+      - uses: actions/checkout@v4
       - name: Download logs from failed jobs
         env:
           GH_TOKEN: ${{ github.token }}
