@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 CATEGORY_PATTERNS = {
     "超时": re.compile(r"timeout|timed out|超时", re.IGNORECASE),
     "断言失败": re.compile(r"AssertionError|assert\s+", re.IGNORECASE),
