@@ -1,7 +1,7 @@
 from typing import Any
 
 import allure
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -346,48 +346,11 @@ class SalesOrderPage(BasePage):
             raise ValueError("店铺名称和店铺 ID 不能为空")
 
         self.wait_for_page_settle(timeout=30000)
-        trigger = self.page.locator(".store-select-trigger:visible").first
-        trigger.wait_for(state="visible", timeout=30000)
-        trigger.click()
-
-        store_search = self.page.locator('input[placeholder="输入店铺搜索"]:visible').first
-        store_search.wait_for(state="visible", timeout=10000)
-        store_search.fill(store_name)
-        self.page.wait_for_timeout(500)
-
-        selected = self.page.evaluate(
-            """
-            (expectedName) => {
-              const items = Array.from(document.querySelectorAll('.store-item'));
-              const item = items.find((candidate) => {
-                const name = candidate.querySelector('.store-name')?.innerText?.trim();
-                return name === expectedName;
-              });
-              if (!item) return {found: false, checked: false, name: ''};
-              const checkbox = item.querySelector('input[type="checkbox"]');
-              if (checkbox && !checkbox.checked) checkbox.click();
-              return {
-                found: true,
-                checked: Boolean(checkbox?.checked),
-                name: item.querySelector('.store-name')?.innerText?.trim() || ''
-              };
-            }
-            """,
-            store_name,
-        )
-        if not selected.get("found"):
-            raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
-        if not selected.get("checked"):
-            raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
-
-        trigger.click()
-        search_button = self.page.get_by_role("button", name="搜索", exact=True)
-        search_button.wait_for(state="visible", timeout=10000)
         search_requests: list[dict[str, str]] = []
 
         def record_order_request(request: Any) -> None:
             url = str(request.url or "")
-            if "batchListNew" in url or "/sales/order/" in url:
+            if "sales/order" in url.lower():
                 search_requests.append(
                     {
                         "method": str(request.method or ""),
@@ -396,8 +359,55 @@ class SalesOrderPage(BasePage):
                     }
                 )
 
+        # Register before opening the store picker.  Selecting or closing the
+        # custom picker can itself trigger the order-list request.
         self.page.on("request", record_order_request)
+        trigger = self.page.locator(".store-select-trigger:visible").first
         try:
+            trigger.wait_for(state="visible", timeout=30000)
+            trigger.click()
+
+            store_search = self.page.locator('input[placeholder="输入店铺搜索"]:visible').first
+            store_search.wait_for(state="visible", timeout=10000)
+            store_search.fill(store_name)
+            self.page.wait_for_function(
+                """
+                (expectedName) => Array.from(document.querySelectorAll('.store-item'))
+                  .some((candidate) => candidate.querySelector('.store-name')?.innerText?.trim() === expectedName)
+                """,
+                store_name,
+                timeout=30000,
+            )
+
+            selected = self.page.evaluate(
+                """
+                (expectedName) => {
+                  const items = Array.from(document.querySelectorAll('.store-item'));
+                  const item = items.find((candidate) => {
+                    const name = candidate.querySelector('.store-name')?.innerText?.trim();
+                    return name === expectedName;
+                  });
+                  if (!item) return {found: false, checked: false, name: ''};
+                  const checkbox = item.querySelector('input[type="checkbox"]');
+                  if (checkbox && !checkbox.checked) checkbox.click();
+                  return {
+                    found: true,
+                    checked: Boolean(checkbox?.checked),
+                    name: item.querySelector('.store-name')?.innerText?.trim() || ''
+                  };
+                }
+                """,
+                store_name,
+            )
+            if not selected.get("found"):
+                raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
+            if not selected.get("checked"):
+                raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
+
+            trigger.click()
+            search_button = self.page.get_by_role("button", name="搜索", exact=True)
+            search_button.wait_for(state="visible", timeout=10000)
+            expect(search_button).to_be_enabled(timeout=60000)
             search_button.click()
             self.wait_for_loading_complete(timeout=60000)
             self.wait_for_table_data(timeout=60000)

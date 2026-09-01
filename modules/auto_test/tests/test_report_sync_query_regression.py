@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 import pytest
+import requests
 
 from modules.auto_test.api.report_sync_query_api import (
     CursorPaginationError,
@@ -49,6 +50,9 @@ def _orders_with_adaptive_window(api: ReportSyncQueryAPI, payload: dict) -> tupl
             continue
         except ReportSyncQueryBusinessError as exc:
             attempts.append(f"{minutes}m=接口业务失败({exc})")
+            continue
+        except requests.exceptions.Timeout as exc:
+            attempts.append(f"{minutes}m=接口超时({exc})")
             continue
         attempts.append(f"{minutes}m={len(orders)}")
         if orders:

@@ -298,12 +298,21 @@ def sales_report(logged_in_page: Page) -> SalesReportPage:
 
 @pytest.fixture()
 def sales_report_large_account(page: Page) -> SalesReportPage:
+    """Open the large-data report with the credentials supplied by CI.
+
+    The CI administrator lane provides the account with the broadest data
+    visibility. Keeping credentials environment-driven also prevents a local
+    account from silently replacing the lane's configured account.
+    """
+    username = get_secret("USERNAME")
+    password = get_secret("PASSWORD")
+    assert username and password, "Large-data report requires CI login credentials"
     page.context.clear_cookies()
     page.goto(get_config().base_url)
     page.evaluate("() => { localStorage.clear(); sessionStorage.clear(); }")
     page.goto(f"{get_config().base_url.rstrip('/')}/login")
     login_page = LoginPage(page)
-    assert login_page.login("15137651220", "123456"), "Large-data account login failed"
+    assert login_page.login(username, password), "Large-data account login failed"
     report_page = SalesReportPage(page)
     report_page.navigate_to_report()
     return report_page

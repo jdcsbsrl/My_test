@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import requests
@@ -25,6 +26,8 @@ class ReportSyncQueryBusinessError(AssertionError):
 
 class ReportSyncQueryAPI:
     MAX_PAGES = 100
+    REQUEST_ATTEMPTS = 3
+    REQUEST_TIMEOUT = (10, 60)
     REPORT = "/oms-admin/sales/order/reportSyncQuery"
     ORDER_LIST = "/oms-admin/sales/order/batchListNew"
     ORDER_ITEMS = "/oms-admin/sales/orderItem/queryAllList"
@@ -37,7 +40,20 @@ class ReportSyncQueryAPI:
                 self.base_url = self.base_url[: -len(suffix)]
 
     def post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        response = self.session.post(f"{self.base_url}{path}", json=payload, timeout=30)
+        response = None
+        for attempt in range(1, self.REQUEST_ATTEMPTS + 1):
+            try:
+                response = self.session.post(
+                    f"{self.base_url}{path}",
+                    json=payload,
+                    timeout=self.REQUEST_TIMEOUT,
+                )
+                break
+            except requests.exceptions.Timeout:
+                if attempt == self.REQUEST_ATTEMPTS:
+                    raise
+                time.sleep(attempt)
+        assert response is not None
         response.raise_for_status()
         body = response.json()
         assert isinstance(body, dict), "response must be a JSON object"
