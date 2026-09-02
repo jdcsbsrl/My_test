@@ -89,8 +89,23 @@ class BrowserDriver:
             raise
 
     def new_context_and_page(self) -> tuple[BrowserContext, Page]:
+        context = self.new_context()
+        try:
+            page = context.new_page()
+            return context, page
+        except Exception:
+            try:
+                context.close()
+            except Exception:
+                logger.exception("BrowserDriver: failed to close context after page creation failure")
+            self._discard_context(context)
+            self._discard_context(context, tracing=True)
+            raise
+
+    def new_context(self, **overrides: Any) -> BrowserContext:
+        """Create and register an isolated context using shared browser options."""
         if self.browser is None:
-            raise RuntimeError("BrowserDriver.start_browser must be called before new_context_and_page")
+            raise RuntimeError("BrowserDriver.start_browser must be called before creating a context")
 
         viewport = self.config.get("playwright.viewport", {"width": 1920, "height": 1080})
         context_options: dict[str, Any] = {
@@ -104,6 +119,7 @@ class BrowserDriver:
         if video_config in ("on", "retain-on-failure"):
             context_options["record_video_dir"] = str(_runtime_video_dir(self._run_id, self._worker_id))
             context_options["record_video_size"] = viewport
+        context_options.update(overrides)
 
         context = self.browser.new_context(**context_options)
         self._contexts.append(context)
@@ -114,9 +130,7 @@ class BrowserDriver:
                 context.tracing.start(screenshots=True, snapshots=True, sources=True)
                 trace_started = True
                 self._tracing_contexts.append(context)
-
-            page = context.new_page()
-            return context, page
+            return context
         except Exception:
             if trace_started:
                 try:

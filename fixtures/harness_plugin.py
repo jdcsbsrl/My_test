@@ -12,9 +12,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -104,6 +104,85 @@ def _ensure_runtime_directories(config: pytest.Config | None = None) -> None:
         runtime_dir("sheet_build"),
     ):
         directory.mkdir(parents=True, exist_ok=True)
+
+
+def _explicit_cli_value(config: pytest.Config, option: str) -> str | None:
+    args = [str(arg) for arg in getattr(config.invocation_params, "args", ())]
+    prefix = f"{option}="
+    for index, arg in enumerate(args):
+        if arg == option and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith(prefix):
+            return arg[len(prefix) :]
+    return None
+
+
+def _browser_launch_options(request: pytest.FixtureRequest, config_manager: ConfigManager) -> dict[str, Any]:
+    config = request.config
+    args = {str(arg) for arg in getattr(config.invocation_params, "args", ())}
+    browser = _explicit_cli_value(config, "--browser") or config_manager.get("playwright.browser", "chromium")
+    headless = config_manager.get("playwright.headless", True)
+    if "--headed" in args:
+        headless = False
+    slow_mo_value = _explicit_cli_value(config, "--slow-mo")
+    slow_mo = int(slow_mo_value) if slow_mo_value is not None else config_manager.get("playwright.slow_mo", 0)
+    return {"browser": browser, "headless": headless, "slow_mo": slow_mo}
+
+
+def _login_response_capture(page: Page) -> tuple[dict[str, Any], Any]:
+    login_result: dict[str, Any] = {}
+
+    def handle_response(response) -> None:
+        if "/auth/login" in response.url:
+            try:
+                login_result["response"] = response.json()
+                headers = response.request.all_headers()
+                login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
+            except Exception:
+                pass
+
+    page.on("response", handle_response)
+    return login_result, handle_response
+
+
+def _refresh_authenticated_session(
+    *,
+    state: dict[str, Any],
+    page: Page,
+    request: pytest.FixtureRequest,
+    config_manager: ConfigManager,
+) -> None:
+    lock = state["refresh_lock"]
+    with lock:
+        login_result, handler = _login_response_capture(page)
+        try:
+            credentials = state["credentials"]
+            if not LoginPage(page).login(credentials["username"], credentials["password"]):
+                raise RuntimeError("重新登录未成功返回")
+            if "response" not in login_result:
+                raise RuntimeError("重新登录未捕获到 auth/login 响应")
+            _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+
+            login_response = login_result["response"]
+            login_response["_clientid"] = login_result.get("clientid")
+            login_response["_cookies"] = page.context.cookies()
+            auth_file = Path(state["storage_state"])
+            temp_auth_file = auth_file.with_name(f"{auth_file.stem}.refresh-{uuid.uuid4().hex}.tmp")
+            try:
+                page.context.storage_state(path=str(temp_auth_file))
+                os.replace(temp_auth_file, auth_file)
+            finally:
+                if temp_auth_file.exists():
+                    temp_auth_file.unlink()
+
+            state["login_response"].clear()
+            state["login_response"].update(login_response)
+            state["refresh_count"] += 1
+        except Exception as exc:
+            _capture_authentication_diagnostic(page, "refresh-failure", request.config)
+            raise RuntimeError(f"认证刷新失败: {exc}") from exc
+        finally:
+            page.remove_listener("response", handler)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -356,55 +435,39 @@ def schema_factory() -> SchemaBasedFactory:
 
 
 @pytest.fixture(scope="session")
-def browser(request: pytest.FixtureRequest, config_manager: ConfigManager) -> Browser:
+def _browser_driver(request: pytest.FixtureRequest, config_manager: ConfigManager) -> BrowserDriver:
     driver = BrowserDriver(run_id=_run_id(request.config), worker_id=_worker_id())
-    driver.start_browser(
-        browser=config_manager.get("playwright.browser", "chromium"),
-        headless=config_manager.get("playwright.headless", True),
-        slow_mo=config_manager.get("playwright.slow_mo", 0),
-    )
+    driver.start_browser(**_browser_launch_options(request, config_manager))
     try:
-        yield driver.browser
+        yield driver
     finally:
         driver.shutdown_browser()
+
+
+@pytest.fixture(scope="session")
+def browser(_browser_driver: BrowserDriver) -> Browser:
+    if _browser_driver.browser is None:
+        raise RuntimeError("BrowserDriver did not expose a started browser")
+    return _browser_driver.browser
 
 
 @pytest.fixture(scope="function")
 def context(
     request: pytest.FixtureRequest,
-    browser: Browser,
-    config_manager: ConfigManager,
+    _browser_driver: BrowserDriver,
     authenticated_storage_state: str,
 ):
-    viewport = config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
-    options: dict[str, Any] = {
-        "viewport": viewport,
-        "accept_downloads": True,
-        "record_video_dir": None,
-        "record_video_size": None,
-        "storage_state": authenticated_storage_state,
-    }
-    if config_manager.get("playwright.video", "off") in {"on", "retain-on-failure"}:
-        options["record_video_dir"] = str(_runtime_reports_dir(request.config) / "videos")
-        options["record_video_size"] = viewport
-    browser_context = browser.new_context(**options)
-    trace_started = False
+    browser_context = _browser_driver.new_context(storage_state=authenticated_storage_state)
     try:
-        if config_manager.get("playwright.trace", "off") in {"on", "retain-on-failure", "on-first-retry"}:
-            browser_context.tracing.start(screenshots=True, snapshots=True, sources=True)
-            trace_started = True
         yield browser_context
     finally:
         errors: list[Exception] = []
-        if trace_started:
+        trace_path = None
+        if getattr(request.node, "rep_call", None) is not None and request.node.rep_call.failed:
             trace_path = _runtime_reports_dir(request.config) / "traces" / f"test_trace_{uuid.uuid4().hex[:8]}.zip"
             trace_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                browser_context.tracing.stop(path=str(trace_path))
-            except Exception as exc:
-                errors.append(exc)
         try:
-            browser_context.close()
+            _browser_driver.close_context(browser_context, trace_path=str(trace_path) if trace_path else None)
         except Exception as exc:
             errors.append(exc)
         if errors:
@@ -412,34 +475,50 @@ def context(
 
 
 @pytest.fixture(scope="session")
-def authenticated_storage_state(
+def _authenticated_session(
     request: pytest.FixtureRequest,
     browser: Browser,
     config_manager: ConfigManager,
     tmp_path_factory,
-) -> str:
-    credentials = _credentials()
+    test_user_credentials: dict[str, str],
+) -> dict[str, Any]:
+    """Authenticate once and expose all session-level authentication artifacts."""
     auth_dir = tmp_path_factory.mktemp("playwright-auth")
     auth_file = auth_dir / "state.json"
     for attempt in range(2):
         auth_context = None
         auth_page = None
+        login_result, handler = ({}, None)
         try:
             auth_context = browser.new_context(
                 viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
             )
             auth_page = auth_context.new_page()
-            if not LoginPage(auth_page).login(credentials["username"], credentials["password"]):
+            login_result, handler = _login_response_capture(auth_page)
+            if not LoginPage(auth_page).login(test_user_credentials["username"], test_user_credentials["password"]):
                 raise RuntimeError("登录流程未成功返回")
+            if "response" not in login_result:
+                raise RuntimeError("Failed to capture login API response")
             _assert_authenticated_page(auth_page, config_manager.base_url, timeout=30000)
             auth_context.storage_state(path=str(auth_file))
-            return str(auth_file)
+            login_response = login_result["response"]
+            login_response["_clientid"] = login_result.get("clientid")
+            login_response["_cookies"] = auth_page.context.cookies()
+            return {
+                "storage_state": str(auth_file),
+                "login_response": login_response,
+                "credentials": test_user_credentials,
+                "refresh_lock": threading.Lock(),
+                "refresh_count": 0,
+            }
         except Exception as exc:
             if auth_page is not None:
-                _capture_authentication_diagnostic(auth_page, f"storage-state-{attempt + 1}", request.config)
+                _capture_authentication_diagnostic(auth_page, f"session-{attempt + 1}", request.config)
             if attempt == 1:
-                pytest.fail(f"Unable to create authenticated browser state: {exc}")
+                pytest.fail(f"Unable to create authenticated session: {exc}")
         finally:
+            if auth_page is not None and handler is not None:
+                auth_page.remove_listener("response", handler)
             if auth_page is not None:
                 try:
                     auth_page.close()
@@ -463,16 +542,26 @@ def page(context: BrowserContext) -> Page:
 
 
 @pytest.fixture(scope="function")
-def logged_in_page(request: pytest.FixtureRequest, page: Page, config_manager: ConfigManager) -> Page:
-    credentials = _credentials()
+def logged_in_page(
+    request: pytest.FixtureRequest,
+    page: Page,
+    config_manager: ConfigManager,
+    _authenticated_session: dict[str, Any],
+) -> Page:
     try:
         _assert_authenticated_page(page, config_manager.base_url, timeout=60000)
     except Exception as exc:
         logger.warning("认证状态失效，尝试在当前 context 重新登录: %s", exc)
         try:
-            if not LoginPage(page).login(credentials["username"], credentials["password"]):
-                raise RuntimeError("重新登录未成功返回")
-            _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+            if getattr(request.node, "_auth_refresh_attempted", False):
+                raise RuntimeError("同一测试内认证刷新次数已达到上限")
+            setattr(request.node, "_auth_refresh_attempted", True)
+            _refresh_authenticated_session(
+                state=_authenticated_session,
+                page=page,
+                request=request,
+                config_manager=config_manager,
+            )
         except Exception as retry_exc:
             _capture_authentication_diagnostic(page, "logged-in-page", request.config)
             pytest.fail(f"认证状态无效，重新登录失败: {retry_exc}")
@@ -542,67 +631,18 @@ def token_manager() -> TokenManager:
 
 
 @pytest.fixture(scope="session")
-def login_response(
-    request: pytest.FixtureRequest,
-    ui_base_url: str,
-    test_user_credentials: dict[str, str],
-    config_manager: ConfigManager,
-) -> dict:
-    def capture() -> dict:
-        login_result: dict[str, Any] = {}
-        driver = BrowserDriver(run_id=_run_id(request.config), worker_id=_worker_id())
-        driver.start_browser(
-            browser=config_manager.get("playwright.browser", "chromium"),
-            headless=config_manager.get("playwright.headless", True),
-            slow_mo=config_manager.get("playwright.slow_mo", 0),
-        )
-        auth_context = None
-        page = None
-        try:
-            auth_context = driver.browser.new_context(
-                viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
-            )
-            page = auth_context.new_page()
-
-            def handle_response(response) -> None:
-                if "/auth/login" in response.url:
-                    try:
-                        login_result["response"] = response.json()
-                        headers = response.request.all_headers()
-                        login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
-                    except Exception:
-                        pass
-
-            page.on("response", handle_response)
-            page.goto(ui_base_url)
-            page.wait_for_load_state("networkidle")
-            LoginPage(page).login(test_user_credentials["username"], test_user_credentials["password"])
-            if "response" not in login_result:
-                raise RuntimeError("Failed to capture login API response")
-            login_result["response"]["_clientid"] = login_result.get("clientid")
-            login_result["response"]["_cookies"] = page.context.cookies()
-            return login_result["response"]
-        finally:
-            if page is not None:
-                try:
-                    page.close()
-                except Exception:
-                    logger.debug("failed to close login response page", exc_info=True)
-            if auth_context is not None:
-                try:
-                    auth_context.close()
-                except Exception:
-                    logger.debug("failed to close login response context", exc_info=True)
-            driver.shutdown_browser()
-
-    try:
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="login-capture") as executor:
-            return executor.submit(capture).result()
-    except Exception as exc:
-        pytest.fail(f"Failed to get login response: {exc}")
+def authenticated_storage_state(_authenticated_session: dict[str, Any]) -> str:
+    return _authenticated_session["storage_state"]
 
 
 @pytest.fixture(scope="session")
+def login_response(
+    _authenticated_session: dict[str, Any],
+) -> dict:
+    return _authenticated_session["login_response"]
+
+
+@pytest.fixture(scope="function")
 def login_token(login_response: dict) -> str:
     if login_response.get("code") == 200:
         data = login_response.get("data") or {}
@@ -671,17 +711,9 @@ def sales_order_facade_class(api_client: APIClient):
 
 
 @pytest.fixture(scope="session")
-def browser_driver_session(request: pytest.FixtureRequest):
-    driver = BrowserDriver(run_id=_run_id(request.config), worker_id=_worker_id())
-    driver.start_browser(
-        browser=request.config.getoption("--browser"),
-        headless=not request.config.getoption("--headed"),
-        slow_mo=int(request.config.getoption("--slow-mo")),
-    )
-    try:
-        yield driver
-    finally:
-        driver.shutdown_browser()
+def browser_driver_session(_browser_driver: BrowserDriver) -> BrowserDriver:
+    """Compatibility alias backed by the shared worker-scoped browser driver."""
+    return _browser_driver
 
 
 @pytest.fixture(scope="function")
