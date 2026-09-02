@@ -242,9 +242,9 @@ jobs:
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
-      # Keep the administrator account single-threaded. The inventory lane
-      # uses a different account and can run at the same time.
-      max-parallel: 1
+      # Each runner has an isolated browser; allow two administrator shards
+      # while keeping the account lane bounded.
+      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -329,9 +329,8 @@ jobs:
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
       fail-fast: false
       # Inventory shards share the group-leader account and backend data scope.
-      # Run them one at a time without a concurrency group, so GitHub does not
-      # discard queued shards.
-      max-parallel: 1
+      # Allow two isolated runners at a time while keeping the lane bounded.
+      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -347,13 +347,13 @@ class SalesOrderPage(BasePage):
 
         self.wait_for_page_settle(timeout=30000)
         search_requests: list[dict[str, str]] = []
+        capture_requests = False
 
         def record_order_request(request: Any) -> None:
             url = str(request.url or "")
-            if "sales/order" in url.lower():
+            if capture_requests and str(request.method or "").upper() == "POST":
                 search_requests.append(
                     {
-                        "method": str(request.method or ""),
                         "url": url,
                         "payload": str(request.post_data or ""),
                     }
@@ -414,6 +414,7 @@ class SalesOrderPage(BasePage):
             search_button = self.page.get_by_role("button", name="搜索", exact=True)
             search_button.wait_for(state="visible", timeout=10000)
             expect(search_button).to_be_enabled(timeout=60000)
+            capture_requests = True
             search_button.click()
             self.wait_for_loading_complete(timeout=60000)
             self.wait_for_table_data(timeout=60000)
@@ -425,9 +426,16 @@ class SalesOrderPage(BasePage):
             request for request in search_requests if store_id in request["payload"] or store_id in request["url"]
         ]
         if not matching_requests:
-            payload = search_requests[-1] if search_requests else "<未捕获销售订单列表请求>"
+            request_summary = [
+                {
+                    "url": request["url"],
+                    "payload_contains_store_id": store_id in request["payload"],
+                }
+                for request in search_requests[-10:]
+            ]
             raise AssertionError(
-                "销售订单店铺筛选未传递期望的 storeId: " f"name={store_name}, expected_id={store_id}, request={payload}"
+                "销售订单店铺筛选未传递期望的 storeId: "
+                f"name={store_name}, expected_id={store_id}, requests={request_summary}"
             )
 
         order_numbers = self.get_sorted_order_numbers(limit=1)
