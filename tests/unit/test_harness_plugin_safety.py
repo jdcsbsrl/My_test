@@ -1,3 +1,4 @@
+import inspect
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,19 @@ def test_root_configuration_loads_the_only_harness_entry_point():
     conftest = Path(__file__).parents[2] / "modules" / "auto_test" / "conftest.py"
     assert "pytest.fixture" not in conftest.read_text(encoding="utf-8")
     assert "pytest_configure" not in conftest.read_text(encoding="utf-8")
+
+
+def test_authentication_fixtures_share_one_session_source():
+    storage_state_params = inspect.signature(
+        harness_plugin.authenticated_storage_state._fixture_function
+    ).parameters
+    login_response_params = inspect.signature(
+        harness_plugin.login_response._fixture_function
+    ).parameters
+
+    assert list(storage_state_params) == ["_authenticated_session"]
+    assert list(login_response_params) == ["_authenticated_session"]
+    assert "ThreadPoolExecutor" not in Path(harness_plugin.__file__).read_text(encoding="utf-8")
 
 
 def test_authorization_fails_closed_without_explicit_grant(monkeypatch):
