@@ -1,7 +1,7 @@
 from typing import Any
 
 import allure
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -13,7 +13,7 @@ class SalesOrderPage(BasePage):
     SALES_EXPORT_STORE_CASES = (
         ("yxl_payment-Velora", "2000509327097937921"),
         ("yxl_kehu_zuzhang-test_yxl", "2067069306596454401"),
-        ("yxl_kehu_zuzhang-test_yxl_new1", "2083105892576489473"),
+        ("yxl_kehu_zuzhang-test_yxl_new", "2083105892576489473"),
     )
 
     def __init__(self, page: Page) -> None:
@@ -346,58 +346,115 @@ class SalesOrderPage(BasePage):
             raise ValueError("店铺名称和店铺 ID 不能为空")
 
         self.wait_for_page_settle(timeout=30000)
-        trigger = self.page.locator(".store-select-trigger:visible").first
-        trigger.wait_for(state="visible", timeout=30000)
-        trigger.click()
-
-        store_search = self.page.locator('input[placeholder="输入店铺搜索"]:visible').first
-        store_search.wait_for(state="visible", timeout=10000)
-        store_search.fill(store_name)
-        self.page.wait_for_timeout(500)
-
-        selected = self.page.evaluate(
-            """
-            (expectedName) => {
-              const items = Array.from(document.querySelectorAll('.store-item'));
-              const item = items.find((candidate) => {
-                const name = candidate.querySelector('.store-name')?.innerText?.trim();
-                return name === expectedName;
-              });
-              if (!item) return {found: false, checked: false, name: ''};
-              const checkbox = item.querySelector('input[type="checkbox"]');
-              if (checkbox && !checkbox.checked) checkbox.click();
-              return {
-                found: true,
-                checked: Boolean(checkbox?.checked),
-                name: item.querySelector('.store-name')?.innerText?.trim() || ''
-              };
-            }
-            """,
-            store_name,
-        )
-        if not selected.get("found"):
-            raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
-        if not selected.get("checked"):
-            raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
-
-        trigger.click()
-        search_button = self.page.get_by_role("button", name="搜索", exact=True)
-        search_button.wait_for(state="visible", timeout=10000)
         search_requests: list[dict[str, str]] = []
+        capture_requests = False
 
         def record_order_request(request: Any) -> None:
             url = str(request.url or "")
-            if "batchListNew" in url or "/sales/order/" in url:
+            if capture_requests and str(request.method or "").upper() == "POST":
                 search_requests.append(
                     {
-                        "method": str(request.method or ""),
                         "url": url,
                         "payload": str(request.post_data or ""),
                     }
                 )
 
+        # Register before opening the store picker.  Selecting or closing the
+        # custom picker can itself trigger the order-list request.
         self.page.on("request", record_order_request)
+        trigger = self.page.locator(".store-select-trigger:visible").first
         try:
+            trigger.wait_for(state="visible", timeout=30000)
+            trigger.click()
+
+            store_search = self.page.locator('input[placeholder="输入店铺搜索"]:visible').first
+            store_search.wait_for(state="visible", timeout=10000)
+            store_search.fill(store_name)
+            self.page.wait_for_function(
+                """
+                (expectedName) => {
+                  const normalize = value => (value || '')
+                    .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+                    .replace(/\\s+/g, '').trim();
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                      && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
+                  const expected = normalize(expectedName);
+                  const matches = value => {
+                    const normalized = normalize(value);
+                    return normalized === expected || normalized.includes(expected);
+                  };
+                  const namedItems = Array.from(document.querySelectorAll('.store-item'))
+                    .filter(visible)
+                    .some((candidate) => matches(candidate.querySelector('.store-name')?.textContent));
+                  if (namedItems) return true;
+                  return Array.from(document.querySelectorAll('body *'))
+                    .filter(visible)
+                    .some(candidate => matches(candidate.textContent)
+                      && !Array.from(candidate.children).some(child => matches(child.textContent)));
+                }
+                """,
+                arg=store_name,
+                timeout=30000,
+            )
+
+            selected = self.page.evaluate(
+                """
+                (expectedName) => {
+                  const normalize = value => (value || '')
+                    .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+                    .replace(/\\s+/g, '').trim();
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                      && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
+                  const expected = normalize(expectedName);
+                  const matches = value => {
+                    const normalized = normalize(value);
+                    return normalized === expected || normalized.includes(expected);
+                  };
+                  const items = Array.from(document.querySelectorAll('.store-item')).filter(visible);
+                  let item = items.find((candidate) => {
+                    const name = candidate.querySelector('.store-name')?.textContent;
+                    return matches(name);
+                  });
+                  if (!item) {
+                    const textNode = Array.from(document.querySelectorAll('body *'))
+                      .filter(visible)
+                      .find(candidate => matches(candidate.textContent)
+                        && !Array.from(candidate.children).some(child => matches(child.textContent)));
+                    item = textNode?.closest('.store-item, [role="option"], li, tr') || textNode;
+                  }
+                  if (!item) return {found: false, checked: false, name: ''};
+                  const checkbox = item.matches('input[type="checkbox"]')
+                    ? item
+                    : item.querySelector('input[type="checkbox"], [role="checkbox"]');
+                  if (checkbox && !checkbox.checked) checkbox.click();
+                  if (!checkbox) item.click();
+                  return {
+                    found: true,
+                    checked: checkbox ? Boolean(checkbox.checked) : true,
+                    name: item.querySelector('.store-name')?.textContent?.trim() || item.textContent?.trim() || ''
+                  };
+                }
+                """,
+                store_name,
+            )
+            if not selected.get("found"):
+                raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
+            if not selected.get("checked"):
+                raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
+
+            trigger.click()
+            search_button = self.page.get_by_role("button", name="搜索", exact=True)
+            search_button.wait_for(state="visible", timeout=10000)
+            expect(search_button).to_be_enabled(timeout=60000)
+            capture_requests = True
             search_button.click()
             self.wait_for_loading_complete(timeout=60000)
             self.wait_for_table_data(timeout=60000)
@@ -409,9 +466,16 @@ class SalesOrderPage(BasePage):
             request for request in search_requests if store_id in request["payload"] or store_id in request["url"]
         ]
         if not matching_requests:
-            payload = search_requests[-1] if search_requests else "<未捕获销售订单列表请求>"
+            request_summary = [
+                {
+                    "url": request["url"],
+                    "payload_contains_store_id": store_id in request["payload"],
+                }
+                for request in search_requests[-10:]
+            ]
             raise AssertionError(
-                "销售订单店铺筛选未传递期望的 storeId: " f"name={store_name}, expected_id={store_id}, request={payload}"
+                "销售订单店铺筛选未传递期望的 storeId: "
+                f"name={store_name}, expected_id={store_id}, requests={request_summary}"
             )
 
         order_numbers = self.get_sorted_order_numbers(limit=1)
@@ -1167,7 +1231,7 @@ class SalesOrderPage(BasePage):
                     if (nt) return nt.domComplete - nt.fetchStart;
                     return pt.domComplete - pt.fetchStart;
                 }
-            """)
+                """)
             return round(timing / 1000, 3)
         except Exception:
             return 0.0
@@ -1257,7 +1321,7 @@ class SalesOrderPage(BasePage):
                     }
                     return exportButtons;
                 }
-            """)
+                """)
             logger.info(f"找到导出按钮信息: {script_result}")
         except Exception as e:
             logger.debug(f"查找导出按钮信息失败: {e}")
@@ -1341,7 +1405,7 @@ class SalesOrderPage(BasePage):
                     }
                     return { success: checkedCount > 0, count: checkedCount, message: 'clicked order-block checkboxes' };
                 }
-            """)
+                """)
             logger.info(f"通过order-block勾选订单: {script_result}")
             import time
 
@@ -1384,7 +1448,7 @@ class SalesOrderPage(BasePage):
                     }
                     return checked;
                 }
-            """)
+                """)
             return count or 0
         except Exception:
             return 0
@@ -1476,7 +1540,7 @@ class SalesOrderPage(BasePage):
                     }
                     return { clicked: false };
                 }
-            """)
+                """)
         except Exception as e:
             logger.debug(f"通过JS点击导出勾选的订单失败: {e}")
         else:
@@ -1641,7 +1705,7 @@ class SalesOrderPage(BasePage):
                         }}
                         return orderNumbers;
                     }}
-                """)
+                    """)
                 if script_result:
                     results = script_result
                     logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
@@ -1660,7 +1724,7 @@ class SalesOrderPage(BasePage):
                             }}
                             return [];
                         }}
-                    """)
+                        """)
                     if script_result:
                         results = script_result
                         logger.info("通过 body 文本匹配获取到 {} 个系统单号", len(results))

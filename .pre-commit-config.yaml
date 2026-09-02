@@ -13,6 +13,12 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-commit]
+      - id: runtime-report-sensitive-audit
+        name: runtime report sensitive-artifact audit
+        entry: python tools/scan_runtime_reports.py
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:

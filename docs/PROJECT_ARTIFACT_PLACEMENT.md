@@ -79,6 +79,7 @@ cache downloads logs reports scripts sheet_build uploads
 | 文件 | 所属工具 | 保留原因 | CI 使用 | 可迁移 |
 |---|---|---|---|---|
 | `pyproject.toml` | Python | 构建和依赖配置 | 是 | 否 |
+| `setup.cfg` | setuptools | 将 egg-info 构建元数据输出到 `.runtime/` | 是 | 否 |
 | `pytest.ini` | pytest | 测试配置 | 是 | 否 |
 | `.env.example` | dotenv | 脱敏环境变量模板 | 否 | 否 |
 

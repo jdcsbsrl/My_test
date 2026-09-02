@@ -6,7 +6,13 @@ on:
   pull_request:
     branches: [ main, fix, clean-branch ]
   schedule:
-    - cron: '0 2 * * *'
+    # GitHub Actions uses UTC; 16:00 UTC is 00:00 the next day in China Standard Time.
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
 
 concurrency:
   # A new push supersedes an older run on the same branch. Including the SHA
@@ -145,7 +151,9 @@ jobs:
             --cov-fail-under=60
       - name: Scan unit test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
       - name: Upload unit test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -188,7 +196,9 @@ jobs:
           pytest tests/integration/ tests/test_workflow_integration.py tests/test_knowledge_retriever_regression.py -v --tb=short --no-cov --alluredir .runtime/reports/allure-results
       - name: Scan integration test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
       - name: Upload integration test results
         uses: actions/upload-artifact@v4
         if: always()
@@ -197,8 +207,8 @@ jobs:
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 
-  ui-tests:
-    name: UI测试 (分片${{ matrix.shard }})
+  sales-ui-tests:
+    name: UI测试 (管理员-销售分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: code-quality
     timeout-minutes: 90
@@ -206,8 +216,10 @@ jobs:
       TEST_ENV: test
       # CI is an explicitly authorized test-environment execution.
       AUTO_TEST_AUTHORIZED: "true"
-      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      # Sales/report tests include the large-data export scenario, so use the
+      # administrator account with the broadest data visibility.
+      TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
       # Keep reportSyncQuery focused on the recent, bounded test data window.
@@ -230,10 +242,9 @@ jobs:
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
       fail-fast: false
-      # The test environment shares one login account and one backend data
-      # scope. Keep this lane single-threaded; two browsers can still race
-      # during login even when the matrix itself is otherwise healthy.
-      max-parallel: 1
+      # Each runner has an isolated browser; allow two administrator shards
+      # while keeping the account lane bounded.
+      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -249,6 +260,10 @@ jobs:
         run: pip install -e . "pytest>=8,<9"
       - name: Validate CI endpoints
         run: python tools/validate_ci_environment.py --require-ui
+      - name: Validate administrator credentials are configured
+        run: |
+          test -n "$TEST_USERNAME" || { echo '缺少 ADMIN_USERNAME secret'; exit 1; }
+          test -n "$TEST_PASSWORD" || { echo '缺少 ADMIN_PASSWORD secret'; exit 1; }
       - name: Cache Playwright browser
         uses: actions/cache@v4
         with:
@@ -266,34 +281,37 @@ jobs:
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
       - name: Scan UI test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
         env:
           TEST_ENV: test
-          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+          TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
           TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
       - name: Upload UI test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: allure-results-ui-shard-${{ matrix.shard }}
+          name: allure-results-admin-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 
   inventory-tests:
-    name: UI测试 (库存分片${{ matrix.shard }})
+    name: UI测试 (组长-库存分片${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # A separate job-level max-parallel is not a global lock. Start the
-    # inventory lane only after the sales/report UI lane has fully finished,
-    # so shared-account browser sessions never overlap across jobs.
-    needs: ui-tests
+    # This lane has its own account. It may run in parallel with the
+    # administrator sales/report lane, but its own shards remain serial.
+    needs: code-quality
     timeout-minutes: 90
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: "true"
-      TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
-      TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      # Inventory pages do not require system-administrator permissions.
+      # Use the business-group-leader account to keep data scope separate.
+      TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
     strategy:
@@ -310,9 +328,9 @@ jobs:
           - shard: 9
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
       fail-fast: false
-      # Inventory shards share one backend data scope. Run them one at a time
-      # without a concurrency group, so GitHub does not discard queued shards.
-      max-parallel: 1
+      # Inventory shards share the group-leader account and backend data scope.
+      # Allow two isolated runners at a time while keeping the lane bounded.
+      max-parallel: 2
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -328,6 +346,10 @@ jobs:
         run: pip install -e . "pytest>=8,<9"
       - name: Validate CI endpoints
         run: python tools/validate_ci_environment.py --require-ui
+      - name: Validate business-group-leader credentials are configured
+        run: |
+          test -n "$TEST_USERNAME" || { echo '缺少 LEADER_USERNAME secret'; exit 1; }
+          test -n "$TEST_PASSWORD" || { echo '缺少 LEADER_PASSWORD secret'; exit 1; }
       - name: Cache Playwright browser
         uses: actions/cache@v4
         with:
@@ -342,18 +364,24 @@ jobs:
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
       - name: Scan inventory UI test artifacts for secrets
         if: always()
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
+        env:
+          TEST_ENV: test
+          TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
       - name: Upload inventory UI test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: allure-results-ui-shard-${{ matrix.shard }}
+          name: allure-results-leader-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
   report:
     name: 生成测试报告
     runs-on: ubuntu-latest
-    needs: [security-scan, unit-tests, integration-tests, ui-tests, inventory-tests]
+    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, inventory-tests]
     if: always()
     timeout-minutes: 15
     steps:
@@ -375,7 +403,9 @@ jobs:
           merge-multiple: true
           path: .runtime/reports/allure-results/
       - name: Scan merged Allure results for secrets
-        run: python tools/scan_sensitive_artifacts.py .runtime/reports/allure-results
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          python tools/scan_sensitive_artifacts.py .runtime/reports/allure-results
       - name: Validate Allure results
         run: |
           RESULT_COUNT=$(find .runtime/reports/allure-results -name '*-result.json' -type f | wc -l)
@@ -410,3 +440,149 @@ jobs:
       - uses: actions/checkout@v4
       - name: Deploy to test environment
         run: echo "部署到测试环境..."
+
+  collect-failure-logs:
+    name: 收集失败日志
+    runs-on: ubuntu-latest
+    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, inventory-tests, report, deploy-test-stub]
+    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download logs from failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report_dir=".runtime/reports/ci-failure-logs"
+          mkdir -p "$report_dir"
+          printf '仓库：%s\n工作流：Test ERP CI/CD\n运行 ID：%s\n详情：https://github.com/%s/actions/runs/%s\n' \
+            "$GITHUB_REPOSITORY" "$RUN_ID" "$GITHUB_REPOSITORY" "$RUN_ID" \
+            > "$report_dir/run-info.txt"
+          if gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed > "$report_dir/failed-jobs.log"; then
+            echo '失败 Job 日志已下载。' | tee "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'GitHub 未返回失败 Job 日志，请打开运行详情查看。' | tee "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Generate CI metrics report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report_dir=".runtime/reports/ci-failure-logs"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/jobs?per_page=100" \
+            > "$report_dir/jobs.json"
+          python tools/generate_ci_metrics_report.py \
+            --jobs "$report_dir/jobs.json" \
+            --logs "$report_dir/failed-jobs.log" \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$RUN_ID" \
+            --markdown "$report_dir/ci-metrics-report.md" \
+            --json "$report_dir/ci-metrics-report.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Download each failed job log and annotations
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report_dir=".runtime/reports/ci-failure-logs"
+          python - "$report_dir/jobs.json" "$report_dir" "$GITHUB_REPOSITORY" <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          jobs_path = Path(sys.argv[1])
+          report_dir = Path(sys.argv[2])
+          repository = sys.argv[3]
+          jobs = json.loads(jobs_path.read_text(encoding="utf-8")).get("jobs", [])
+          failed = [job for job in jobs if job.get("conclusion") == "failure"]
+          combined_path = report_dir / "failed-jobs.log"
+          combined_path.write_text("", encoding="utf-8")
+          summary = ["# 失败 Job 明细", ""]
+          for job in failed:
+              job_id = str(job.get("id"))
+              safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(job.get("name", job_id))).strip("_") or job_id
+              log_path = report_dir / f"job-{job_id}-{safe_name}.log"
+              annotation_path = report_dir / f"job-{job_id}-{safe_name}-annotations.json"
+              log_result = subprocess.run(
+                  [
+                      "curl",
+                      "-fsSL",
+                      "-H",
+                      "Accept: application/vnd.github+json",
+                      "-H",
+                      f"Authorization: Bearer {os.environ['GH_TOKEN']}",
+                      "-H",
+                      "X-GitHub-Api-Version: 2022-11-28",
+                      f"https://api.github.com/repos/{repository}/actions/jobs/{job_id}/logs",
+                      "-o",
+                      str(log_path),
+                  ],
+                  check=False,
+                  capture_output=True,
+              )
+              if log_result.returncode != 0:
+                  log_path.write_bytes(log_result.stderr)
+              with combined_path.open("a", encoding="utf-8") as combined:
+                  combined.write(f"\n===== {job.get('name', job_id)} ({job_id}) =====\n")
+                  combined.write(log_path.read_text(encoding="utf-8", errors="replace"))
+              annotation_result = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/check-runs/{job_id}/annotations"],
+                  check=False,
+                  capture_output=True,
+              )
+              annotation_path.write_bytes(annotation_result.stdout)
+              failed_steps = [
+                  step.get("name", "未命名步骤")
+                  for step in job.get("steps", [])
+                  if step.get("conclusion") == "failure"
+              ]
+              summary.append(f"## {job.get('name', job_id)}")
+              summary.append(f"- Job ID：`{job_id}`")
+              summary.append(f"- 失败步骤：{'、'.join(failed_steps) or '未识别'}")
+              summary.append(f"- 原始日志：`{log_path.name}`")
+              summary.append(f"- Annotations：`{annotation_path.name}`")
+              summary.append(f"- 日志下载退出码：`{log_result.returncode}`")
+              summary.append("")
+          if not failed:
+              summary.extend(["未识别到失败 Job。", ""])
+          (report_dir / "failed-jobs-summary.md").write_text("\n".join(summary), encoding="utf-8")
+          PY
+
+      - name: Regenerate CI metrics report with downloaded logs
+        if: always()
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report_dir=".runtime/reports/ci-failure-logs"
+          python tools/generate_ci_metrics_report.py \
+            --jobs "$report_dir/jobs.json" \
+            --logs "$report_dir/failed-jobs.log" \
+            --repository "$GITHUB_REPOSITORY" \
+            --run-id "$RUN_ID" \
+            --markdown "$report_dir/ci-metrics-report.md" \
+            --json "$report_dir/ci-metrics-report.json" \
+            > "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload failed job logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ci-failure-logs-${{ github.run_id }}
+          path: .runtime/reports/ci-failure-logs
+          if-no-files-found: warn
+          retention-days: 14

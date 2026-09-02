@@ -1,14 +1,14 @@
 ---
 title: 智能体配置与交互规则
 purpose: Agent 权限、知识访问、审核和交互约束
-version: 3.1.0
-updated: 2026-08-18
+version: 3.2.0
+updated: 2026-09-01
 authority: 专项规范
 ---
 # 智能体配置与交互规则
 
-> 版本：3.1.0
-> 生效日期：2026-08-18
+> 版本：3.2.0
+> 生效日期：2026-09-01
 > 维护人：Test ERP Team
 
 ---
@@ -185,6 +185,12 @@ AutoTestExecutor ──► 数据准备（DataLoader/DynamicDataGen/VersionMgr�
 | 知识检索 | KnowledgeRetriever | 其他智能体请求 |
 | 报告生成 | ReportGenerator | 测试执行完成 |
 | 审核监督 | AuditAgent | 测试用例生成完成、测试执行完成、输出文件生成完成 |
+
+### Codex 任务委派规则
+
+- 除非用户明确要求，否则不得创建、委派或并行运行其他 Codex 任务；所有分析应在当前任务中完成。
+- 用户明确要求派遣一个或多个子 Agent 进行分析、审核或执行时，才允许创建对应的子任务。
+- 本规则只约束当前项目任务中的 Agent 行为，不改变 Codex 应用层面的全局设置。
 
 ### 审核触发机制
 

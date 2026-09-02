@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta
 
 import pytest
+import requests
 
 from modules.auto_test.api.report_sync_query_api import (
     CursorPaginationError,
@@ -36,21 +37,31 @@ def _update_after(minutes: int = 60) -> str:
 
 
 def _orders_with_adaptive_window(api: ReportSyncQueryAPI, payload: dict) -> tuple[list[dict], str]:
+    """Fetch a bounded sample without draining a potentially huge report.
+
+    The report endpoint may contain millions of historical orders and can
+    continue returning pages even for a narrow ``updateAfter`` window.  This
+    regression verifies query/filter behavior, not exhaustive data export, so
+    one page is sufficient and prevents CI from spending tens of minutes
+    walking an unbounded result set.
+    """
     attempts: list[str] = []
     now = datetime.now()
     windows = _lookback_minutes()
     for minutes in windows:
         update_after = (now - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
-        page_budget = 20 if minutes >= 60 else ReportSyncQueryAPI.MAX_PAGES
         try:
-            orders = api.query_all({**payload, "updateAfter": update_after}, max_pages=page_budget)
+            orders, envelope = api.query_page({**payload, "updateAfter": update_after})
         except CursorPaginationError as exc:
             attempts.append(f"{minutes}m=分页未收敛({exc})")
             continue
         except ReportSyncQueryBusinessError as exc:
             attempts.append(f"{minutes}m=接口业务失败({exc})")
             continue
-        attempts.append(f"{minutes}m={len(orders)}")
+        except requests.exceptions.Timeout as exc:
+            attempts.append(f"{minutes}m=接口超时({exc})")
+            continue
+        attempts.append(f"{minutes}m={len(orders)}(hasMore={envelope['hasMore']})")
         if orders:
             print(f"[report_sync] updateAfter={update_after} fallback={','.join(attempts)}")
             return orders, update_after
