@@ -1,5 +1,6 @@
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,34 @@ def test_authentication_fixtures_share_one_session_source():
     assert list(storage_state_params) == ["_authenticated_session"]
     assert list(login_response_params) == ["_authenticated_session"]
     assert "ThreadPoolExecutor" not in Path(harness_plugin.__file__).read_text(encoding="utf-8")
+
+
+def test_browser_entrypoints_share_one_driver_source():
+    browser_params = inspect.signature(harness_plugin.browser._fixture_function).parameters
+    driver_params = inspect.signature(harness_plugin.browser_driver_session._fixture_function).parameters
+
+    assert list(browser_params) == ["_browser_driver"]
+    assert list(driver_params) == ["_browser_driver"]
+
+
+def test_browser_launch_options_only_override_config_when_cli_is_explicit():
+    config = SimpleNamespace(
+        invocation_params=SimpleNamespace(args=("--browser=firefox", "--headed", "--slow-mo", "25"))
+    )
+    request = FakeRequest(config)
+    config_manager = SimpleNamespace(
+        get=lambda key, default=None: {
+            "playwright.browser": "chromium",
+            "playwright.headless": True,
+            "playwright.slow_mo": 0,
+        }.get(key, default)
+    )
+
+    assert harness_plugin._browser_launch_options(request, config_manager) == {
+        "browser": "firefox",
+        "headless": False,
+        "slow_mo": 25,
+    }
 
 
 def test_authorization_fails_closed_without_explicit_grant(monkeypatch):

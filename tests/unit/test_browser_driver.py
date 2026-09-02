@@ -102,6 +102,16 @@ def test_new_context_and_page_uses_video_and_trace_options(monkeypatch):
     context.tracing.start.assert_called_once_with(screenshots=True, snapshots=True, sources=True)
 
 
+def test_new_context_forwards_context_overrides(driver):
+    context = Mock()
+    browser = Mock()
+    browser.new_context.return_value = context
+    driver.browser = browser
+
+    assert driver.new_context(storage_state="auth-state.json") is context
+    assert browser.new_context.call_args.kwargs["storage_state"] == "auth-state.json"
+
+
 def test_new_context_and_page_requires_started_browser(driver):
     with pytest.raises(RuntimeError):
         driver.new_context_and_page()

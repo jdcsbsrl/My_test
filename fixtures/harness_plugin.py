@@ -105,6 +105,29 @@ def _ensure_runtime_directories(config: pytest.Config | None = None) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def _explicit_cli_value(config: pytest.Config, option: str) -> str | None:
+    args = [str(arg) for arg in getattr(config.invocation_params, "args", ())]
+    prefix = f"{option}="
+    for index, arg in enumerate(args):
+        if arg == option and index + 1 < len(args):
+            return args[index + 1]
+        if arg.startswith(prefix):
+            return arg[len(prefix) :]
+    return None
+
+
+def _browser_launch_options(request: pytest.FixtureRequest, config_manager: ConfigManager) -> dict[str, Any]:
+    config = request.config
+    args = {str(arg) for arg in getattr(config.invocation_params, "args", ())}
+    browser = _explicit_cli_value(config, "--browser") or config_manager.get("playwright.browser", "chromium")
+    headless = config_manager.get("playwright.headless", True)
+    if "--headed" in args:
+        headless = False
+    slow_mo_value = _explicit_cli_value(config, "--slow-mo")
+    slow_mo = int(slow_mo_value) if slow_mo_value is not None else config_manager.get("playwright.slow_mo", 0)
+    return {"browser": browser, "headless": headless, "slow_mo": slow_mo}
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Initialize fresh per-session state and worker-isolated artifacts."""
     config._harness_state = {
@@ -355,55 +378,39 @@ def schema_factory() -> SchemaBasedFactory:
 
 
 @pytest.fixture(scope="session")
-def browser(request: pytest.FixtureRequest, config_manager: ConfigManager) -> Browser:
+def _browser_driver(request: pytest.FixtureRequest, config_manager: ConfigManager) -> BrowserDriver:
     driver = BrowserDriver(run_id=_run_id(request.config), worker_id=_worker_id())
-    driver.start_browser(
-        browser=config_manager.get("playwright.browser", "chromium"),
-        headless=config_manager.get("playwright.headless", True),
-        slow_mo=config_manager.get("playwright.slow_mo", 0),
-    )
+    driver.start_browser(**_browser_launch_options(request, config_manager))
     try:
-        yield driver.browser
+        yield driver
     finally:
         driver.shutdown_browser()
+
+
+@pytest.fixture(scope="session")
+def browser(_browser_driver: BrowserDriver) -> Browser:
+    if _browser_driver.browser is None:
+        raise RuntimeError("BrowserDriver did not expose a started browser")
+    return _browser_driver.browser
 
 
 @pytest.fixture(scope="function")
 def context(
     request: pytest.FixtureRequest,
-    browser: Browser,
-    config_manager: ConfigManager,
+    _browser_driver: BrowserDriver,
     authenticated_storage_state: str,
 ):
-    viewport = config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
-    options: dict[str, Any] = {
-        "viewport": viewport,
-        "accept_downloads": True,
-        "record_video_dir": None,
-        "record_video_size": None,
-        "storage_state": authenticated_storage_state,
-    }
-    if config_manager.get("playwright.video", "off") in {"on", "retain-on-failure"}:
-        options["record_video_dir"] = str(_runtime_reports_dir(request.config) / "videos")
-        options["record_video_size"] = viewport
-    browser_context = browser.new_context(**options)
-    trace_started = False
+    browser_context = _browser_driver.new_context(storage_state=authenticated_storage_state)
     try:
-        if config_manager.get("playwright.trace", "off") in {"on", "retain-on-failure", "on-first-retry"}:
-            browser_context.tracing.start(screenshots=True, snapshots=True, sources=True)
-            trace_started = True
         yield browser_context
     finally:
         errors: list[Exception] = []
-        if trace_started:
+        trace_path = None
+        if getattr(request.node, "rep_call", None) is not None and request.node.rep_call.failed:
             trace_path = _runtime_reports_dir(request.config) / "traces" / f"test_trace_{uuid.uuid4().hex[:8]}.zip"
             trace_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                browser_context.tracing.stop(path=str(trace_path))
-            except Exception as exc:
-                errors.append(exc)
         try:
-            browser_context.close()
+            _browser_driver.close_context(browser_context, trace_path=str(trace_path) if trace_path else None)
         except Exception as exc:
             errors.append(exc)
         if errors:
@@ -639,17 +646,9 @@ def sales_order_facade_class(api_client: APIClient):
 
 
 @pytest.fixture(scope="session")
-def browser_driver_session(request: pytest.FixtureRequest):
-    driver = BrowserDriver(run_id=_run_id(request.config), worker_id=_worker_id())
-    driver.start_browser(
-        browser=request.config.getoption("--browser"),
-        headless=not request.config.getoption("--headed"),
-        slow_mo=int(request.config.getoption("--slow-mo")),
-    )
-    try:
-        yield driver
-    finally:
-        driver.shutdown_browser()
+def browser_driver_session(_browser_driver: BrowserDriver) -> BrowserDriver:
+    """Compatibility alias backed by the shared worker-scoped browser driver."""
+    return _browser_driver
 
 
 @pytest.fixture(scope="function")
