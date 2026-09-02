@@ -204,7 +204,8 @@ class SalesOrderPage(BasePage):
         if not clicked:
             try:
                 search_name = tab_name.split("(")[0]
-                result = self.page.evaluate(f"""
+                result = self.page.evaluate(
+                    f"""
                     () => {{
                         const debug = {{}};
                         debug.roleTabs = document.querySelectorAll('[role="tab"]').length;
@@ -229,7 +230,8 @@ class SalesOrderPage(BasePage):
                         }}
                         return {{ success: false, debug: debug }};
                     }}
-                """)
+                """
+                )
                 clicked = result.get("success", False)
                 debug_info = result.get("debug", {})
                 logger.info(
@@ -374,9 +376,21 @@ class SalesOrderPage(BasePage):
                 """
                 (expectedName) => {
                   const normalize = value => (value || '').replace(/\\s+/g, '').trim();
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                      && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
                   const expected = normalize(expectedName);
-                  return Array.from(document.querySelectorAll('.store-item'))
+                  const namedItems = Array.from(document.querySelectorAll('.store-item'))
+                    .filter(visible)
                     .some((candidate) => normalize(candidate.querySelector('.store-name')?.innerText) === expected);
+                  if (namedItems) return true;
+                  return Array.from(document.querySelectorAll('body *'))
+                    .filter(visible)
+                    .some(candidate => normalize(candidate.innerText) === expected
+                      && !Array.from(candidate.children).some(child => normalize(child.innerText) === expected));
                 }
                 """,
                 arg=store_name,
@@ -387,14 +401,29 @@ class SalesOrderPage(BasePage):
                 """
                 (expectedName) => {
                   const normalize = value => (value || '').replace(/\\s+/g, '').trim();
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                      && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
                   const expected = normalize(expectedName);
-                  const items = Array.from(document.querySelectorAll('.store-item'));
-                  const item = items.find((candidate) => {
+                  const items = Array.from(document.querySelectorAll('.store-item')).filter(visible);
+                  let item = items.find((candidate) => {
                     const name = candidate.querySelector('.store-name')?.innerText;
                     return normalize(name) === expected;
                   });
+                  if (!item) {
+                    const textNode = Array.from(document.querySelectorAll('body *'))
+                      .filter(visible)
+                      .find(candidate => normalize(candidate.innerText) === expected
+                        && !Array.from(candidate.children).some(child => normalize(child.innerText) === expected));
+                    item = textNode?.closest('.store-item, [role="option"], li, tr') || textNode;
+                  }
                   if (!item) return {found: false, checked: false, name: ''};
-                  const checkbox = item.querySelector('input[type="checkbox"]');
+                  const checkbox = item.matches('input[type="checkbox"]')
+                    ? item
+                    : item.querySelector('input[type="checkbox"], [role="checkbox"]');
                   if (checkbox && !checkbox.checked) checkbox.click();
                   return {
                     found: true,
@@ -947,7 +976,8 @@ class SalesOrderPage(BasePage):
             "step_times_ms": [],
         }
 
-        self.page.evaluate("""
+        self.page.evaluate(
+            """
             window.__scrollMetrics = { frames: [], startTime: 0, rafId: null };
             window.__scrollMetrics.startTime = performance.now();
             let lastTime = performance.now();
@@ -958,7 +988,8 @@ class SalesOrderPage(BasePage):
                 window.__scrollMetrics.rafId = requestAnimationFrame(recordFrame);
             }
             window.__scrollMetrics.rafId = requestAnimationFrame(recordFrame);
-        """)
+        """
+        )
         time.sleep(0.3)
 
         total_scroll_time = 0.0
@@ -972,7 +1003,8 @@ class SalesOrderPage(BasePage):
 
         time.sleep(0.5)
 
-        frame_data = self.page.evaluate("""
+        frame_data = self.page.evaluate(
+            """
             () => {
                 if (!window.__scrollMetrics) return [];
                 cancelAnimationFrame(window.__scrollMetrics.rafId);
@@ -980,7 +1012,8 @@ class SalesOrderPage(BasePage):
                 const totalTime = performance.now() - window.__scrollMetrics.startTime;
                 return { frames, totalTime };
             }
-        """)
+        """
+        )
 
         results["total_time_ms"] = round(total_scroll_time, 1)
         results["avg_step_time_ms"] = round(total_scroll_time / scroll_steps, 1)
@@ -1184,14 +1217,16 @@ class SalesOrderPage(BasePage):
 
         time.sleep(0.5)
         try:
-            timing = self.page.evaluate("""
+            timing = self.page.evaluate(
+                """
                 () => {
                     const pt = performance.timing;
                     const nt = performance.getEntriesByType('navigation')[0];
                     if (nt) return nt.domComplete - nt.fetchStart;
                     return pt.domComplete - pt.fetchStart;
                 }
-            """)
+                """
+            )
             return round(timing / 1000, 3)
         except Exception:
             return 0.0
@@ -1265,7 +1300,8 @@ class SalesOrderPage(BasePage):
     def click_export_button(self) -> None:
         """点击页面上的导出按钮"""
         try:
-            script_result = self.page.evaluate("""
+            script_result = self.page.evaluate(
+                """
                 () => {
                     const buttons = document.querySelectorAll('button');
                     const exportButtons = [];
@@ -1281,7 +1317,8 @@ class SalesOrderPage(BasePage):
                     }
                     return exportButtons;
                 }
-            """)
+                """
+            )
             logger.info(f"找到导出按钮信息: {script_result}")
         except Exception as e:
             logger.debug(f"查找导出按钮信息失败: {e}")
@@ -1326,7 +1363,8 @@ class SalesOrderPage(BasePage):
     def select_all_current_page(self) -> None:
         self.wait_for_order_rows_ready(timeout=30000)
         try:
-            script_result = self.page.evaluate("""
+            script_result = self.page.evaluate(
+                """
                 () => {
                     const checkbox = document.querySelector('thead input[type="checkbox"]');
                     if (checkbox && !checkbox.checked) {
@@ -1335,15 +1373,18 @@ class SalesOrderPage(BasePage):
                     }
                     return { success: false, message: 'checkbox not found or already checked' };
                 }
-            """)
+            """
+            )
             logger.info(f"全选当前页订单: {script_result}")
             import time
 
             time.sleep(1)
 
-            selected_count = self.page.evaluate("""
+            selected_count = self.page.evaluate(
+                """
                 () => document.querySelectorAll('table tbody input[type="checkbox"]:checked').length
-            """)
+            """
+            )
             if selected_count > 0:
                 logger.info(f"成功勾选 {selected_count} 个订单")
                 return
@@ -1352,7 +1393,8 @@ class SalesOrderPage(BasePage):
             logger.debug(f"全选失败: {e}")
 
         try:
-            script_result = self.page.evaluate("""
+            script_result = self.page.evaluate(
+                """
                 () => {
                     const orderBlocks = document.querySelectorAll('.order-block');
                     let checkedCount = 0;
@@ -1365,7 +1407,8 @@ class SalesOrderPage(BasePage):
                     }
                     return { success: checkedCount > 0, count: checkedCount, message: 'clicked order-block checkboxes' };
                 }
-            """)
+                """
+            )
             logger.info(f"通过order-block勾选订单: {script_result}")
             import time
 
@@ -1390,7 +1433,8 @@ class SalesOrderPage(BasePage):
     @allure.step("获取选中订单数量")
     def get_selected_count(self) -> int:
         try:
-            count = self.page.evaluate("""
+            count = self.page.evaluate(
+                """
                 () => {
                     const tableChecked = Array.from(
                         document.querySelectorAll('table tbody input[type="checkbox"]:checked')
@@ -1408,7 +1452,8 @@ class SalesOrderPage(BasePage):
                     }
                     return checked;
                 }
-            """)
+                """
+            )
             return count or 0
         except Exception:
             return 0
@@ -1488,7 +1533,8 @@ class SalesOrderPage(BasePage):
         time.sleep(2)
 
         try:
-            script_result = self.page.evaluate("""
+            script_result = self.page.evaluate(
+                """
                 () => {
                     const items = document.querySelectorAll('.el-dropdown-menu__item');
                     for (let i = 0; i < items.length; i++) {
@@ -1500,7 +1546,8 @@ class SalesOrderPage(BasePage):
                     }
                     return { clicked: false };
                 }
-            """)
+                """
+            )
         except Exception as e:
             logger.debug(f"通过JS点击导出勾选的订单失败: {e}")
         else:
@@ -1648,7 +1695,8 @@ class SalesOrderPage(BasePage):
             time.sleep(5)
 
             try:
-                script_result = self.page.evaluate(f"""
+                script_result = self.page.evaluate(
+                    f"""
                     () => {{
                         const orderBlocks = document.querySelectorAll('.order-block');
                         const orderNumbers = [];
@@ -1665,7 +1713,8 @@ class SalesOrderPage(BasePage):
                         }}
                         return orderNumbers;
                     }}
-                """)
+                    """
+                )
                 if script_result:
                     results = script_result
                     logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
@@ -1674,7 +1723,8 @@ class SalesOrderPage(BasePage):
 
             if not results:
                 try:
-                    script_result = self.page.evaluate(f"""
+                    script_result = self.page.evaluate(
+                        f"""
                         () => {{
                             const text = document.body.innerText;
                             const matches = text.match(/SO\\d{{14,}}/g);
@@ -1684,7 +1734,8 @@ class SalesOrderPage(BasePage):
                             }}
                             return [];
                         }}
-                    """)
+                        """
+                    )
                     if script_result:
                         results = script_result
                         logger.info("通过 body 文本匹配获取到 {} 个系统单号", len(results))
