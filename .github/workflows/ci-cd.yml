@@ -8,6 +8,7 @@ on:
   schedule:
     # GitHub Actions uses UTC; 16:00 UTC is 00:00 the next day in China Standard Time.
     - cron: '0 16 * * *'
+  workflow_dispatch:
 
 permissions:
   actions: read

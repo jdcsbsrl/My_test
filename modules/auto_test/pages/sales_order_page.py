@@ -372,8 +372,12 @@ class SalesOrderPage(BasePage):
             store_search.fill(store_name)
             self.page.wait_for_function(
                 """
-                (expectedName) => Array.from(document.querySelectorAll('.store-item'))
-                  .some((candidate) => candidate.querySelector('.store-name')?.innerText?.trim() === expectedName)
+                (expectedName) => {
+                  const normalize = value => (value || '').replace(/\\s+/g, '').trim();
+                  const expected = normalize(expectedName);
+                  return Array.from(document.querySelectorAll('.store-item'))
+                    .some((candidate) => normalize(candidate.querySelector('.store-name')?.innerText) === expected);
+                }
                 """,
                 arg=store_name,
                 timeout=30000,
@@ -382,10 +386,12 @@ class SalesOrderPage(BasePage):
             selected = self.page.evaluate(
                 """
                 (expectedName) => {
+                  const normalize = value => (value || '').replace(/\\s+/g, '').trim();
+                  const expected = normalize(expectedName);
                   const items = Array.from(document.querySelectorAll('.store-item'));
                   const item = items.find((candidate) => {
-                    const name = candidate.querySelector('.store-name')?.innerText?.trim();
-                    return name === expectedName;
+                    const name = candidate.querySelector('.store-name')?.innerText;
+                    return normalize(name) === expected;
                   });
                   if (!item) return {found: false, checked: false, name: ''};
                   const checkbox = item.querySelector('input[type="checkbox"]');
