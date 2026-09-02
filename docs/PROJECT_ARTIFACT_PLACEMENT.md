@@ -124,7 +124,7 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 14. 清理规则
 
-`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除文件。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以优化流程写入的“最终评分”为唯一权威分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
+`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除文件。对历史遗留在 `.runtime` 根目录下的 pytest/tmp/cache 临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式仅识别固定命名模式、检查目录最新修改时间并阻止符号链接越界。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以优化流程写入的“最终评分”为唯一权威分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
 
 ## 15. 变更记录
 
