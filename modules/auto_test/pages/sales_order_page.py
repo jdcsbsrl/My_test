@@ -13,6 +13,7 @@ class SalesOrderPage(BasePage):
     SALES_EXPORT_STORE_CASES = (
         ("yxl_payment-Velora", "2000509327097937921"),
         ("yxl_kehu_zuzhang-test_yxl", "2067069306596454401"),
+        ("yxl_kehu_zuzhang-test_yxl_new1", "2083105892576489473"),
     )
 
     def __init__(self, page: Page) -> None:
@@ -372,7 +373,9 @@ class SalesOrderPage(BasePage):
             self.page.wait_for_function(
                 """
                 (expectedName) => {
-                  const normalize = value => (value || '').replace(/\\s+/g, '').trim();
+                  const normalize = value => (value || '')
+                    .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+                    .replace(/\\s+/g, '').trim();
                   const visible = element => {
                     const rect = element.getBoundingClientRect();
                     const style = window.getComputedStyle(element);
@@ -380,14 +383,18 @@ class SalesOrderPage(BasePage):
                       && style.visibility !== 'hidden' && style.display !== 'none';
                   };
                   const expected = normalize(expectedName);
+                  const matches = value => {
+                    const normalized = normalize(value);
+                    return normalized === expected || normalized.includes(expected);
+                  };
                   const namedItems = Array.from(document.querySelectorAll('.store-item'))
                     .filter(visible)
-                    .some((candidate) => normalize(candidate.querySelector('.store-name')?.innerText) === expected);
+                    .some((candidate) => matches(candidate.querySelector('.store-name')?.textContent));
                   if (namedItems) return true;
                   return Array.from(document.querySelectorAll('body *'))
                     .filter(visible)
-                    .some(candidate => normalize(candidate.innerText) === expected
-                      && !Array.from(candidate.children).some(child => normalize(child.innerText) === expected));
+                    .some(candidate => matches(candidate.textContent)
+                      && !Array.from(candidate.children).some(child => matches(child.textContent)));
                 }
                 """,
                 arg=store_name,
@@ -397,7 +404,9 @@ class SalesOrderPage(BasePage):
             selected = self.page.evaluate(
                 """
                 (expectedName) => {
-                  const normalize = value => (value || '').replace(/\\s+/g, '').trim();
+                  const normalize = value => (value || '')
+                    .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+                    .replace(/\\s+/g, '').trim();
                   const visible = element => {
                     const rect = element.getBoundingClientRect();
                     const style = window.getComputedStyle(element);
@@ -405,16 +414,20 @@ class SalesOrderPage(BasePage):
                       && style.visibility !== 'hidden' && style.display !== 'none';
                   };
                   const expected = normalize(expectedName);
+                  const matches = value => {
+                    const normalized = normalize(value);
+                    return normalized === expected || normalized.includes(expected);
+                  };
                   const items = Array.from(document.querySelectorAll('.store-item')).filter(visible);
                   let item = items.find((candidate) => {
-                    const name = candidate.querySelector('.store-name')?.innerText;
-                    return normalize(name) === expected;
+                    const name = candidate.querySelector('.store-name')?.textContent;
+                    return matches(name);
                   });
                   if (!item) {
                     const textNode = Array.from(document.querySelectorAll('body *'))
                       .filter(visible)
-                      .find(candidate => normalize(candidate.innerText) === expected
-                        && !Array.from(candidate.children).some(child => normalize(child.innerText) === expected));
+                      .find(candidate => matches(candidate.textContent)
+                        && !Array.from(candidate.children).some(child => matches(child.textContent)));
                     item = textNode?.closest('.store-item, [role="option"], li, tr') || textNode;
                   }
                   if (!item) return {found: false, checked: false, name: ''};
@@ -422,10 +435,11 @@ class SalesOrderPage(BasePage):
                     ? item
                     : item.querySelector('input[type="checkbox"], [role="checkbox"]');
                   if (checkbox && !checkbox.checked) checkbox.click();
+                  if (!checkbox) item.click();
                   return {
                     found: true,
-                    checked: Boolean(checkbox?.checked),
-                    name: item.querySelector('.store-name')?.innerText?.trim() || ''
+                    checked: checkbox ? Boolean(checkbox.checked) : true,
+                    name: item.querySelector('.store-name')?.textContent?.trim() || item.textContent?.trim() || ''
                   };
                 }
                 """,
