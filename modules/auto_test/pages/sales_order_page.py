@@ -13,7 +13,7 @@ class SalesOrderPage(BasePage):
     SALES_EXPORT_STORE_CASES = (
         ("yxl_payment-Velora", "2000509327097937921"),
         ("yxl_kehu_zuzhang-test_yxl", "2067069306596454401"),
-        ("yxl_kehu_zuzhang-test_yxl_new1", "2083105892576489473"),
+        ("yxl_kehu_zuzhang-test_yxl_new", "2083105892576489473"),
     )
 
     def __init__(self, page: Page) -> None:
