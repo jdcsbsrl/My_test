@@ -12,6 +12,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -126,6 +127,62 @@ def _browser_launch_options(request: pytest.FixtureRequest, config_manager: Conf
     slow_mo_value = _explicit_cli_value(config, "--slow-mo")
     slow_mo = int(slow_mo_value) if slow_mo_value is not None else config_manager.get("playwright.slow_mo", 0)
     return {"browser": browser, "headless": headless, "slow_mo": slow_mo}
+
+
+def _login_response_capture(page: Page) -> tuple[dict[str, Any], Any]:
+    login_result: dict[str, Any] = {}
+
+    def handle_response(response) -> None:
+        if "/auth/login" in response.url:
+            try:
+                login_result["response"] = response.json()
+                headers = response.request.all_headers()
+                login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
+            except Exception:
+                pass
+
+    page.on("response", handle_response)
+    return login_result, handle_response
+
+
+def _refresh_authenticated_session(
+    *,
+    state: dict[str, Any],
+    page: Page,
+    request: pytest.FixtureRequest,
+    config_manager: ConfigManager,
+) -> None:
+    lock = state["refresh_lock"]
+    with lock:
+        login_result, handler = _login_response_capture(page)
+        try:
+            credentials = state["credentials"]
+            if not LoginPage(page).login(credentials["username"], credentials["password"]):
+                raise RuntimeError("重新登录未成功返回")
+            if "response" not in login_result:
+                raise RuntimeError("重新登录未捕获到 auth/login 响应")
+            _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+
+            login_response = login_result["response"]
+            login_response["_clientid"] = login_result.get("clientid")
+            login_response["_cookies"] = page.context.cookies()
+            auth_file = Path(state["storage_state"])
+            temp_auth_file = auth_file.with_name(f"{auth_file.stem}.refresh-{uuid.uuid4().hex}.tmp")
+            try:
+                page.context.storage_state(path=str(temp_auth_file))
+                os.replace(temp_auth_file, auth_file)
+            finally:
+                if temp_auth_file.exists():
+                    temp_auth_file.unlink()
+
+            state["login_response"].clear()
+            state["login_response"].update(login_response)
+            state["refresh_count"] += 1
+        except Exception as exc:
+            _capture_authentication_diagnostic(page, "refresh-failure", request.config)
+            raise RuntimeError(f"认证刷新失败: {exc}") from exc
+        finally:
+            page.remove_listener("response", handler)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -431,23 +488,13 @@ def _authenticated_session(
     for attempt in range(2):
         auth_context = None
         auth_page = None
-        login_result: dict[str, Any] = {}
+        login_result, handler = ({}, None)
         try:
             auth_context = browser.new_context(
                 viewport=config_manager.get("playwright.viewport", {"width": 1920, "height": 1080})
             )
             auth_page = auth_context.new_page()
-
-            def handle_response(response) -> None:
-                if "/auth/login" in response.url:
-                    try:
-                        login_result["response"] = response.json()
-                        headers = response.request.all_headers()
-                        login_result["clientid"] = headers.get("clientid") or headers.get("client-id")
-                    except Exception:
-                        pass
-
-            auth_page.on("response", handle_response)
+            login_result, handler = _login_response_capture(auth_page)
             if not LoginPage(auth_page).login(test_user_credentials["username"], test_user_credentials["password"]):
                 raise RuntimeError("登录流程未成功返回")
             if "response" not in login_result:
@@ -457,13 +504,21 @@ def _authenticated_session(
             login_response = login_result["response"]
             login_response["_clientid"] = login_result.get("clientid")
             login_response["_cookies"] = auth_page.context.cookies()
-            return {"storage_state": str(auth_file), "login_response": login_response}
+            return {
+                "storage_state": str(auth_file),
+                "login_response": login_response,
+                "credentials": test_user_credentials,
+                "refresh_lock": threading.Lock(),
+                "refresh_count": 0,
+            }
         except Exception as exc:
             if auth_page is not None:
                 _capture_authentication_diagnostic(auth_page, f"session-{attempt + 1}", request.config)
             if attempt == 1:
                 pytest.fail(f"Unable to create authenticated session: {exc}")
         finally:
+            if auth_page is not None and handler is not None:
+                auth_page.remove_listener("response", handler)
             if auth_page is not None:
                 try:
                     auth_page.close()
@@ -487,16 +542,26 @@ def page(context: BrowserContext) -> Page:
 
 
 @pytest.fixture(scope="function")
-def logged_in_page(request: pytest.FixtureRequest, page: Page, config_manager: ConfigManager) -> Page:
-    credentials = _credentials()
+def logged_in_page(
+    request: pytest.FixtureRequest,
+    page: Page,
+    config_manager: ConfigManager,
+    _authenticated_session: dict[str, Any],
+) -> Page:
     try:
         _assert_authenticated_page(page, config_manager.base_url, timeout=60000)
     except Exception as exc:
         logger.warning("认证状态失效，尝试在当前 context 重新登录: %s", exc)
         try:
-            if not LoginPage(page).login(credentials["username"], credentials["password"]):
-                raise RuntimeError("重新登录未成功返回")
-            _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+            if getattr(request.node, "_auth_refresh_attempted", False):
+                raise RuntimeError("同一测试内认证刷新次数已达到上限")
+            setattr(request.node, "_auth_refresh_attempted", True)
+            _refresh_authenticated_session(
+                state=_authenticated_session,
+                page=page,
+                request=request,
+                config_manager=config_manager,
+            )
         except Exception as retry_exc:
             _capture_authentication_diagnostic(page, "logged-in-page", request.config)
             pytest.fail(f"认证状态无效，重新登录失败: {retry_exc}")
@@ -577,7 +642,7 @@ def login_response(
     return _authenticated_session["login_response"]
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def login_token(login_response: dict) -> str:
     if login_response.get("code") == 200:
         data = login_response.get("data") or {}
