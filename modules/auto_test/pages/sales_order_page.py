@@ -351,11 +351,15 @@ class SalesOrderPage(BasePage):
 
         def record_order_request(request: Any) -> None:
             url = str(request.url or "")
-            if capture_requests and str(request.method or "").upper() == "POST":
+            method = str(request.method or "").upper()
+            if capture_requests and (
+                method in {"POST", "PUT", "PATCH"}
+                or any(marker in url.lower() for marker in ("order", "query", "search"))
+            ):
                 search_requests.append(
                     {
                         "url": url,
-                        "payload": str(request.post_data or ""),
+                        "payload": str(request.post_data or request.url or ""),
                     }
                 )
 
