@@ -151,9 +151,7 @@ def verify_query(rows: list[dict], check: QueryCheck) -> None:
     # filter checking. New scenarios must use assertions so fuzzy and combined
     # searches cannot accidentally be interpreted as exact matches.
     predicates = check.assertions or tuple(
-        {"field": field, "op": "eq", "value": value}
-        for field, value in check.filters.items()
-        if value != ""
+        {"field": field, "op": "eq", "value": value} for field, value in check.filters.items() if value != ""
     )
     for predicate in predicates:
         if not isinstance(predicate, dict) or set(predicate) != {"field", "op", "value"}:
@@ -187,7 +185,9 @@ def verify_query(rows: list[dict], check: QueryCheck) -> None:
 def verify_pagination(first: list[dict], second: list[dict], check: QueryCheck) -> None:
     """Verify two pages as one explicit pagination contract."""
     page_assertions = tuple(item for item in check.assertions if item.get("op") != "disjoint")
-    page_check = QueryCheck(check.name, check.filters, assertions=page_assertions, page_num=check.page_num, page_size=check.page_size)
+    page_check = QueryCheck(
+        check.name, check.filters, assertions=page_assertions, page_num=check.page_num, page_size=check.page_size
+    )
     verify_query(first, page_check)
     verify_query(second, page_check)
     identities = [row.get("orderNo") for row in first + second]

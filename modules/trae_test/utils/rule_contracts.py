@@ -67,13 +67,13 @@ def evaluate_assertions(rows, predicates, *, next_rows=None):
         if op == "count_range":
             assert value[0] <= len(rows) <= value[1], "Record count contradicts rule"
         elif op == "eq":
-            assert rows and all(field in row and str(row[field]) == str(value) for row in rows), (
-                "Field contradicts rule"
-            )
+            assert rows and all(
+                field in row and str(row[field]) == str(value) for row in rows
+            ), "Field contradicts rule"
         elif op == "contains":
-            assert rows and all(field in row and str(value) in str(row[field]) for row in rows), (
-                "Field does not contain required value"
-            )
+            assert rows and all(
+                field in row and str(value) in str(row[field]) for row in rows
+            ), "Field does not contain required value"
         else:
             assert rows and next_rows and all(row.get(field) for row in rows + next_rows), "Missing pagination evidence"
             assert {row[field] for row in rows}.isdisjoint(row[field] for row in next_rows), "Pages overlap"

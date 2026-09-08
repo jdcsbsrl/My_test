@@ -148,8 +148,10 @@ class CaseGenerationService:
             "questions": questions,
             "generation_errors": [issue.message for issue in errors if issue.rule_id not in information_rules],
             "sources": items,
-            "semantic_status": "contract_checked"
-            if result.passed and case.get("_runtime_rule_binding", {}).get("digest")
-            else "unverified",
+            "semantic_status": (
+                "contract_checked"
+                if result.passed and case.get("_runtime_rule_binding", {}).get("digest")
+                else "unverified"
+            ),
             "release_decision": release_decision.to_dict(),
         }

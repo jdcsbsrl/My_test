@@ -239,12 +239,8 @@ def test_registered_run_does_not_treat_all_skipped_xml_as_pass(tmp_path, monkeyp
 def test_query_runner_detects_ignored_filters():
     from modules.auto_test.core.regression_checks import execute_sales_queries
 
-    rows = [
-        {"orderNo": "DEMO-A", "orderStatus": "new"}
-        for _ in range(5)
-    ] + [
-        {"orderNo": "DEMO-B", "orderStatus": "done"}
-        for _ in range(5)
+    rows = [{"orderNo": "DEMO-A", "orderStatus": "new"} for _ in range(5)] + [
+        {"orderNo": "DEMO-B", "orderStatus": "done"} for _ in range(5)
     ]
     facade = Mock()
     facade.query_orders.return_value = SimpleNamespace(status_code=200, json=lambda: {"code": 200, "data": rows})

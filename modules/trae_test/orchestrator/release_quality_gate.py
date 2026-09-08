@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
-
 READY_FOR_DELIVERY = "READY_FOR_DELIVERY"
 REQUIRES_REVIEW = "REQUIRES_REVIEW"
 BLOCKED = "BLOCKED"
@@ -95,7 +94,9 @@ class ReleaseQualityGate:
             errors = audit_result.get("errors", [])
         else:
             errors = getattr(audit_result, "errors", [])
-        passed = audit_result.get("passed") if isinstance(audit_result, Mapping) else getattr(audit_result, "passed", None)
+        passed = (
+            audit_result.get("passed") if isinstance(audit_result, Mapping) else getattr(audit_result, "passed", None)
+        )
         if passed is False and not errors:
             blocking.append({"code": "AUDIT_FAILED", "message": "AuditAgent did not approve the target"})
         for error in errors or []:
@@ -130,9 +131,13 @@ class ReleaseQualityGate:
             if score is not None:
                 try:
                     if float(score) < 85:
-                        warnings.append({"code": "STRUCTURAL_SCORE_LOW", "message": f"Case {index} structural score is below 85"})
+                        warnings.append(
+                            {"code": "STRUCTURAL_SCORE_LOW", "message": f"Case {index} structural score is below 85"}
+                        )
                 except (TypeError, ValueError):
-                    blocking.append({"code": "QUALITY_INVALID", "message": f"Case {index} has an invalid structural score"})
+                    blocking.append(
+                        {"code": "QUALITY_INVALID", "message": f"Case {index} has an invalid structural score"}
+                    )
             if quality and quality.get("needs_human_review"):
                 review.append({"code": "CASE_REQUIRES_REVIEW", "message": f"Case {index} is marked for human review"})
             if case.get("_runtime_rule_binding") is None and str(case.get("知识库关联", "")).strip() == "":
@@ -179,4 +184,9 @@ class ReleaseQualityGate:
                 )
             )
             if missing:
-                blocking.append({"code": "P0_NOT_EXECUTED", "message": "P0 cases lack matching regression evidence: " + ", ".join(missing)})
+                blocking.append(
+                    {
+                        "code": "P0_NOT_EXECUTED",
+                        "message": "P0 cases lack matching regression evidence: " + ", ".join(missing),
+                    }
+                )
