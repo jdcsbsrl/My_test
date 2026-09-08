@@ -44,7 +44,9 @@ def test_database_migration_requires_exactly_one_migration_scope():
 
 
 def test_auto_login_returns_failure_status_when_any_environment_fails(monkeypatch):
-    monkeypatch.setattr(auto_login, "login_to_env", lambda env, force=False: {"env": env, "success": env == "test"})
+    monkeypatch.setattr(
+        auto_login, "login_to_env", lambda env, force=False, method="browser": {"env": env, "success": env == "test"}
+    )
     monkeypatch.setattr("sys.argv", ["auto_login.py", "--env", "all"])
 
     assert auto_login.main() == 1

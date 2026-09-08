@@ -22,7 +22,7 @@ class TestCaseAuditor:
         r"(页面|页|按钮|输入框|文本框|下拉框|选择框|复选框|单选框|表格|列表|弹窗|菜单|导航|标签|字段|列|链接|图标|区域|模块|订单|商品|客户|库存)"
     )
     _VAGUE_PATTERN = re.compile(
-        r"^(?:执行(?:相关|对应)?操作|进入相关页面|检查结果|操作成功|符合预期|页面正常|系统正常|数据正确|验证成功)[。；;！! ]*$"
+        r"^(?:执行(?:相关|对应)?操作|进入相关页面|检查结果|操作成功|操作执行成功|验证操作结果|进入相关功能页面|符合预期|页面正常|系统正常|数据正确|验证成功)[。；;！! ]*$"
     )
 
     # 标准测试用例字段（15字段）
@@ -157,13 +157,10 @@ class TestCaseAuditor:
                 case["质量评分"] = score
                 case["最终评分"] = score
                 result.score = score
+                if not 0 <= score <= 100:
+                    raise ValueError("结构参考分必须在0到100之间")
                 if score < FINAL_SCORE_THRESHOLD:
-                    self._business_error(
-                        result,
-                        "TC_SCORE_BELOW_GATE",
-                        f"最终质量评分为{score:.2f}分，低于85分交付门槛，必须优化后重新审核",
-                        case_location,
-                    )
+                    result.add_suggestion("结构参考分低于85；是否交付由字段、业务内容和依据审核决定")
             except Exception:
                 self._business_error(
                     result,
@@ -175,6 +172,13 @@ class TestCaseAuditor:
         # 需求级审核必须在单条用例审核完成后执行；覆盖元数据只存在运行时上下文，
         # 不改变生成器核心和正式15列表头。
         self._audit_requirement_coverage(test_cases, context or {}, result)
+        from ...utils.rule_contracts import check_contract
+
+        for case in test_cases:
+            if isinstance(case, dict):
+                snapshot = check_contract(case, (context or {}).get("knowledge_sources"), result)
+                if snapshot:
+                    case["_runtime_rule_binding"] = snapshot
 
         # 添加建议
         if result.warnings:
@@ -223,7 +227,32 @@ class TestCaseAuditor:
             return
 
         def values(case: dict, *names: str) -> set[str]:
-            raw = next((case.get(name) for name in names if case.get(name) not in (None, "")), "")
+            runtime = case.get("_runtime_coverage_matrix") or {}
+            if not isinstance(runtime, dict):
+                runtime = {}
+            mapping = {
+                "覆盖规则ID": runtime.get("business_rules", []),
+                "场景类型": sum(
+                    (
+                        runtime.get(key, [])
+                        for key in (
+                            "normal_scenarios",
+                            "abnormal_scenarios",
+                            "boundary_scenarios",
+                            "rollback_scenarios",
+                        )
+                    ),
+                    [],
+                ),
+            }
+            raw = next(
+                (
+                    case.get(name, mapping.get(name))
+                    for name in names
+                    if case.get(name, mapping.get(name)) not in (None, "")
+                ),
+                "",
+            )
             if isinstance(raw, (list, tuple, set)):
                 return {str(v).strip() for v in raw if str(v).strip()}
             return {v.strip() for v in re.split(r"[,，;；\n|]", str(raw)) if v.strip()}
@@ -347,6 +376,8 @@ class TestCaseAuditor:
 
     def _check_business_content(self, case: dict, case_location: str, result: AuditResult):
         """审核前置条件、步骤和预期结果是否能指导测试人员实际操作。"""
+        if not str(case.get("知识库关联", "")).strip():
+            self._business_error(result, "TC_EVIDENCE_REQUIRED", "关键业务预期必须有关联依据", case_location)
         preconditions = self._split_points(case.get("前置条件", ""))
         steps = self._split_points(case.get("用例步骤", ""))
         expected = self._split_points(case.get("预期结果", ""))
@@ -407,8 +438,11 @@ class TestCaseAuditor:
                     f"第{step_number}步缺少页面对象，应明确页面、按钮、输入框、列表等操作对象：{step}",
                     case_location,
                 )
-            if re.search(r"(输入|填写|选择|搜索|查询|上传)", step) and not re.search(
-                r"[：:]|['\"]|“[^”]+”|\b\d+\b|\S+数据|测试", step
+            action = self._ACTION_PATTERN.search(step)
+            if (
+                action
+                and action.group(0) in {"输入", "填写", "选择", "搜索", "查询", "上传"}
+                and not re.search(r"[：:]|['\"]|“[^”]+”|\b\d+\b|\S+数据|测试", step)
             ):
                 self._business_error(
                     result,
@@ -515,6 +549,8 @@ class TestCaseAuditor:
                 continue
 
             valid_values = rules.get("valid_values", [])
+            if rules.get("fixed") and field_value != rules.get("default_value"):
+                result.add_error("TC_FIXED_FIELD_CHANGED", f"固定字段{field_name}不能更改", case_location)
             if valid_values and field_value not in valid_values:
                 result.add_error(
                     f"TC_FIELD_{field_name.upper()}_INVALID",

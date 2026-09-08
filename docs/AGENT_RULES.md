@@ -32,25 +32,16 @@ authority: 专项规范
 **职责**: 基于用户需求和知识库，自动生成符合标准的测试用例，并进行质量评分与优化
 
 **工作流程**:
-1. 接收用户测试需求
-2. 检索相关业务规则知识库
-3. 分析业务流程和边界条件
-4. 按15字段模板生成测试用例
-5. 使用 `TestCaseScoreEngine` 对每条用例进行五维度质量评分；冷启动评分只能作为临时评分，不能单独作为最终交付依据。评分记录保留原始评分、优化后评分和最终评分
-6. 使用 `TestCaseOptimizer` 自动优化低分用例（补充步骤/预期结果/用例名称）
-7. 使用 `TestCaseRegenerationLoop` 执行自动重生闭环（最多3次，熔断保护）
-8. 标记 `needs_human_review` 的用例提交人工审查；`qualified` 仅为运行时评分状态，不得写入正式“用例状态”字段
-9. 导出优化后的测试用例 Excel，含质量评分列；JSON 仅作为运行时中间数据，不作为交付物
+1. 接收完整需求，通过 KnowledgeRetriever 检索规则和参考用例。
+2. 调用既有生成器产生可变内容，由程序按配置填入固定字段。
+3. TestCaseScoreEngine 记录结构参考分；TestCaseOptimizer 只整理已有格式。
+4. AuditAgent 自动校验字段、固定值、依据和业务内容。通过即交付，无需逐条人工确认。
+5. 只有缺失依据、关键歧义或业务矛盾未解决时，集中返回待确认问题。
+6. 使用统一ExcelGenerator导出十五字段；生命周期和评分轨迹只保留在内部存储。
 
-运行时评分与覆盖矩阵必须使用 `_runtime_quality`、`_runtime_coverage_matrix` 命名空间保存，保留评分轨迹和覆盖缺口；不得将原始评分、优化后评分、最终评分、冷启动、置信度或覆盖矩阵扩展为正式Excel列。正式Excel表头始终严格保持15列，第15列为“质量评分”。
-
-**关键工具 v3.0**:
-| 工具 | 用途 |
-|------|------|
-| TestCaseGenerator | 按15字段模板生成测试用例 |
-| TestCaseScoreEngine | 五维度评分（覆盖率/完整性/优先级/可执行性/可维护性） |
-| TestCaseOptimizer | 自动优化步骤、预期结果、用例名称 |
-| TestCaseRegenerationLoop | 自动重生闭环 + 熔断机制（最大3次，冷却期3600s） |
+质量评分是结构参考分，不代表业务正确性。85仅为提示线，不作为交付门槛。
+新用例没有执行历史，不因此触发人工确认。原始评分、优化后评分和最终评分保留在运行时。
+具体规则和命令见 [TRAE_TEST_WORKFLOW.md](TRAE_TEST_WORKFLOW.md)。
 
 **访问控制**:
 - ✅ 业务规则目录（全部）
@@ -218,38 +209,9 @@ AuditAgent审核
 
 ### 4.1 TestCaseGenerator 工具调用决策
 
-```
-用户请求测试用例生成
-    │
-    ▼
-IF 用户需求已明确
-    │
-    ├── THEN 使用 KnowledgeRetriever 检索业务规则知识库
-    │
-    ├── THEN 使用 TestCaseGenerator 按15字段模板生成测试用例
-    │
-    ├── THEN 使用 TestCaseScoreEngine 对每条用例评分
-    │
-    │   IF 最终评分 < 85
-    │       │
-    │       ├── THEN 使用 TestCaseOptimizer 优化该用例，并补齐业务知识、页面对象、分点步骤和可验证结果
-    │       │
-    │       └── THEN 重新评分
-    │
-    │   IF 优化后最终评分仍 < 85 且 未触发熔断
-    │       │
-    │       └── THEN 使用 TestCaseRegenerationLoop 执行自动重生
-    │
-    │   IF 最终评分 >= 85 且格式、业务内容审核均通过
-    │       │
-    │       └── THEN 标记为合格用例；否则不得导出
-    │
-    │   IF needs_human_review = True
-    │       │
-    │       └── THEN 提交人工审查队列
-    │
-    └── THEN 仅导出格式、业务内容和最终评分均通过的测试用例 Excel
-```
+采用 [TRAE_TEST_WORKFLOW.md](TRAE_TEST_WORKFLOW.md) 的统一入口。
+检索异常报告错误，无结果报告知识缺口；不生成通用模板冒充有依据的用例。
+固定字段由配置锁定，格式问题自动修复，业务问题集中澄清；字段和业务审核通过即可交付。
 
 ### 4.2 AutoTestExecutor 工具调用决策
 
@@ -284,49 +246,11 @@ IF 测试环境配置有效
     └── THEN 执行 cleanup 任务（级联删除 + DB兜底清理）
 ```
 
-### 4.3 TestCaseScoreEngine 评分规则
+### 4.3 TestCaseScoreEngine 与优化规则
 
-```
-执行评分
-    │
-    ▼
-IF execution_count < 10（冷启动保护）
-    │
-    └── THEN 使用静态维度评分并标记为临时评分（覆盖率30% + 完整性25% + 优先级20% + 可维护性10%）
-        │
-        └── 跳过可执行性维度（无执行历史数据）
-    │
-    ELSE
-    │
-    └── THEN 使用全五维度评分：
-        │
-        ├── 覆盖率（30%）: 业务规则匹配度
-        │
-        ├── 完整性（25%）: 步骤/预期/前置条件完整性
-        │
-        ├── 优先级（20%）: 用例优先级权重
-        │
-        ├── 可执行性（15%）: 通过率 + 执行耗时
-        │
-        └── 可维护性（10%）: 步骤长度 + 重复度
-```
-
-### 4.4 TestCaseRegenerationLoop 熔断规则
-
-```
-执行自动重生
-    │
-    ▼
-IF 同一用例在冷却期（3600秒）内重生次数 >= 3
-    │
-    └── THEN 触发熔断，标记为 needs_human_review = True
-        │
-        └── 停止自动重生，等待人工介入
-    │
-    ELSE
-    │
-    └── THEN 执行重生，增加重生计数
-```
+评分只表示结构字段完整性，不能用文字长度、优先级或自动化标记推断业务质量。
+85是提示线。执行历史与设计质量分离，冷启动不构成交付阻断。
+格式整理不添加通用步骤或预期结果；缺少新依据时不循环凑分。
 
 ---
 
@@ -641,108 +565,10 @@ AuditAgent接收
 
 ## 九、完整工作流示例
 
-### 9.1 测试用例生成完整流程示例
+### 9.1 测试用例生成
 
-**用户请求**: "为销售订单创建功能生成测试用例"
-
-**Step 1: Agent阅读AGENTS.md**
-```
-Agent读取 AGENTS.md
-    │
-    ├── 定位「测试用例生成」索引
-    │       │
-    │       └── 找到核心工具：TestCaseGenerator, TestCaseScoreEngine, 
-    │            TestCaseOptimizer, TestCaseRegenerationLoop
-    │
-    ├── 定位「agent_rules.md」规则文件
-    │       │
-    │       └── 找到工具调用决策树和评分规则
-    │
-    └── 定位「TRAE_TEST_WORKFLOW.md」工作流程文档
-            │
-            └── 获取完整流程步骤
-```
-
-**Step 2: 知识检索**
-```python
-from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
-r = KnowledgeRetriever()
-business_rules = r.search_business_rules("销售订单")
-requirements = r.search_requirements("创建订单")
-```
-
-**Step 3: 生成测试用例**
-```python
-from modules.trae_test.utils.test_case_generator import TestCaseGenerator
-generator = TestCaseGenerator()
-test_cases = generator.generate(business_rules, requirements)
-# 生成15字段标准格式测试用例
-```
-
-**Step 4: 质量评分（自动触发）**
-```python
-from modules.trae_test.utils.test_case_strategy import TestCaseScoreEngine
-scorer = TestCaseScoreEngine()
-
-for case in test_cases:
-    score = scorer.score(case)
-    case['quality_score'] = score
-    case['needs_human_review'] = score < 85 or not case.get('business_audit_passed', False)
-    
-# TC_001: 评分85 → 合格
-# TC_002: 评分65 → 需要优化
-# TC_003: 评分90 → 合格
-```
-
-**Step 5: 自动优化（自动触发）**
-```python
-from modules.trae_test.utils.test_case_strategy import TestCaseOptimizer
-optimizer = TestCaseOptimizer()
-
-# 优化低分用例
-for case in test_cases:
-    if case['quality_score'] < 85:
-        optimized_case = optimizer.optimize(case)
-        case['quality_score'] = scorer.score(optimized_case)
-        # TC_002: 优化后评分84 → 仍需优化，不得导出
-```
-
-**Step 6: 自动重生（按需触发）**
-```python
-from modules.trae_test.utils.test_case_strategy import TestCaseRegenerationLoop
-loop = TestCaseRegenerationLoop()
-
-# 如果优化后仍不合格，触发重生（最多3次，熔断保护）
-for case in test_cases:
-    if case['quality_score'] < 85:
-        regenerated = loop.regenerate(case)
-        if regenerated:
-            case = regenerated
-            case['quality_score'] = scorer.score(case)
-        else:
-            # 熔断触发，标记需要人工审查
-            case['needs_human_review'] = True
-```
-
-**Step 7: 导出测试用例**
-```python
-from modules.trae_test.utils.excel_generator import ExcelGenerator
-excel_gen = ExcelGenerator()
-excel_gen.generate(test_cases, output_path="workspace/20260716/需求销售订单创建.xlsx")
-# 导出的Excel包含：标准15字段模板，质量评分为第15列；评分轨迹和审核状态仅保留在运行时
-```
-
-**Step 8: AuditAgent审核**
-```
-AuditAgent审核
-    │
-    ├── 文件命名：✓ 需求销售订单创建.xlsx
-    ├── 文件位置：✓ workspace/20260716/
-    ├── 文件格式：✓ .xlsx
-    ├── Excel表头：✓ 15字段正确
-    ├── 质量评分字段：✓ 质量评分为第15列
-    └── 审核通过 → 允许继续
-```
+使用 `python tools/case_generator_cli.py generate --help` 查看需求输入、模型选择和登记参数。
+生成、审核、交付和登记使用同一条链路，详见 [TRAE_TEST_WORKFLOW.md](TRAE_TEST_WORKFLOW.md)。
 
 ### 9.2 自动化测试执行完整流程示例
 
@@ -832,14 +658,5 @@ report_gen.generate(test_results, ".runtime/reports/测试报告_销售订单创
 
 ### 9.3 关键规则摘要
 
-| 规则 | 触发条件 | 自动行为 |
-|------|----------|----------|
-| 评分规则 | 生成用例后 | 自动执行五维度评分 |
-| 优化规则 | 最终评分 < 85 | 自动调用TestCaseOptimizer |
-| 重生规则 | 优化后最终评分仍 < 85 | 自动执行重生闭环（最多3次） |
-| 熔断规则 | 重生次数 >= 3 | 触发熔断，标记needs_human_review |
-| 冷启动保护 | execution_count < 10 | 跳过可执行性维度，使用静态评分 |
-| 懒加载规则 | 文件大小 > 阈值 | DataLoader自动切换为懒加载模式 |
-| 拓扑排序 | setUp任务有依赖 | 自动按Kahn算法排序执行 |
-| 级联清理 | cleanup任务有依赖 | 自动按优先级逆序执行 |
-| DB兜底 | 级联删除失败 | 自动执行DB兜底清理 |
+固定字段和十五列保持现有契约；评分不替代业务审核，已知规则不重复确认。
+回归执行需要明确授权，环境限制不变。历史交付和用例版本不可自动清理。

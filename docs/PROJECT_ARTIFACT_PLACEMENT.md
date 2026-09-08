@@ -89,7 +89,7 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 12. 测试用例专项规则
 
-测试用例必须通过知识库 API 生成，使用统一 15 字段模板和 Excel 生成器；标准15字段中删除“关联缺陷ID”，第15列为“质量评分”。前置条件、执行步骤、预期结果必须基于业务知识和页面对象分点描述，便于测试人员直接操作；用例还必须登记功能点、业务规则、页面对象和覆盖矩阵。经过质量评分、优化和审核后，最终 `.xlsx` 文件写入 `workspace/YYYYMMDD/`：格式审核、业务内容审核和最终评分均通过且最终评分 >= 85 才允许导出。中间 JSON、评分轨迹、审核报告和临时 Excel 写入 `.runtime/`。原始评分、优化后评分、最终评分及冷启动信息只保留在运行时和审核报告中，不扩展正式Excel表头。回归执行按变更风险选择冒烟、模块、影响域或全量范围，核心 P0 用例不得因缩减回归而跳过。重生次数以 `TestCaseRegenerationLoop` 配置为准，当前默认 3 次，必须具备冷却期和熔断机制。
+测试用例必须通过知识库 API 生成，使用统一 15 字段模板和 Excel 生成器；标准15字段中删除“关联缺陷ID”，第15列为“质量评分”。前置条件、执行步骤、预期结果必须基于业务知识和页面对象分点描述，便于测试人员直接操作；用例还必须登记功能点、业务规则、页面对象和覆盖矩阵。经过质量评分、优化和审核后，最终 `.xlsx` 文件写入 `workspace/YYYYMMDD/`：格式审核、固定字段校验和业务内容审核通过才允许导出；质量评分仅作结构参考。中间 JSON、评分轨迹、审核报告和临时 Excel 写入 `.runtime/`。原始评分、优化后评分、最终评分及冷启动信息只保留在运行时和审核报告中，不扩展正式Excel表头。回归执行按变更风险选择冒烟、模块、影响域或全量范围，核心 P0 用例不得因缩减回归而跳过。重生次数以 `TestCaseRegenerationLoop` 配置为准，保留兼容上限3次；当前格式整理仅执行一次，无新增依据不反复凑分。
 
 ### 测试用例质量门禁契约
 
@@ -97,14 +97,19 @@ cache downloads logs reports scripts sheet_build uploads
 - 执行步骤至少 3 个分点；每步必须包含明确页面对象、动作和必要测试数据，禁止使用“进入相关页面”等空泛表述。
 - 预期结果至少 2 个分点；必须对应步骤并描述可观察、可验证的页面、提示、数据或状态变化，禁止仅写“成功”或“符合预期”。
 - AuditAgent 必须同时检查格式、结构、业务可执行性、业务规则与页面对象一致性、覆盖矩阵和回归标识。
-- 最终评分低于 85、评分缺失、冷启动评分未经业务复核或状态为 `needs_human_review` 时，必须阻断审核和导出。
+- 业务依据缺失、关键歧义或矛盾未解决时，必须阻断审核和导出；新用例没有执行历史，不因此触发人工确认。结构参考分缺失或非法时修复字段，低于85不单独阻断。
 - 适量回归按变更风险执行：冒烟回归覆盖核心主流程；模块回归覆盖受影响模块及关联异常；影响域回归覆盖公共能力的依赖方；发布或核心重构执行全量回归。P0 用例必须执行。
 
 ### 运行时评分与覆盖矩阵字段契约
 
-运行时字段必须使用 `_runtime_` 命名空间，不能增加或改写正式15列Excel表头。评分状态统一写入 `_runtime_quality`，版本写入 `_runtime_quality_version`；其字段为：`original_score`、`optimized_score`、`final_score`、`score_history`、`score_threshold`、`is_cold_start`、`confidence`、`optimization_attempts`、`needs_human_review`、`final_audit_passed`。评分门槛固定为85分，`score_history`必须保留原始评分和每次优化评分，冷启动信息只能作为审核上下文，不能单独放行交付。
+运行时字段必须使用 `_runtime_` 命名空间，不能增加或改写正式15列Excel表头。评分状态统一写入 `_runtime_quality`，版本写入 `_runtime_quality_version`；其字段为：`original_score`、`optimized_score`、`final_score`、`score_history`、`score_threshold`、`is_cold_start`、`confidence`、`optimization_attempts`、`needs_human_review`、`final_audit_passed`。结构参考分提示线保留85分，`score_history`必须保留原始评分和每次优化评分，冷启动信息只能作为运行历史上下文，不构成交付门槛。
 
 覆盖矩阵统一写入 `_runtime_coverage_matrix`，版本写入 `_runtime_coverage_matrix_version`；矩阵维度为业务规则、业务对象、正常场景、异常场景、边界场景、回滚场景和排除项。矩阵缺口、回归范围和审核结果写入 `.runtime/reports/`，不得写入正式Excel。正式Excel仍严格保持15列，表头必须严格等于 `template_builder.ALL_FIELDS`。
+
+活动用例登记表位于 `data/private/case_registry.sqlite3`，记录稳定ID、版本、停用原因、脚本关联及执行证据。该文件是持久业务资产，不属于临时缓存，不自动清理。固定字段由 RuleManager 配置控制，默认值不自动等同固定值。
+
+有限业务契约映射使用`_runtime_rule_binding`保存来源ID、规则ID、版本、场景及程序核对的规则摘要/判断。
+映射随用例版本进入登记内容JSON，参与版本指纹，不扩展Excel十五列，也不回写业务知识库。
 
 ## 13. 审核与 CI
 
@@ -124,7 +129,7 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 14. 清理规则
 
-`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除文件。对历史遗留在 `.runtime` 根目录下的 pytest/tmp/cache 临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式仅识别固定命名模式、检查目录最新修改时间并阻止符号链接越界。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以优化流程写入的“最终评分”为唯一权威分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
+`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除文件。对历史遗留在 `.runtime` 根目录下的 pytest/tmp/cache 临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式仅识别固定命名模式、检查目录最新修改时间并阻止符号链接越界。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以格式整理流程写入的“最终评分”为结构参考分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
 
 ## 15. 变更记录
 

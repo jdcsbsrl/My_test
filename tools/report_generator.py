@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 class TestReportGenerator:
@@ -23,8 +23,40 @@ class TestReportGenerator:
         self.results = []
         self.start_time = datetime.now()
         self.end_time = None
+        self.planned_count = 0
+
+    @property
+    def exit_code(self) -> int:
+        if any(r["status"] == "FAIL" for r in self.results):
+            return 1
+        if not self.results or len(self.results) < self.planned_count:
+            return 2
+        return 2 if any(r["status"] != "PASS" for r in self.results) else 0
+
+    def summary(self) -> dict:
+        decision = getattr(self, "release_decision", None)
+        conclusion = (
+            {"READY_FOR_DELIVERY": "可交付", "BLOCKED": "阻断", "REQUIRES_REVIEW": "需要复核", "INCOMPLETE": "验证不完整"}.get(
+                decision.get("status"), "未判定"
+            )
+            if isinstance(decision, dict)
+            else {0: "通过", 1: "失败", 2: "验证不完整"}[self.exit_code]
+        )
+        return {
+            "total": len(self.results),
+            "planned": max(self.planned_count, len(self.results)),
+            "executed": sum(r["status"] in {"PASS", "FAIL"} for r in self.results),
+            "passed": sum(r["status"] == "PASS" for r in self.results),
+            "failed": sum(r["status"] == "FAIL" for r in self.results),
+            "skipped": sum(r["status"] == "SKIP" for r in self.results),
+            "blocked": sum(r["status"] == "BLOCKED" for r in self.results),
+            "conclusion": conclusion,
+            "release_decision": decision,
+        }
 
     def add_test_result(self, test_name: str, status: str, message: str = "", duration: float = 0):
+        if status not in {"PASS", "FAIL", "SKIP", "BLOCKED"}:
+            raise ValueError("Unknown test status")
         self.results.append(
             {
                 "test_name": test_name,
@@ -52,13 +84,32 @@ class TestReportGenerator:
     <title>test_erp 回归测试报告</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); overflow: hidden; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+            }}
+        .container {{ max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            overflow: hidden;
+            }}
         .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; }}
         .header h1 {{ font-size: 28px; margin-bottom: 10px; }}
         .header p {{ opacity: 0.9; }}
-        .summary {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; padding: 30px; background: #f8f9fa; }}
-        .summary-card {{ text-align: center; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }}
+        .summary {{ display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            padding: 30px;
+            background: #f8f9fa;
+            }}
+        .summary-card {{ text-align: center;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            }}
         .summary-card .number {{ font-size: 36px; font-weight: bold; }}
         .summary-card.pass {{ color: #10b981; }}
         .summary-card.fail {{ color: #ef4444; }}
@@ -67,7 +118,12 @@ class TestReportGenerator:
         .summary-card .label {{ font-size: 14px; opacity: 0.7; margin-top: 5px; }}
         .results {{ padding: 30px; }}
         .results h2 {{ font-size: 20px; margin-bottom: 20px; color: #374151; }}
-        .test-row {{ display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #e5e7eb; transition: background 0.2s; }}
+        .test-row {{ display: flex;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #e5e7eb;
+            transition: background 0.2s;
+            }}
         .test-row:hover {{ background: #f9fafb; }}
         .test-row:last-child {{ border-bottom: none; }}
         .status-badge {{ width: 10px; height: 10px; border-radius: 50%; margin-right: 15px; }}
@@ -89,6 +145,10 @@ class TestReportGenerator:
     <div class="container">
         <div class="header">
             <h1>test_erp 回归测试报告</h1>
+            <p>结论: {self.summary()['conclusion']}
+                | 计划: {self.summary()['planned']}
+                | 实际执行: {self.summary()['executed']}
+                | 环境/数据阻断: {self.summary()['blocked']}</p>
             <p>生成时间: {self.end_time.strftime('%Y-%m-%d %H:%M:%S')} | 执行时长: {duration:.2f} 秒</p>
         </div>
 
@@ -115,15 +175,21 @@ class TestReportGenerator:
             <h2 style="margin-bottom: 20px;">测试结果分布</h2>
             <div class="chart-bar">
                 <div class="chart-item">
-                    <div class="chart-bar-inner" style="height: {passed/len(self.results)*100 if self.results else 0}%; background: #10b981;"></div>
+                    <div class="chart-bar-inner"
+                         style="height: {passed/len(self.results)*100 if self.results else 0}%;
+            background: #10b981;"></div>
                     <div class="chart-label">通过 ({passed})</div>
                 </div>
                 <div class="chart-item">
-                    <div class="chart-bar-inner" style="height: {failed/len(self.results)*100 if self.results else 0}%; background: #ef4444;"></div>
+                    <div class="chart-bar-inner"
+                         style="height: {failed/len(self.results)*100 if self.results else 0}%;
+            background: #ef4444;"></div>
                     <div class="chart-label">失败 ({failed})</div>
                 </div>
                 <div class="chart-item">
-                    <div class="chart-bar-inner" style="height: {skipped/len(self.results)*100 if self.results else 0}%; background: #f59e0b;"></div>
+                    <div class="chart-bar-inner"
+                         style="height: {skipped/len(self.results)*100 if self.results else 0}%;
+            background: #f59e0b;"></div>
                     <div class="chart-label">跳过 ({skipped})</div>
                 </div>
             </div>
@@ -161,12 +227,7 @@ class TestReportGenerator:
         report = {
             "generated_at": datetime.now().isoformat(),
             "duration": (self.end_time - self.start_time).total_seconds() if self.end_time else 0,
-            "summary": {
-                "total": len(self.results),
-                "passed": sum(1 for r in self.results if r["status"] == "PASS"),
-                "failed": sum(1 for r in self.results if r["status"] == "FAIL"),
-                "skipped": sum(1 for r in self.results if r["status"] == "SKIP"),
-            },
+            "summary": self.summary(),
             "results": self.results,
         }
 
@@ -181,95 +242,37 @@ class TestReportGenerator:
         return json_str
 
 
-def run_regression_tests():
-    """运行回归测试并生成报告"""
-    report = TestReportGenerator()
-
-    print("=" * 60)
-    print("test_erp 查询功能回归测试")
-    print("=" * 60)
-    print()
-
-    from modules.auto_test.api import APIClient
-    from modules.auto_test.core import get_environment
-    from modules.auto_test.facades.api import SalesOrderFacade
-
-    try:
-        env = get_environment("test")
-        print(f"✓ 环境配置加载成功: {env.name}")
-        print(f"  - API基础URL: {env.endpoints.api_base_url}")
-
-        client = APIClient(env.endpoints.api_base_url)
-        facade = SalesOrderFacade(client)
-
-        tests = [
-            ("基础查询-无筛选条件", lambda: facade.query_orders(page_num=1, page_size=10)),
-            ("销售单号搜索-精确匹配", lambda: facade.query_orders(orderNo="SKU2024042400004", pageNum=1, pageSize=10)),
-            ("销售单号搜索-包含匹配", lambda: facade.query_orders(orderNo="20240424", pageNum=1, pageSize=10)),
-            ("订单状态筛选", lambda: facade.query_orders(orderStatus="0", pageNum=1, pageSize=10)),
-            ("分页参数验证(1/10)", lambda: facade.query_orders(page_num=1, page_size=10)),
-            ("分页参数验证(2/10)", lambda: facade.query_orders(page_num=2, page_size=10)),
-            ("搜索条件组合测试", lambda: facade.query_orders(orderNo="2024", sku="DMS", pageNum=1, pageSize=10)),
-            ("空值筛选验证", lambda: facade.query_orders(orderNo="", pageNum=1, pageSize=10)),
-        ]
-
-        for test_name, test_func in tests:
-            try:
-                response = test_func()
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("code") in (200, 0):
-                        print(f"✓ {test_name}")
-                        report.add_test_result(test_name, "PASS", "测试通过")
-                    else:
-                        print(f"✗ {test_name} - 业务码错误: {data.get('msg')}")
-                        report.add_test_result(test_name, "FAIL", f"业务码错误: {data.get('msg')}")
-                else:
-                    print(f"✗ {test_name} - HTTP状态码: {response.status_code}")
-                    report.add_test_result(test_name, "FAIL", f"HTTP状态码: {response.status_code}")
-            except Exception as e:
-                print(f"✗ {test_name} - 异常: {str(e)[:50]}")
-                report.add_test_result(test_name, "FAIL", f"异常: {str(e)[:50]}")
-
-        client.close()
-
-    except Exception as e:
-        print(f"✗ 测试初始化失败: {e}")
-        report.add_test_result("初始化", "FAIL", f"初始化失败: {e}")
-
-    print()
-    print("=" * 60)
-    print("生成测试报告")
-    print("=" * 60)
-
+def run_regression_tests(*, env_name: str = "test", scope: str = "module"):
+    """Execute approved read-only queries and render their business results."""
+    from modules.auto_test.core.regression_checks import execute_sales_queries, planned_scenario_count
+    from modules.auto_test.core.regression_session import regression_session
+    from modules.auto_test.facades.api.sales_order_facade import SalesOrderFacade
+    from modules.trae_test.orchestrator.release_quality_gate import ReleaseQualityGate
     from modules.trae_test.utils.runtime_paths import runtime_dir
 
-    reports_dir = runtime_dir("reports")
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    html_path = str(reports_dir / f"regression_report_{timestamp}.html")
-    json_path = str(reports_dir / f"regression_report_{timestamp}.json")
-
-    report.generate_html_report(html_path)
-    report.generate_json_report(json_path)
-
-    print(f"✓ HTML报告: {html_path}")
-    print(f"✓ JSON报告: {json_path}")
-    print()
-
-    summary = report.generate_json_report()
-    summary_data = json.loads(summary)
-    print("测试汇总:")
-    print(f"  总测试数: {summary_data['summary']['total']}")
-    print(f"  通过: {summary_data['summary']['passed']}")
-    print(f"  失败: {summary_data['summary']['failed']}")
-    print(f"  跳过: {summary_data['summary']['skipped']}")
-
-    print()
-    print("=" * 60)
-    print("测试完成")
-    print("=" * 60)
-
+    if env_name not in {"test", "uat"} or scope not in {"smoke", "module", "release"}:
+        raise ValueError("Only test/uat and smoke/module/release are supported")
+    report = TestReportGenerator()
+    report.planned_count = planned_scenario_count(scope)
+    try:
+        with regression_session(env_name) as client:
+            execute_sales_queries(SalesOrderFacade(client), report, scope=scope)
+    except Exception as exc:
+        report.add_test_result("初始化", "BLOCKED", type(exc).__name__)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    root = runtime_dir("reports")
+    decision = ReleaseQualityGate().evaluate(
+        cases=[],
+        regression_report=report,
+        release_scope=scope,
+        require_regression=True,
+        require_p0=False,
+        require_cases=False,
+    )
+    report.release_decision = decision.to_dict()
+    report.generate_html_report(str(root / f"regression_report_{stamp}.html"))
+    report.generate_json_report(str(root / f"regression_report_{stamp}.json"))
+    print(report.summary())
     return report
 
 
@@ -281,7 +284,7 @@ def main() -> int:
         parser.print_help()
         return 0
     report = run_regression_tests()
-    return 1 if any(item["status"] == "FAIL" for item in report.results) else 0
+    return report.exit_code
 
 
 if __name__ == "__main__":
