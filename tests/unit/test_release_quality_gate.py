@@ -66,9 +66,7 @@ def test_missing_regression_is_incomplete_not_success():
 
 
 def test_blocked_regression_requires_review():
-    result = ReleaseQualityGate().evaluate(
-        cases=[case()], regression_report=report("BLOCKED"), release_scope="module"
-    )
+    result = ReleaseQualityGate().evaluate(cases=[case()], regression_report=report("BLOCKED"), release_scope="module")
 
     assert result.status == REQUIRES_REVIEW
     assert result.required_review[0]["code"] == "REGRESSION_NOT_VERIFIED"
@@ -79,9 +77,7 @@ def test_registered_p0_name_matches_versioned_execution_result():
     registered["_registered_name"] = "TC-001 v2"
     result = ReleaseQualityGate().evaluate(
         cases=[registered],
-        regression_report=SimpleNamespace(
-            results=[{"test_name": "TC-001 v2", "status": "PASS"}], planned_count=1
-        ),
+        regression_report=SimpleNamespace(results=[{"test_name": "TC-001 v2", "status": "PASS"}], planned_count=1),
         release_scope="module",
     )
 

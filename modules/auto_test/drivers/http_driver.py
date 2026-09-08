@@ -158,6 +158,8 @@ class HttpDriver:
 
     def _log_request(self, method: str, url: str, **kwargs: Any) -> None:
         logger.debug(f"Request: {method} {self._redact_url(url)}")
+        if not getattr(self, "log_bodies", True):
+            return
         if "json" in kwargs:
             logger.debug(f"Request body: {json.dumps(self._redact(kwargs['json']), ensure_ascii=False, default=str)}")
         if "data" in kwargs:
@@ -180,6 +182,8 @@ class HttpDriver:
         elapsed = getattr(response, "elapsed", None)
         elapsed_seconds = elapsed.total_seconds() if elapsed is not None else 0.0
         logger.debug(f"Response time: {elapsed_seconds:.3f}s")
+        if not getattr(self, "log_bodies", True):
+            return
         try:
             body = response.json()
             logger.debug(f"Response body: {json.dumps(self._redact(body), ensure_ascii=False, indent=2)}")

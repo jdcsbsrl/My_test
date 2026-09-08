@@ -50,7 +50,9 @@ def main() -> int:
             print(row["case_id"], f"v{row['version']}", row["script_id"])
         return run_registered_cases(registry, selected, args.env) if args.execute else 0
     report = run_regression_tests(env_name=args.env, scope=args.scope)
-    return 1 if report.release_decision["status"] == "BLOCKED" else 2 if not report.release_decision["can_deliver"] else 0
+    return (
+        1 if report.release_decision["status"] == "BLOCKED" else 2 if not report.release_decision["can_deliver"] else 0
+    )
 
 
 if __name__ == "__main__":

@@ -33,12 +33,8 @@ def test_root_configuration_loads_the_only_harness_entry_point():
 
 
 def test_authentication_fixtures_share_one_session_source():
-    storage_state_params = inspect.signature(
-        harness_plugin.authenticated_storage_state._fixture_function
-    ).parameters
-    login_response_params = inspect.signature(
-        harness_plugin.login_response._fixture_function
-    ).parameters
+    storage_state_params = inspect.signature(harness_plugin.authenticated_storage_state._fixture_function).parameters
+    login_response_params = inspect.signature(harness_plugin.login_response._fixture_function).parameters
 
     assert list(storage_state_params) == ["_authenticated_session"]
     assert list(login_response_params) == ["_authenticated_session"]

@@ -36,9 +36,12 @@ class TestReportGenerator:
     def summary(self) -> dict:
         decision = getattr(self, "release_decision", None)
         conclusion = (
-            {"READY_FOR_DELIVERY": "可交付", "BLOCKED": "阻断", "REQUIRES_REVIEW": "需要复核", "INCOMPLETE": "验证不完整"}.get(
-                decision.get("status"), "未判定"
-            )
+            {
+                "READY_FOR_DELIVERY": "可交付",
+                "BLOCKED": "阻断",
+                "REQUIRES_REVIEW": "需要复核",
+                "INCOMPLETE": "验证不完整",
+            }.get(decision.get("status"), "未判定")
             if isinstance(decision, dict)
             else {0: "通过", 1: "失败", 2: "验证不完整"}[self.exit_code]
         )
