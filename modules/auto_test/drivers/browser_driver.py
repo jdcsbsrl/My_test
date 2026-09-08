@@ -34,8 +34,9 @@ def _runtime_video_dir(run_id: str | None = None, worker_id: str | None = None) 
 class BrowserDriver:
     """Manages Playwright lifecycle: one Browser, many contexts (test isolation)."""
 
-    def __init__(self, *, run_id: str | None = None, worker_id: str | None = None) -> None:
-        self.config = get_config()
+    def __init__(self, *, run_id: str | None = None, worker_id: str | None = None, config: Any | None = None) -> None:
+        """Create a browser driver bound to an explicit environment when supplied."""
+        self.config = config or get_config()
         self._playwright: Any = None
         self.browser: Browser | None = None
         self._contexts: list[BrowserContext] = []

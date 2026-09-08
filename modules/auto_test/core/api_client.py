@@ -55,5 +55,9 @@ class APIClient:
     def clear_auth(self) -> None:
         self.session.headers.pop("Authorization", None)
 
+    def set_body_logging(self, enabled: bool) -> None:
+        """Allow read-only runners to collect status evidence without business payloads."""
+        self._driver.log_bodies = enabled
+
     def close(self) -> None:
         self._driver.close()
