@@ -15,6 +15,10 @@ logger = get_logger()
 # Canonical product template name. The selector implementation remains tolerant
 # of legacy spelling variants, while callers use one stable value.
 EXPORT_TEMPLATE = "！Dayone标准模板 --计算账单"
+EXPORT_TEMPLATE_ALIASES = (
+    EXPORT_TEMPLATE,
+    "Dayone海外仓订单导出模板！！",
+)
 
 
 class SalesOrderExportPage(BasePage):
@@ -180,6 +184,8 @@ class SalesOrderExportPage(BasePage):
     def select_field(self, field_name: str) -> bool:
         # 多选择器回退策略
         selectors = [
+            f'.el-checkbox:has-text("{field_name}") input[type="checkbox"]',
+            f'.ant-checkbox-wrapper:has-text("{field_name}") input[type="checkbox"]',
             f'.el-checkbox__label:has-text("{field_name}")',
             f'.ant-checkbox-wrapper:has-text("{field_name}")',
             f'label:has-text("{field_name}")',
@@ -198,6 +204,8 @@ class SalesOrderExportPage(BasePage):
                     else:
                         el.click(force=True)
                     self.wait_for_loading_complete(timeout=10000)
+                    if el.get_attribute("type") == "checkbox" and not el.is_checked():
+                        continue
                     logger.info(f"已选择字段: {field_name} (通过选择器: {selector[:50]}...)")
                     return True
             except Exception:
@@ -296,11 +304,16 @@ class SalesOrderExportPage(BasePage):
         try:
             self.wait_for_page_settle(timeout=30000)
 
-            template_variants = [
-                template_name,
-                template_name.replace(" --", "-"),
-                template_name.replace("-", "--"),
-            ]
+            aliases = EXPORT_TEMPLATE_ALIASES if template_name == EXPORT_TEMPLATE else (template_name,)
+            template_variants = list(
+                dict.fromkeys(
+                    [
+                        *aliases,
+                        template_name.replace(" --", "-"),
+                        template_name.replace("-", "--"),
+                    ]
+                )
+            )
 
             # 1. 先点击空白处关闭任何已打开的下拉菜单
             self.page.locator("body").click()
@@ -441,7 +454,7 @@ class SalesOrderExportPage(BasePage):
 
             # 精确匹配失败时，使用关键字模糊匹配作为后备方案
             # 去除所有空白字符后匹配，避免隐藏字符/不同空白编码的影响
-            keywords = ["dayone", "标准模板", "计算账单"]
+            keywords = ["dayone"]
             for item in items:
                 try:
                     text = (item.text_content() or "").strip()
@@ -451,7 +464,9 @@ class SalesOrderExportPage(BasePage):
                     import re
 
                     text_clean = re.sub(r"[\s\u200b-\u200d\uFEFF\xa0]+", "", text).lower()
-                    if all(kw in text_clean for kw in keywords):
+                    if all(kw in text_clean for kw in keywords) and any(
+                        marker in text_clean for marker in ("标准模板", "计算账单", "海外仓订单导出模板")
+                    ):
                         item.click()
                         logger.info(f"模糊匹配成功（归一化后），选择模板: {text}")
                         self.wait_for_loading_complete(timeout=10000)
