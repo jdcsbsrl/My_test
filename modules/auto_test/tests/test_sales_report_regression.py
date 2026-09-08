@@ -207,13 +207,27 @@ def _business_success(body: Any) -> bool:
     return success is True or success == "true"
 
 
+def _normalize_metric(value: Any) -> str:
+    """Compare numeric report cells independent of Excel/UI formatting."""
+    text = str(value or "").strip().replace(",", "")
+    if not text or text == "-":
+        return text
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.12f}".rstrip("0").rstrip(".")
+
+
 def _export_row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
     return (
         row.get("店铺名称") or row.get("店铺") or "",
         row.get("库存SKU") or row.get("SKU编码") or "",
-        row.get("销量", ""),
-        row.get("日均销量", ""),
-        row.get("订单数", ""),
+        _normalize_metric(row.get("销量", "")),
+        _normalize_metric(row.get("日均销量", "")),
+        _normalize_metric(row.get("订单数", "")),
     )
 
 
@@ -221,9 +235,9 @@ def _detail_row_key(row: dict[str, str]) -> tuple[str, str, str, str, str]:
     return (
         row.get("店铺", ""),
         row.get("SKU编码", ""),
-        row.get("销量", ""),
-        row.get("日均销量", ""),
-        row.get("订单数", ""),
+        _normalize_metric(row.get("销量", "")),
+        _normalize_metric(row.get("日均销量", "")),
+        _normalize_metric(row.get("订单数", "")),
     )
 
 

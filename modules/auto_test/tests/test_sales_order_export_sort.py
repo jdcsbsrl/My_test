@@ -44,7 +44,13 @@ def read_excel_order_numbers(file_path: str, limit: int = 50) -> list[str]:
         for index, header in enumerate(header_row):
             header_text = str(header).strip() if header else ""
             normalized_header = header_text.lower().replace(" ", "")
-            if normalized_header in {"orderid", "order_id"}:
+            if normalized_header in {
+                "orderid",
+                "order_id",
+                "系统单号",
+                "订单号",
+                "systemorderno",
+            }:
                 order_col_index = index
                 break
 
