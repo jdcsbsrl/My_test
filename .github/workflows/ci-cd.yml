@@ -187,6 +187,8 @@ jobs:
             ${{ runner.os }}-pip-
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
       - name: Validate CI endpoints
         run: python tools/validate_ci_environment.py
       - name: Run integration tests
