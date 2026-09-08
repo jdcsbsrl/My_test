@@ -347,7 +347,10 @@ class SalesOrderPage(BasePage):
 
         self.wait_for_page_settle(timeout=30000)
         search_requests: list[dict[str, str]] = []
-        capture_requests = False
+        # The store picker can submit the order query while the selection is
+        # being applied or when the picker closes. Capture from the beginning
+        # so those requests are not missed before the explicit search click.
+        capture_requests = True
 
         def record_order_request(request: Any) -> None:
             url = str(request.url or "")
@@ -425,12 +428,20 @@ class SalesOrderPage(BasePage):
                   const items = Array.from(document.querySelectorAll('.store-item')).filter(visible);
                   let item = items.find((candidate) => {
                     const name = candidate.querySelector('.store-name')?.textContent;
+                    return normalize(name) === expected;
+                  }) || items.find((candidate) => {
+                    const name = candidate.querySelector('.store-name')?.textContent;
                     return matches(name);
                   });
                   if (!item) {
-                    const textNode = Array.from(document.querySelectorAll('body *'))
+                    const visibleTextNodes = Array.from(document.querySelectorAll('body *'))
                       .filter(visible)
-                      .find(candidate => matches(candidate.textContent)
+                      .filter(candidate => !Array.from(candidate.children).some(child =>
+                        normalize(child.textContent) === expected));
+                    const textNode = visibleTextNodes.find(candidate =>
+                        normalize(candidate.textContent) === expected
+                        && !Array.from(candidate.children).some(child => matches(child.textContent)))
+                      || visibleTextNodes.find(candidate => matches(candidate.textContent)
                         && !Array.from(candidate.children).some(child => matches(child.textContent)));
                     item = textNode?.closest('.store-item, [role="option"], li, tr') || textNode;
                   }
@@ -458,7 +469,6 @@ class SalesOrderPage(BasePage):
             search_button = self.page.get_by_role("button", name="搜索", exact=True)
             search_button.wait_for(state="visible", timeout=10000)
             expect(search_button).to_be_enabled(timeout=60000)
-            capture_requests = True
             search_button.click()
             self.wait_for_loading_complete(timeout=60000)
             self.wait_for_table_data(timeout=60000)
