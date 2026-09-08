@@ -1,5 +1,7 @@
 from typing import Any
 
+import re
+
 import allure
 from playwright.sync_api import Page, expect
 
@@ -408,8 +410,38 @@ class SalesOrderPage(BasePage):
                 timeout=30000,
             )
 
-            selected = self.page.evaluate(
-                """
+            selected = {"found": False, "checked": False, "name": ""}
+            # Prefer Playwright's real checkbox interaction. Calling
+            # HTMLElement.click() from evaluate can change the visual state
+            # without dispatching the framework event that updates the store
+            # IDs used by the order-list request.
+            store_items = self.page.locator(".store-item:visible")
+            expected_normalized = re.sub(r"\s+", "", store_name).strip()
+            for index in range(store_items.count()):
+                item = store_items.nth(index)
+                try:
+                    item_name = (item.locator(".store-name").first.text_content() or "").strip()
+                    if re.sub(r"\s+", "", item_name) != expected_normalized:
+                        continue
+                    checkbox = item.locator('input[type="checkbox"]').first
+                    if checkbox.count() > 0:
+                        if not checkbox.is_checked():
+                            checkbox.check(force=True)
+                        selected = {
+                            "found": True,
+                            "checked": checkbox.is_checked(),
+                            "name": item_name,
+                        }
+                    else:
+                        item.click(force=True)
+                        selected = {"found": True, "checked": True, "name": item_name}
+                    break
+                except Exception:
+                    continue
+
+            if not selected["found"]:
+                selected = self.page.evaluate(
+                    """
                 (expectedName) => {
                   const normalize = value => (value || '')
                     .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
@@ -458,8 +490,8 @@ class SalesOrderPage(BasePage):
                   };
                 }
                 """,
-                store_name,
-            )
+                    store_name,
+                )
             if not selected.get("found"):
                 raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
             if not selected.get("checked"):
