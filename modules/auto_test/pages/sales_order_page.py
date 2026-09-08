@@ -417,6 +417,23 @@ class SalesOrderPage(BasePage):
             # IDs used by the order-list request.
             store_items = self.page.locator(".store-item:visible")
             expected_normalized = re.sub(r"\s+", "", store_name).strip()
+            # The picker is multi-select and can retain a previous test's
+            # choice when the page context is reused. Clear other visible
+            # selections so the request contains exactly the requested store.
+            for index in range(store_items.count()):
+                item = store_items.nth(index)
+                try:
+                    item_name = (item.locator(".store-name").first.text_content() or "").strip()
+                    checkbox = item.locator('input[type="checkbox"]').first
+                    if (
+                        checkbox.count() > 0
+                        and checkbox.is_checked()
+                        and re.sub(r"\s+", "", item_name) != expected_normalized
+                    ):
+                        checkbox.uncheck(force=True)
+                except Exception:
+                    continue
+
             for index in range(store_items.count()):
                 item = store_items.nth(index)
                 try:
@@ -498,6 +515,9 @@ class SalesOrderPage(BasePage):
                 raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
 
             trigger.click()
+            # Allow the component's v-model/update cycle to commit the store
+            # ID before the search button reads its query payload.
+            self.page.wait_for_timeout(750)
             search_button = self.page.get_by_role("button", name="搜索", exact=True)
             search_button.wait_for(state="visible", timeout=10000)
             expect(search_button).to_be_enabled(timeout=60000)
