@@ -37,6 +37,7 @@ dependencies = [
     "requests-toolbelt>=1.0.0",
     "pydantic>=2.6.0",
     "jsonschema>=4.21.0",
+    "defusedxml>=0.7.1",
     # 性能测试
     "locust>=2.24.0",
     # 数据处理

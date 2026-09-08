@@ -63,13 +63,7 @@ class CaseRegistry:
         return hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
     def list_cases(self, requirement_id: str | None = None, *, active_only: bool = True) -> list[dict]:
-        clauses, values = [], []
-        if active_only:
-            clauses.append("active=1")
-        if requirement_id is not None:
-            clauses.append("requirement_id=?")
-            values.append(requirement_id)
-        sql = """SELECT cases.*,
+        select_sql = """SELECT cases.*,
             (SELECT status FROM executions e WHERE e.case_id=cases.case_id AND e.version=cases.version
              ORDER BY e.rowid DESC LIMIT 1) AS last_status,
             (SELECT evidence FROM executions e WHERE e.case_id=cases.case_id AND e.version=cases.version
@@ -78,9 +72,19 @@ class CaseRegistry:
              ORDER BY e.rowid DESC LIMIT 1) AS last_executed_at
             ,(SELECT digest FROM script_snapshots s WHERE s.case_id=cases.case_id AND s.version=cases.version)
              AS script_digest
-            FROM cases""" + (" WHERE " + " AND ".join(clauses) if clauses else "")
+            FROM cases"""
         with self._connect() as db:
-            rows = db.execute(sql + " ORDER BY case_id,version", values).fetchall()
+            if requirement_id is None and active_only:
+                rows = db.execute(select_sql + " WHERE active=1 ORDER BY case_id,version").fetchall()
+            elif requirement_id is None:
+                rows = db.execute(select_sql + " ORDER BY case_id,version").fetchall()
+            else:
+                rows = db.execute(
+                    select_sql
+                    + (" WHERE active=1 AND requirement_id=?" if active_only else " WHERE requirement_id=?")
+                    + " ORDER BY case_id,version",
+                    (requirement_id,),
+                ).fetchall()
         return [{**dict(row), "content": json.loads(row["content"])} for row in rows]
 
     def propose(self, cases: list[dict], requirement_id: str) -> list[dict]:
