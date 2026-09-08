@@ -37,7 +37,7 @@ pytest tests/unit tests/integration
 
 ```bash
 python tools/case_generator_cli.py list-templates
-python tools/case_generator_cli.py generate --module "基础资料" --function "物料新增" --priority P1
+python tools/case_generator_cli.py generate --module "基础资料" --function "物料新增" --priority P1 --requirement-file data/private/requirement.txt
 ```
 
 Generated cases follow the project's 15-field standard and pass through the AuditAgent gateway before delivery.

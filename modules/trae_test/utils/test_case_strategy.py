@@ -607,7 +607,7 @@ class TestCaseScoreEngine:
             "score": score,
             "is_cold_start": is_cold_start,
             "confidence": self._calculate_confidence(execution_count),
-            "is_final_score_qualified": self.is_final_score_qualified(score) and not is_cold_start,
+            "is_final_score_qualified": self.is_final_score_qualified(score),
             "threshold": self.FINAL_SCORE_THRESHOLD,
         }
 
@@ -629,38 +629,18 @@ class TestCaseScoreEngine:
         runtime.is_cold_start = metadata["is_cold_start"]
         runtime.confidence = metadata["confidence"]
         if stage == "final":
-            runtime.needs_human_review = not metadata["is_final_score_qualified"]
+            runtime.needs_human_review = False  # Business audit, not score/history, decides unresolved issues.
         runtime.score_history.append({"stage": stage, "score": score})
         attach_runtime_quality(case, runtime)
         return score
 
     def score(self, case: dict[str, Any]) -> float:
-        """计算用例综合得分（0-100）
+        """Return structural completeness only; never infer business correctness."""
+        from .template_builder import ALL_FIELDS
 
-        含冷启动保护机制：当用例历史执行次数不足时，采用简化评分策略
-        """
-        execution_count = case.get("execution_count", 0)
-        confidence = self._calculate_confidence(execution_count)
-
-        # 冷启动保护：执行次数不足时，仅使用静态维度评分
-        if execution_count < self._COLD_START_THRESHOLD:
-            return self._cold_start_score(case, confidence)
-
-        # 正常评分逻辑
-        scores = {
-            "coverage": self._score_coverage(case),
-            "completeness": self._score_completeness(case),
-            "priority": self._score_priority(case),
-            "executability": self._score_executability(case),
-            "maintainability": self._score_maintainability(case),
-        }
-
-        # 应用置信度权重调整
-        weights = self._adjust_weights_by_confidence(confidence)
-
-        total_score = sum(scores[dimension] * weights[dimension] for dimension in self.WEIGHTS)
-
-        return round(total_score, 2)
+        fields = [field for field in ALL_FIELDS if field not in {"需求ID", "质量评分"}]
+        present = sum(isinstance(case.get(field), str) and bool(case[field].strip()) for field in fields)
+        return round(100.0 * present / len(fields), 2)
 
     def _calculate_confidence(self, execution_count: int) -> float:
         """计算评分置信度（0.0-1.0）
@@ -790,51 +770,27 @@ class TestCaseOptimizer:
         ]
 
     def optimize(self, case: dict[str, Any], target_score: float | None = None) -> dict[str, Any]:
-        """优化用例直到达到目标分数"""
-        if target_score is None:
-            target_score = self.score_engine.FINAL_SCORE_THRESHOLD
-        current_score = self.score_engine.score(case)
-        if current_score >= target_score:
-            return case
-
-        for rule in self._optimization_rules:
-            case = rule(case)
-
+        """Normalize existing points once, without inventing or truncating content."""
+        self._optimize_steps(case)
+        self._optimize_expected_results(case)
         return case
 
+    @staticmethod
+    def _normalize_points(value: str) -> str:
+        import re
+
+        points = [re.sub(r"^\s*\d+[.、)]\s*", "", line).strip() for line in value.splitlines() if line.strip()]
+        return "\n".join(f"{index}. {point}" for index, point in enumerate(points, 1))
+
     def _optimize_steps(self, case: dict[str, Any]) -> dict[str, Any]:
-        """优化用例步骤"""
-        steps = case.get("用例步骤", "")
-        step_list = [s.strip() for s in steps.split("\n") if s.strip()]
-
-        if len(step_list) < 3:
-            step_list.append("验证操作结果")
-            if len(step_list) < 3:
-                step_list.insert(0, "进入相关功能页面")
-
-        case["用例步骤"] = "\n".join(f"{i}. {s}" for i, s in enumerate(step_list, 1))
+        case["用例步骤"] = self._normalize_points(case.get("用例步骤", ""))
         return case
 
     def _optimize_expected_results(self, case: dict[str, Any]) -> dict[str, Any]:
-        """优化预期结果"""
-        expected = case.get("预期结果", "")
-        expected_list = [e.strip() for e in expected.split("\n") if e.strip()]
-
-        if len(expected_list) < 2:
-            expected_list.append("操作执行成功")
-
-        case["预期结果"] = "\n".join(f"{i}. {e}" for i, e in enumerate(expected_list, 1))
+        case["预期结果"] = self._normalize_points(case.get("预期结果", ""))
         return case
 
     def _optimize_case_name(self, case: dict[str, Any]) -> dict[str, Any]:
-        """优化用例名称"""
-        case_name = case.get("用例名称", "")
-        if len(case_name) < 10:
-            case_name = f"测试_{case_name}_{datetime.now().strftime('%Y%m%d')}"
-        elif len(case_name) > 50:
-            case_name = case_name[:50]
-
-        case["用例名称"] = case_name
         return case
 
 
@@ -969,52 +925,31 @@ class TestCaseRegenerationLoop:
         from .excel_generator import ExcelGenerator
 
         cases = self.generate_and_optimize(keyword, limit)
-        if any(case.get("用例状态") != "正常" or case.get("质量评分", 0) < self._min_score_threshold for case in cases):
-            raise RuntimeError("存在未达到最终评分门槛的用例，禁止导出")
+        from ..orchestrator.audit_gateway import AuditGateway
+        from .template_builder import LEGACY_RUNTIME_FIELDS
+
+        result = AuditGateway().audit(cases, "test_case", {"block_on_fail": True})
+        for case in cases:
+            quality = read_runtime_quality(case)
+            quality.final_audit_passed = result.passed
+            quality.needs_human_review = not result.passed
+            attach_runtime_quality(case, quality)
+            for field_name in LEGACY_RUNTIME_FIELDS:
+                case.pop(field_name, None)
         return ExcelGenerator.generate(cases, output_path=output_path or "")
 
     def _regenerate_until_qualified(self, case: dict[str, Any]) -> dict[str, Any]:
-        """循环优化直到达标或达到重生上限"""
-        regeneration = dict(case.get("_runtime_regeneration") or {})
-        regeneration_count = int(regeneration.get("count", 0) or 0)
-        runtime_quality = read_runtime_quality(case)
-        if runtime_quality.original_score is None:
-            self.score_engine.record_score(case, "original")
-
-        for _ in range(self._max_regeneration_attempts):
-            score = self.score_engine.score(case)
-            if score >= self._min_score_threshold:
-                self.score_engine.record_score(case, "final")
-                case["质量评分"] = read_runtime_quality(case).final_score or 0.0
-                case["_runtime_regeneration"] = {
-                    "count": regeneration_count,
-                    "last_regenerated_at": datetime.now().isoformat(),
-                }
-                case["用例状态"] = "正常"
-                runtime = read_runtime_quality(case)
-                runtime.needs_human_review = False
-                attach_runtime_quality(case, runtime)
-                return case
-
-            if read_runtime_quality(case).original_score is None:
-                self.score_engine.record_score(case, "original")
-            case = self.optimizer.optimize(case, target_score=self._min_score_threshold)
-            self.score_engine.record_score(case, "optimized")
-            regeneration_count += 1
-
-        # 达到重生上限，触发熔断
+        """Normalize once; unresolved business issues are decided by AuditAgent."""
+        self.score_engine.record_score(case, "original")
+        self.optimizer.optimize(case)
+        self.score_engine.record_score(case, "optimized")
         self.score_engine.record_score(case, "final")
-        case["质量评分"] = read_runtime_quality(case).final_score or 0.0
-        case["_runtime_regeneration"] = {
-            "count": regeneration_count,
-            "last_regenerated_at": datetime.now().isoformat(),
-        }
-        case["用例状态"] = "正常"
         runtime = read_runtime_quality(case)
-        runtime.needs_human_review = True
+        runtime.optimization_attempts = 1
         attach_runtime_quality(case, runtime)
-        self._send_human_review_alert(case)
-
+        case["质量评分"] = runtime.final_score or 0.0
+        case["用例状态"] = "正常"
+        case["_runtime_regeneration"] = {"count": 1, "last_regenerated_at": datetime.now().isoformat()}
         return case
 
     def _is_circuit_broken(self, case: dict[str, Any]) -> bool:

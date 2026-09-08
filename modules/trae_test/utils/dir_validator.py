@@ -47,9 +47,13 @@ def _fallback_nav_json_path() -> str:
 
 @lru_cache(maxsize=1)
 def _load_module_hierarchy() -> dict[str, dict[str, list[str]]]:
-    path = _nav_json_path()
-    if not os.path.exists(path):
-        path = _fallback_nav_json_path()
+    from .knowledge_retriever import KnowledgeRetriever
+
+    data = KnowledgeRetriever().search_navigation()
+    if isinstance(data, dict) and data.get("module_hierarchy"):
+        return data["module_hierarchy"]
+    # Only the immutable, non-sensitive fixture may be read by path.
+    path = _fallback_nav_json_path()
     if not os.path.exists(path):
         return {}
     with open(path, encoding="utf-8") as f:
