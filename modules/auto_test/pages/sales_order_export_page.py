@@ -182,6 +182,62 @@ class SalesOrderExportPage(BasePage):
 
     @allure.step("选择指定字段: {field_name}")
     def select_field(self, field_name: str) -> bool:
+        # The export page renders the checkbox input next to a text label. A
+        # label click toggles the input, so clicking it unconditionally can
+        # silently deselect a field that the selected template already
+        # enabled. Resolve the wrapper first and only click when unchecked.
+        try:
+            result = self.page.evaluate(
+                """(target) => {
+                    const labels = Array.from(document.querySelectorAll(
+                        'label, .el-checkbox__label, .ant-checkbox-wrapper, span'
+                    ));
+                    const label = labels.find((el) => {
+                        const text = (el.textContent || '').trim();
+                        return text === target || text.includes(target);
+                    });
+                    if (!label) return { found: false, checked: false };
+                    const wrapper = label.closest(
+                        '.el-checkbox, .ant-checkbox-wrapper, label'
+                    ) || label.parentElement;
+                    const checkbox = wrapper && wrapper.querySelector(
+                        'input[type="checkbox"]'
+                    );
+                    if (checkbox && checkbox.checked) {
+                        return { found: true, checked: true };
+                    }
+                    (checkbox || wrapper || label).click();
+                    return { found: true, checked: Boolean(checkbox && checkbox.checked) };
+                }""",
+                field_name,
+            )
+            if result.get("found"):
+                self.wait_for_loading_complete(timeout=10000)
+                checked = self.page.evaluate(
+                    """(target) => {
+                        const labels = Array.from(document.querySelectorAll(
+                            'label, .el-checkbox__label, .ant-checkbox-wrapper, span'
+                        ));
+                        const label = labels.find((el) => {
+                            const text = (el.textContent || '').trim();
+                            return text === target || text.includes(target);
+                        });
+                        const wrapper = label && (label.closest(
+                            '.el-checkbox, .ant-checkbox-wrapper, label'
+                        ) || label.parentElement);
+                        const checkbox = wrapper && wrapper.querySelector(
+                            'input[type="checkbox"]'
+                        );
+                        return Boolean(checkbox && checkbox.checked);
+                    }""",
+                    field_name,
+                )
+                if checked:
+                    logger.info(f"已选择字段: {field_name} (保留/设置复选框状态)")
+                    return True
+        except Exception as e:
+            logger.debug(f"通过复选框包装器选择字段失败，继续回退: {e}")
+
         # 多选择器回退策略
         selectors = [
             f'.el-checkbox:has-text("{field_name}") input[type="checkbox"]',
