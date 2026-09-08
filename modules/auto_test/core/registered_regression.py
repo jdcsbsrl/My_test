@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 import uuid
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 
 from modules.trae_test.utils.runtime_paths import project_root, runtime_dir
 

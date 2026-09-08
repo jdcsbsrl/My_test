@@ -643,7 +643,7 @@ class SalesReportPage(BasePage):
         self.page.on("download", on_download)
         self.page.on("response", on_response)
         try:
-            clicked = self.page.evaluate("""() => {
+            button_clicked = self.page.evaluate("""() => {
                     const visible = (el) => {
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
@@ -657,8 +657,39 @@ class SalesReportPage(BasePage):
                     button.click();
                     return true;
                 }""")
-            if not clicked:
+            if not button_clicked:
                 raise ValueError("Export button not found")
+
+            selected_menu_item = None
+            deadline = time.time() + min(timeout, 10000) / 1000
+            while time.time() < deadline and selected_menu_item is None:
+                selected_menu_item = self.page.evaluate(
+                    """(menuText) => {
+                        const visible = (el) => {
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            return rect.width > 0 && rect.height > 0
+                                && style.display !== 'none' && style.visibility !== 'hidden';
+                        };
+                        const candidates = Array.from(document.querySelectorAll(
+                            '[role="menuitem"], .el-dropdown-menu__item, .ant-dropdown-menu-item, li, button'
+                        )).filter(visible);
+                        const option = candidates.find((el) =>
+                            (el.innerText || el.textContent || '').trim() === menuText
+                        ) || candidates.find((el) =>
+                            (el.innerText || el.textContent || '').trim().includes(menuText)
+                        );
+                        if (!option) return null;
+                        const selected = (option.innerText || option.textContent || '').trim();
+                        option.click();
+                        return selected;
+                    }""",
+                    menu_text,
+                )
+                if selected_menu_item is None:
+                    self.page.wait_for_timeout(200)
+            if selected_menu_item is None:
+                raise ValueError(f"Export menu option not found: {menu_text}")
             deadline = time.time() + timeout / 1000
             while time.time() < deadline:
                 if downloads:
