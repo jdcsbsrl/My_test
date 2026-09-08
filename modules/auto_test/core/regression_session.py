@@ -68,7 +68,8 @@ def regression_session(env_name: str, *, force_login: bool = False):
         # Facades constructed within this context must use this same validated
         # environment, rather than resolve the process-default TEST_ENV again.
         client._test_erp_environment_config = config
-        client.set_body_logging(False)
+        if hasattr(client, "set_body_logging"):
+            client.set_body_logging(False)
         client.set_auth_token(credentials["token"])
         client.set_header("clientid", credentials["clientid"])
         for cookie in credentials["cookies"]:
