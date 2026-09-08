@@ -8,8 +8,8 @@ logger = get_logger()
 
 
 class LoginPage(BasePage):
-    def __init__(self, page: Page) -> None:
-        super().__init__(page)
+    def __init__(self, page: Page, *, config=None) -> None:
+        super().__init__(page, config=config)
         self._username_selectors = [
             'input[placeholder="账号"]',
             '.el-input__inner[type="text"]',
@@ -30,16 +30,12 @@ class LoginPage(BasePage):
             'input[id*="password"]',
         ]
         self._login_button_selectors = [
-            'button:has-text("鐧?褰?)',
             ".el-button--primary",
+            'button:has-text("登录")',
             ".el-button.el-button--primary",
             "button.el-button--primary",
-            '//button[contains(text(), "鐧?)]',
-            '//button[contains(text(), "褰?)]',
             'button[type="button"].el-button--primary',
             'button[type="button"]',
-            'button:has-text("鐧诲綍")',
-            '//button[contains(text(), "鐧诲綍")]',
             'button[type="submit"]',
             'input[type="submit"]',
             ".ant-btn-primary",

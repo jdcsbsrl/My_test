@@ -18,9 +18,9 @@ logger = get_logger()
 
 
 class BasePage:
-    def __init__(self, page: Page) -> None:
+    def __init__(self, page: Page, *, config=None) -> None:
         self.page = page
-        self.config = get_config()
+        self.config = config or get_config()
         self.base_url = self.config.base_url
         self.self_healing = SelfHealingLocator(page, env=getattr(self.config, "env", "test"))
 
@@ -262,6 +262,12 @@ class BasePage:
             self.page.locator(selector).wait_for(timeout=timeout)
         except Exception:
             if not self.self_healing.enabled:
+                raise
+
+            context = LocatorContext(selector=selector, selectors=[selector], description=selector)
+            if not self.self_healing.execute(
+                "wait", context, lambda locator: locator.wait_for(timeout=timeout), timeout=timeout
+            ):
                 raise
 
     @allure.step("等待页面加载完成")

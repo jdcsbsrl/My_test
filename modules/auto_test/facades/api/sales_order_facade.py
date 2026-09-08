@@ -12,9 +12,12 @@ from modules.auto_test.reporting.allure_http import attach_request_info, step
 
 
 class SalesOrderFacade:
-    def __init__(self, client: APIClient) -> None:
+    def __init__(self, client: APIClient, *, config=None) -> None:
         self._client = client
-        self._config = get_config()
+        # Regression sessions attach their validated environment configuration
+        # to the in-memory client. Preserve the normal global-config fallback
+        # for existing callers.
+        self._config = config or getattr(client, "_test_erp_environment_config", None) or get_config()
         self._base = str(self._config.get("api.sales_order_resource", "/oms-admin/sales/order"))
 
     @property
