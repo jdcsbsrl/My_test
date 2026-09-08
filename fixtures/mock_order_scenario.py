@@ -18,12 +18,7 @@ RULES = {
     "pagination": "固定数据集的第一页和第二页订单号不重叠",
 }
 ORDERS = tuple(
-    {
-        "orderNo": f"MOCK-ORDER-{i:03d}",
-        "orderStatus": str(i % 2),
-        "sku": f"MOCK-SKU-{i % 3:03d}",
-    }
-    for i in range(1, 25)
+    {"orderNo": f"MOCK-ORDER-{i:03d}", "orderStatus": str(i % 2), "sku": f"MOCK-SKU-{i % 3:03d}"} for i in range(1, 25)
 )
 
 
@@ -33,24 +28,22 @@ def query_response(payload, *, ignore_filters=False, empty=False, business_code=
         for key in ("orderNo", "orderStatus", "sku"):
             if key in payload:
                 value = str(payload[key])
-                if key == "orderNo":
-                    rows = [row for row in rows if value in str(row[key])]
-                else:
-                    rows = [row for row in rows if str(row[key]) == value]
+                rows = [row for row in rows if (value in str(row[key]) if key == "orderNo" else str(row[key]) == value)]
     size = payload.get("pageSize", 10)
     start = (payload.get("pageNum", 1) - 1) * size
     response = requests.Response()
     response.status_code = 200
     response.headers["Content-Type"] = "application/json"
     response._content = json.dumps(
-        {"code": business_code, "data": {"tableDataInfo": {"code": 200, "rows": rows[start : start + size]}}}
+        {
+            "code": business_code,
+            "data": {"tableDataInfo": {"code": 200, "rows": rows[start : start + size], "total": len(rows)}},
+        }
     ).encode()
     return response
 
 
 class MockKnowledgeAPI:
-    """Explicit test double of the retrieval API, never a real knowledge file reader."""
-
     def retrieve(self, requirement, mode="hybrid"):
         assertions = {
             "basic": [{"field": "rows", "op": "count_range", "value": [10, 10]}],
@@ -111,8 +104,7 @@ def candidate(kind):
         {
             "用例目录": "销售 - 订单处理 - 销售订单",
             "用例名称": "Mock验收：" + RULES[kind],
-            "前置条件": "1. 已启用Mock查询服务，使用虚构订单数据，不连接真实ERP\n"
-            "2. 固定24条订单MOCK-ORDER-001至024，奇数订单状态1、偶数订单状态0，按编号升序",
+            "前置条件": "1. 已启用Mock查询服务，使用虚构订单数据，不连接真实ERP\n2. 固定24条订单MOCK-ORDER-001至024，奇数订单状态1、偶数订单状态0，按编号升序",
             "用例步骤": "1. 打开Mock订单查询测试入口\n" + steps[kind] + "\n3. 打开返回的订单列表并核对记录",
             "预期结果": "1. HTTP状态和业务状态码均为200\n" + expected[kind],
             "用例类型": "接口测试",

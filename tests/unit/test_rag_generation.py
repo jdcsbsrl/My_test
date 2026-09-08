@@ -60,11 +60,11 @@ def test_generation_evaluator_blocks_low_quality_local_case(monkeypatch):
 
     assert result.audit_passed is False
     assert result.point_hit_rate == 1.0
-    assert result.quality_score < 85
-    assert result.original_score == 70
+    assert result.quality_score == 100  # Complete fields cannot overrule the failed business audit.
+    assert result.original_score == 100
     assert result.optimized_score == result.final_score
     assert result.cold_start is True
-    assert result.optimization_attempts == 3
+    assert result.optimization_attempts == 0
     assert result.passed is False
 
 

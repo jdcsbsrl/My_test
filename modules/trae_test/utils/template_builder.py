@@ -56,6 +56,7 @@ RUNTIME_COVERAGE_FIELDS = {
 }
 RUNTIME_REGENERATION_FIELDS = {"count", "last_regenerated_at"}
 RUNTIME_FIELDS = {
+    "_runtime_rule_binding",
     "_runtime_quality",
     "_runtime_quality_version",
     "_runtime_coverage_matrix",
@@ -229,6 +230,10 @@ def validate_case_fields(case: Mapping[str, Any], item_label: str = "用例") ->
 
     if "_runtime_quality" in case:
         _validate_runtime_quality(case["_runtime_quality"])
+    if "_runtime_rule_binding" in case:
+        from .rule_contracts import validate_binding
+
+        validate_binding(case["_runtime_rule_binding"])
     if "_runtime_quality_version" in case and case["_runtime_quality_version"] != SCHEMA_VERSION:
         raise ValueError("_runtime_quality_version版本不匹配")
     if "_runtime_coverage_matrix" in case:
