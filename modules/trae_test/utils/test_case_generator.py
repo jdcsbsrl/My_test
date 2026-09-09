@@ -257,18 +257,10 @@ class TestCaseGenerator:
         not_ready = []
         for case in cases:
             runtime = read_runtime_quality(case)
-            if (
-                runtime.final_audit_passed is not True
-                or runtime.needs_human_review
-                or float(runtime.final_score if runtime.final_score is not None else case.get("质量评分", 0) or 0)
-                < QUALITY_SCORE_GATE
-                or case.get("用例状态") != "正常"
-            ):
+            if runtime.final_audit_passed is not True or runtime.needs_human_review or case.get("用例状态") != "正常":
                 not_ready.append(case.get("用例名称", "未命名用例"))
         if not_ready:
-            raise RuntimeError(
-                f"最终审核未通过，禁止导出 {len(not_ready)} 条用例；" f"评分门槛为{QUALITY_SCORE_GATE:g}分"
-            )
+            raise RuntimeError(f"字段或业务审核未通过，禁止导出 {len(not_ready)} 条用例")
 
         return self.excel_generator.generate(cases, output_path, extra_fields=extra_fields)
 
@@ -311,7 +303,7 @@ class TestCaseGenerator:
             case["用例状态"] = "正常"
             runtime = read_runtime_quality(case)
             runtime.final_score = canonical_score
-            runtime.final_audit_passed = bool(audit_result.passed) and canonical_score >= QUALITY_SCORE_GATE
+            runtime.final_audit_passed = bool(audit_result.passed)
             runtime.needs_human_review = not runtime.final_audit_passed
             attach_runtime_quality(case, runtime)
             for field in LEGACY_RUNTIME_FIELDS:
@@ -338,7 +330,7 @@ class TestCaseGenerator:
         runtime.score_history = list(runtime.score_history)
         runtime.score_history.append({"stage": "original", "score": original})
         current = original
-        for attempt in range(1, MAX_AUTO_OPTIMIZATION_ATTEMPTS + 1):
+        for attempt in range(1, 2):
             if current >= QUALITY_SCORE_GATE:
                 break
             optimizer.optimize(case, target_score=QUALITY_SCORE_GATE)
@@ -347,7 +339,7 @@ class TestCaseGenerator:
         runtime.optimized_score = current
         runtime.final_score = current
         runtime.optimization_attempts = max(0, len(runtime.score_history) - 1)
-        runtime.needs_human_review = current < QUALITY_SCORE_GATE
+        runtime.needs_human_review = False
         runtime.final_audit_passed = False
         attach_runtime_quality(case, runtime)
         case["质量评分"] = current

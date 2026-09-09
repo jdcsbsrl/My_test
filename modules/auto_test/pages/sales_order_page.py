@@ -1,5 +1,7 @@
 from typing import Any
 
+import re
+
 import allure
 from playwright.sync_api import Page, expect
 
@@ -347,15 +349,22 @@ class SalesOrderPage(BasePage):
 
         self.wait_for_page_settle(timeout=30000)
         search_requests: list[dict[str, str]] = []
-        capture_requests = False
+        # The store picker can submit the order query while the selection is
+        # being applied or when the picker closes. Capture from the beginning
+        # so those requests are not missed before the explicit search click.
+        capture_requests = True
 
         def record_order_request(request: Any) -> None:
             url = str(request.url or "")
-            if capture_requests and str(request.method or "").upper() == "POST":
+            method = str(request.method or "").upper()
+            if capture_requests and (
+                method in {"POST", "PUT", "PATCH"}
+                or any(marker in url.lower() for marker in ("order", "query", "search"))
+            ):
                 search_requests.append(
                     {
                         "url": url,
-                        "payload": str(request.post_data or ""),
+                        "payload": str(request.post_data or request.url or ""),
                     }
                 )
 
@@ -401,8 +410,55 @@ class SalesOrderPage(BasePage):
                 timeout=30000,
             )
 
-            selected = self.page.evaluate(
-                """
+            selected = {"found": False, "checked": False, "name": ""}
+            # Prefer Playwright's real checkbox interaction. Calling
+            # HTMLElement.click() from evaluate can change the visual state
+            # without dispatching the framework event that updates the store
+            # IDs used by the order-list request.
+            store_items = self.page.locator(".store-item:visible")
+            expected_normalized = re.sub(r"\s+", "", store_name).strip()
+            # The picker is multi-select and can retain a previous test's
+            # choice when the page context is reused. Clear other visible
+            # selections so the request contains exactly the requested store.
+            for index in range(store_items.count()):
+                item = store_items.nth(index)
+                try:
+                    item_name = (item.locator(".store-name").first.text_content() or "").strip()
+                    checkbox = item.locator('input[type="checkbox"]').first
+                    if (
+                        checkbox.count() > 0
+                        and checkbox.is_checked()
+                        and re.sub(r"\s+", "", item_name) != expected_normalized
+                    ):
+                        checkbox.uncheck(force=True)
+                except Exception:
+                    continue
+
+            for index in range(store_items.count()):
+                item = store_items.nth(index)
+                try:
+                    item_name = (item.locator(".store-name").first.text_content() or "").strip()
+                    if re.sub(r"\s+", "", item_name) != expected_normalized:
+                        continue
+                    checkbox = item.locator('input[type="checkbox"]').first
+                    if checkbox.count() > 0:
+                        if not checkbox.is_checked():
+                            checkbox.check(force=True)
+                        selected = {
+                            "found": True,
+                            "checked": checkbox.is_checked(),
+                            "name": item_name,
+                        }
+                    else:
+                        item.click(force=True)
+                        selected = {"found": True, "checked": True, "name": item_name}
+                    break
+                except Exception:
+                    continue
+
+            if not selected["found"]:
+                selected = self.page.evaluate(
+                    """
                 (expectedName) => {
                   const normalize = value => (value || '')
                     .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
@@ -421,12 +477,20 @@ class SalesOrderPage(BasePage):
                   const items = Array.from(document.querySelectorAll('.store-item')).filter(visible);
                   let item = items.find((candidate) => {
                     const name = candidate.querySelector('.store-name')?.textContent;
+                    return normalize(name) === expected;
+                  }) || items.find((candidate) => {
+                    const name = candidate.querySelector('.store-name')?.textContent;
                     return matches(name);
                   });
                   if (!item) {
-                    const textNode = Array.from(document.querySelectorAll('body *'))
+                    const visibleTextNodes = Array.from(document.querySelectorAll('body *'))
                       .filter(visible)
-                      .find(candidate => matches(candidate.textContent)
+                      .filter(candidate => !Array.from(candidate.children).some(child =>
+                        normalize(child.textContent) === expected));
+                    const textNode = visibleTextNodes.find(candidate =>
+                        normalize(candidate.textContent) === expected
+                        && !Array.from(candidate.children).some(child => matches(child.textContent)))
+                      || visibleTextNodes.find(candidate => matches(candidate.textContent)
                         && !Array.from(candidate.children).some(child => matches(child.textContent)));
                     item = textNode?.closest('.store-item, [role="option"], li, tr') || textNode;
                   }
@@ -443,18 +507,20 @@ class SalesOrderPage(BasePage):
                   };
                 }
                 """,
-                store_name,
-            )
+                    store_name,
+                )
             if not selected.get("found"):
                 raise AssertionError(f"店铺搜索无结果: name={store_name}, id={store_id}")
             if not selected.get("checked"):
                 raise AssertionError(f"店铺未成功选中: name={store_name}, id={store_id}")
 
             trigger.click()
+            # Allow the component's v-model/update cycle to commit the store
+            # ID before the search button reads its query payload.
+            self.page.wait_for_timeout(750)
             search_button = self.page.get_by_role("button", name="搜索", exact=True)
             search_button.wait_for(state="visible", timeout=10000)
             expect(search_button).to_be_enabled(timeout=60000)
-            capture_requests = True
             search_button.click()
             self.wait_for_loading_complete(timeout=60000)
             self.wait_for_table_data(timeout=60000)

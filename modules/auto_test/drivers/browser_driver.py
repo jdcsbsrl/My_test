@@ -34,8 +34,9 @@ def _runtime_video_dir(run_id: str | None = None, worker_id: str | None = None) 
 class BrowserDriver:
     """Manages Playwright lifecycle: one Browser, many contexts (test isolation)."""
 
-    def __init__(self, *, run_id: str | None = None, worker_id: str | None = None) -> None:
-        self.config = get_config()
+    def __init__(self, *, run_id: str | None = None, worker_id: str | None = None, config: Any | None = None) -> None:
+        """Create a browser driver bound to an explicit environment when supplied."""
+        self.config = config or get_config()
         self._playwright: Any = None
         self.browser: Browser | None = None
         self._contexts: list[BrowserContext] = []
@@ -162,7 +163,8 @@ class BrowserDriver:
                 errors.append(exc)
                 logger.exception("BrowserDriver: failed to close page")
 
-        if trace_path is not None or self._contains_context(self._tracing_contexts, context):
+        tracing_started = self._contains_context(self._tracing_contexts, context)
+        if tracing_started:
             try:
                 if trace_path is not None:
                     self._validate_trace_path(trace_path)
@@ -174,6 +176,10 @@ class BrowserDriver:
                 logger.exception("BrowserDriver: failed to save trace")
             finally:
                 self._discard_context(context, tracing=True)
+        elif trace_path is not None:
+            logger.warning(
+                "BrowserDriver: trace path provided for a context without active tracing; skipping trace stop"
+            )
         try:
             context.close()
         except Exception as exc:

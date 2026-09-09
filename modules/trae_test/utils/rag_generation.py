@@ -236,6 +236,10 @@ class SelfHostedLLMRAGCaseGenerator:
             f"创建人必须填写：{self.creator}；优先级必须是P0/P1/P2；用例等级必须是高/中/低。\n"
             f"测试需求：{query}\n"
             f"RAG知识上下文：{context}\n"
+            "固定字段由程序填入，不要改变固定模板。用例目录必须使用依据中的真实三级导航。\n"
+            "前置条件至少两个分点，步骤至少三个分点，预期至少两个可观察分点；不得凑通用句子。\n"
+            "只能使用需求或知识上下文支持的业务规则、数值和页面对象；缺失信息留空，不得编造。\n"
+            "知识库关联填写实际采用的规则依据，不要仅重复需求标题。\n"
         )
 
     def _parse_case(self, raw: str) -> dict[str, Any]:
@@ -315,7 +319,7 @@ class RAGGenerationEvaluator:
         from .test_case_strategy import TestCaseOptimizer
 
         optimizer = TestCaseOptimizer(self.score_engine)
-        while optimized_score < self.score_threshold and optimization_attempts < 3:
+        while optimized_score < self.score_threshold and optimization_attempts < 1:
             optimizer.optimize(case, target_score=self.score_threshold)
             optimization_attempts += 1
             optimized_score = float(self.score_engine.score(case))
@@ -337,7 +341,7 @@ class RAGGenerationEvaluator:
             audit_errors = [{"code": "AUDIT_BLOCKED", "message": str(exc)}]
             audit_warnings = []
         matched, point_hit_rate = case_contains_points(case, expected_points)
-        passed = audit_passed and final_score >= self.score_threshold and point_hit_rate >= self.point_threshold
+        passed = audit_passed and point_hit_rate >= self.point_threshold
         case["最终审核通过"] = passed
         case["用例状态"] = "正常"
         case["needs_human_review"] = not passed

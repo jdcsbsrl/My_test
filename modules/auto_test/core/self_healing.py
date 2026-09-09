@@ -194,6 +194,7 @@ class SelfHealingLocator:
         self.config = config or load_self_healing_config()
         self.env = env
         self.heal_count = 0
+        self.last_result: HealingResult | None = None
         self.history = SelfHealingHistoryStore(self.config.history_path)
         if SelfHealingLocator._breaker is None:
             SelfHealingLocator._breaker = SelfHealingCircuitBreaker(
@@ -245,11 +246,14 @@ class SelfHealingLocator:
     ) -> bool:
         started = time.time()
         result = self.locate(context, timeout=timeout)
+        self.last_result = result
         if result.locator is None:
             self._record_event(action, context, result, started)
             self._record_history(action, context, result)
             return False
-        if result.healed and self._is_high_risk_action(action):
+        if result.healed and self._is_high_risk_action(
+            " ".join([action, context.description or "", context.selector or "", *context.names, *context.selectors])
+        ):
             # High-risk business actions must fail visibly when their primary
             # locator is missing; a guessed fallback could mutate real data.
             result = HealingResult(
@@ -266,6 +270,19 @@ class SelfHealingLocator:
         try:
             operation(result.locator)
             if result.healed:
+                events = getattr(self.page, "_test_erp_healing_events", [])
+                if not isinstance(events, list):
+                    events = []
+                events.append(
+                    {
+                        "action": action,
+                        "original": context.selector,
+                        "replacement": result.selector,
+                        "strategy": result.strategy,
+                        "needs_review": True,
+                    }
+                )
+                self.page._test_erp_healing_events = events
                 self._attach_success(action, context, result)
                 self._record_event(action, context, result, started)
             self._record_history(action, context, result)
@@ -291,7 +308,21 @@ class SelfHealingLocator:
         action_name = action.lower()
         return any(
             keyword in action_name
-            for keyword in ("delete", "remove", "submit", "approve", "audit", "permission", "export")
+            for keyword in (
+                "delete",
+                "remove",
+                "submit",
+                "approve",
+                "audit",
+                "permission",
+                "export",
+                "删除",
+                "提交",
+                "审核",
+                "审批",
+                "授权",
+                "导出",
+            )
         )
 
     def _history_key(self, context: LocatorContext) -> str:

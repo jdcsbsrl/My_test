@@ -643,22 +643,124 @@ class SalesReportPage(BasePage):
         self.page.on("download", on_download)
         self.page.on("response", on_response)
         try:
-            clicked = self.page.evaluate("""() => {
+            # Depending on the deployed frontend, export choices are either
+            # rendered as direct buttons (for example "导出当前搜索结果") or
+            # exposed only after clicking a generic "导出" dropdown trigger.
+            # Keep the semantic menu names accepted by the tests while
+            # matching the concrete labels used by each frontend variant.
+            selected_menu_item = self.page.evaluate(
+                """(menuText) => {
                     const visible = (el) => {
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
                         return rect.width > 0 && rect.height > 0
                             && style.display !== 'none' && style.visibility !== 'hidden';
                     };
-                    const button = Array.from(document.querySelectorAll('button'))
-                        .filter(visible)
-                        .find((el) => (el.innerText || el.textContent || '').includes('导出'));
-                    if (!button) return false;
-                    button.click();
-                    return true;
-                }""")
-            if not clicked:
+                    const normalized = (value) => (value || '')
+                        .replace(/\\s+/g, '').trim();
+                    const aliases = {
+                        '当前页': ['当前页', '当前页面', '导出当前页', '导出当前页面'],
+                        '搜索条件': ['搜索条件', '按搜索条件', '当前搜索结果', '导出搜索条件', '导出当前搜索结果'],
+                        '当前搜索结果': ['当前搜索结果', '搜索条件', '导出当前搜索结果', '导出搜索条件'],
+                    };
+                    const requested = aliases[menuText] || [menuText];
+                    const candidates = Array.from(document.querySelectorAll(
+                        '[role="menuitem"], .el-dropdown-menu__item, .ant-dropdown-menu-item, button, li'
+                    )).filter(visible);
+                    const match = candidates.find((el) => {
+                        const text = normalized(el.innerText || el.textContent);
+                        return requested.some((name) => {
+                            const target = normalized(name);
+                            return text === target || text.includes(target);
+                        });
+                    });
+                    if (!match) return null;
+                    const text = (match.innerText || match.textContent || '').trim();
+                    match.click();
+                    return text;
+                }""",
+                menu_text,
+            )
+
+            # If no direct semantic button exists, open the export dropdown
+            # and resolve the option from the now-visible menu items.
+            if selected_menu_item is None:
+                button_clicked = self.page.evaluate("""() => {
+                        const visible = (el) => {
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            return rect.width > 0 && rect.height > 0
+                                && style.display !== 'none' && style.visibility !== 'hidden';
+                        };
+                        const buttons = Array.from(document.querySelectorAll('button'))
+                            .filter(visible);
+                        const button = buttons.find((el) =>
+                            (el.innerText || el.textContent || '').trim() === '导出'
+                        ) || buttons.find((el) =>
+                            (el.innerText || el.textContent || '').includes('导出')
+                        );
+                        if (!button) return false;
+                        button.click();
+                        return true;
+                    }""")
+            else:
+                button_clicked = True
+
+            if not button_clicked:
                 raise ValueError("Export button not found")
+
+            deadline = time.time() + min(timeout, 10000) / 1000
+            while time.time() < deadline and selected_menu_item is None:
+                selected_menu_item = self.page.evaluate(
+                    """(menuText) => {
+                        const visible = (el) => {
+                            const rect = el.getBoundingClientRect();
+                            const style = window.getComputedStyle(el);
+                            return rect.width > 0 && rect.height > 0
+                                && style.display !== 'none' && style.visibility !== 'hidden';
+                        };
+                        const aliases = {
+                            '当前页': ['当前页', '当前页面', '导出当前页', '导出当前页面'],
+                            '搜索条件': ['搜索条件', '按搜索条件', '当前搜索结果', '导出搜索条件', '导出当前搜索结果'],
+                            '当前搜索结果': ['当前搜索结果', '搜索条件', '导出当前搜索结果', '导出搜索条件'],
+                        };
+                        const requested = aliases[menuText] || [menuText];
+                        const candidates = Array.from(document.querySelectorAll(
+                            '[role="menuitem"], .el-dropdown-menu__item, .ant-dropdown-menu-item, li, button'
+                        )).filter(visible);
+                        const option = candidates.find((el) => {
+                            const text = (el.innerText || el.textContent || '').replace(/\\s+/g, '').trim();
+                            return requested.some((name) => {
+                                const target = name.replace(/\\s+/g, '').trim();
+                                return text === target || text.includes(target);
+                            });
+                        });
+                        if (!option) return null;
+                        const selected = (option.innerText || option.textContent || '').trim();
+                        option.click();
+                        return selected;
+                    }""",
+                    menu_text,
+                )
+                if selected_menu_item is None:
+                    self.page.wait_for_timeout(200)
+            if selected_menu_item is None:
+                menu_surface_count = self.page.evaluate("""() => Array.from(document.querySelectorAll(
+                        '[role="menuitem"], .el-dropdown-menu__item, .ant-dropdown-menu-item'
+                    )).filter((el) => {
+                        const rect = el.getBoundingClientRect();
+                        const style = window.getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none' && style.visibility !== 'hidden';
+                    }).length""")
+                # Some deployments expose only one direct "导出" action and
+                # do not render a menu at all. In that case the click above
+                # is the complete export flow; do not fail merely because the
+                # semantic menu label has no DOM counterpart.
+                if button_clicked and not menu_surface_count:
+                    selected_menu_item = "导出"
+                else:
+                    raise ValueError(f"Export menu option not found: {menu_text}")
             deadline = time.time() + timeout / 1000
             while time.time() < deadline:
                 if downloads:

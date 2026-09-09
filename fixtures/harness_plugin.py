@@ -247,18 +247,37 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     config = session.config
     state = _state(config)
     results = state.get("results", [])
-    summary = {"passed": 0, "failed": 0, "flaky_passed": 0, "categories": {}}
+    summary = {"passed": 0, "failed": 0, "skipped": 0, "flaky_passed": 0, "categories": {}}
+    latest = {}
     for result in results:
+        latest[result.get("nodeid")] = result
+    for result in latest.values():
         if result.get("status") == "flaky_passed":
             summary["flaky_passed"] += 1
         elif result.get("outcome") == "passed":
             summary["passed"] += 1
         elif result.get("outcome") == "failed":
             summary["failed"] += 1
+        elif result.get("outcome") == "skipped":
+            summary["skipped"] += 1
         category = result.get("failure_category")
         if category:
             summary["categories"][category] = summary["categories"].get(category, 0) + 1
-    summary.update({"exitstatus": exitstatus, "run_id": state.get("run_id"), "worker_id": _worker_id()})
+    incomplete = any(r.get("outcome") == "skipped" and r.get("critical") for r in latest.values())
+    all_skipped = bool(latest) and all(r.get("outcome") == "skipped" for r in latest.values())
+    if exitstatus == 0 and (incomplete or all_skipped):
+        session.exitstatus = 2
+        exitstatus = 2
+    summary.update(
+        {
+            "exitstatus": exitstatus,
+            "run_id": state.get("run_id"),
+            "worker_id": _worker_id(),
+            "verification_incomplete": incomplete or all_skipped,
+            "planned": getattr(session, "testscollected", len(latest)),
+            "executed": sum(r.get("outcome") in {"passed", "failed"} for r in latest.values()),
+        }
+    )
     try:
         _ensure_runtime_directories(config)
         with (_runtime_reports_dir(config) / "test-summary.json").open("w", encoding="utf-8") as stream:
@@ -283,7 +302,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
     outcome = yield
     report = outcome.get_result()
     setattr(item, f"rep_{report.when}", report)
-    if report.when != "call":
+    if report.when != "call" and not (report.failed or report.skipped):
         return
     state = _state(item.config)
     attempts = state["attempts"]
@@ -295,8 +314,19 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
         "nodeid": item.nodeid,
         "outcome": report.outcome,
         "attempt": count,
+        "phase": report.when,
+        "critical": any(name in item.keywords for name in ("p0", "core")),
         "failure_category": _classify_failure(report) if report.failed else None,
     }
+    healing_events = []
+    for value in getattr(item, "funcargs", {}).values():
+        events = getattr(value, "_test_erp_healing_events", None)
+        if isinstance(events, list):
+            healing_events.extend(event for event in events if event not in healing_events)
+    if healing_events:
+        payload["self_healing"] = healing_events
+        payload["needs_locator_review"] = True
+        report.user_properties.append(("self_healing_needs_review", "true"))
     if count > 1 and report.outcome == "passed":
         payload["status"] = "flaky_passed"
         report.user_properties.append(("flaky_passed", "true"))

@@ -38,16 +38,22 @@ def _summarize_env_vars(values: Mapping[object, object]) -> dict[str, dict[str, 
     return {str(key): _safe_var_metadata(value) for key, value in values.items()}
 
 
-def login_to_env(env: str, force: bool = False) -> dict:
+def login_to_env(env: str, force: bool = False, method: str = "api") -> dict:
     """登录到指定环境并返回不含认证字段的最小状态。"""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"登录 {env.upper()} 环境")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     try:
         # 验证环境
         validate_environment(env)
         print("✓ 环境验证通过")
+        if method == "browser":
+            from modules.auto_test.core.regression_session import regression_session
+
+            with regression_session(env, force_login=force):
+                print("✓ 浏览器会话验证通过（认证信息仅保留在当前进程）")
+            return {"success": True, "env": env}
 
         # 重置配置
         ConfigManager.reset()
@@ -105,6 +111,9 @@ def main():
         "--env", type=str, choices=["test", "uat", "all"], default="all", help="要登录的环境 (默认: all)"
     )
     parser.add_argument("--force", action="store_true", help="强制重新登录，忽略缓存的 token")
+    parser.add_argument(
+        "--method", choices=("browser", "api"), default="browser", help="默认用浏览器建立会话；api需要完整加密配置"
+    )
     parser.add_argument("--show-vars", action="store_true", help="显示获取到的环境变量")
 
     args = parser.parse_args()
@@ -115,15 +124,15 @@ def main():
     results = []
 
     if args.env == "all":
-        results.append(login_to_env("test", args.force))
-        results.append(login_to_env("uat", args.force))
+        results.append(login_to_env("test", args.force, args.method))
+        results.append(login_to_env("uat", args.force, args.method))
     else:
-        results.append(login_to_env(args.env, args.force))
+        results.append(login_to_env(args.env, args.force, args.method))
 
     # 显示结果汇总
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("登录结果汇总")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     for result in results:
         status = "✓ 成功" if result["success"] else "✗ 失败"
@@ -133,15 +142,15 @@ def main():
 
     # 显示环境变量
     if args.show_vars:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("环境变量")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         for key, metadata in _summarize_env_vars(get_env_vars()).items():
             print(f"{key}: exists={metadata['exists']}, length={metadata['length']}")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("完成")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     if not all(result["success"] for result in results):
         return 1

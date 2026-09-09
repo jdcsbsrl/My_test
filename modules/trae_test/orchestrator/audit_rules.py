@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # 默认 YAML 配置文件路径（相对于项目根目录）
 _DEFAULT_CONFIG_REL_PATH = "configs/audit_rules.yaml"
 
-# 评分契约：审核/生成链路统一引用，低于此值不得作为最终交付。
+# 结构参考分的提示线；不替代字段、业务内容或依据审核。
 FINAL_SCORE_THRESHOLD = 85.0
 COLD_START_EXECUTION_THRESHOLD = 10
 
@@ -291,6 +291,8 @@ class RuleManager:
             return True, ""
 
         valid_values = field_rule.get("valid_values", [])
+        if field_rule.get("fixed") and value != field_rule.get("default_value"):
+            return False, f"固定字段 '{field_name}' 不允许更改"
         if value in valid_values:
             return True, ""
 

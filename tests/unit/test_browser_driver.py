@@ -124,6 +124,7 @@ def test_close_context_stops_trace_when_path_is_given(monkeypatch):
     )
     driver = BrowserDriver()
     context = Mock()
+    driver._tracing_contexts = [context]
 
     driver.close_context(context, trace_path=".runtime/reports/traces/test.zip")
 
@@ -167,6 +168,7 @@ def test_close_context_closes_context_when_trace_save_fails(monkeypatch):
     )
     driver = BrowserDriver()
     context = Mock()
+    driver._tracing_contexts = [context]
     context.tracing.stop.side_effect = RuntimeError("trace failed")
 
     with pytest.raises(RuntimeError, match="teardown failed"):
@@ -182,9 +184,20 @@ def test_close_context_rejects_trace_path_outside_runtime(monkeypatch):
     )
     driver = BrowserDriver()
     context = Mock()
+    driver._tracing_contexts = [context]
 
     with pytest.raises(RuntimeError, match="teardown failed"):
         driver.close_context(context, trace_path="../outside.zip")
+
+    context.tracing.stop.assert_not_called()
+    context.close.assert_called_once_with()
+
+
+def test_close_context_skips_trace_when_context_was_not_started():
+    driver = BrowserDriver()
+    context = Mock()
+
+    driver.close_context(context, trace_path=".runtime/reports/traces/test.zip")
 
     context.tracing.stop.assert_not_called()
     context.close.assert_called_once_with()

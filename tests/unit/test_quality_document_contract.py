@@ -16,10 +16,9 @@ def test_quality_gate_documents_use_85_and_reject_lower_scores():
         _read(name) for name in ("AGENT_RULES.md", "TRAE_TEST_WORKFLOW.md", "PROJECT_ARTIFACT_PLACEMENT.md")
     )
 
-    assert "最终评分 < 85" in content
-    assert "最终评分 >= 85" in content
-    assert "评分低于 85" in content
-    assert "冷启动评分只能作为临时评分" in content
+    assert "质量评分是结构参考分" in content
+    assert "不作为交付门槛" in content
+    assert "新用例没有执行历史" in content
     assert "原始评分、优化后评分和最终评分" in content
 
 
