@@ -126,6 +126,7 @@ ignore = [
 per-file-ignores = { "__init__.py" = ["F401"], "modules/auto_test/testcases/**/*.py" = ["S101"], "testcases/**/*.py" = ["S101"] }
 
 [tool.mypy]
+cache_dir = ".runtime/cache/mypy"
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true

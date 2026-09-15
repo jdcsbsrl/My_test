@@ -10,7 +10,7 @@ authority: 项目强制规范
 
 ## 1. 适用范围
 
-本规范约束开发人员、AI Agent、测试脚本、构建脚本和 CI/CD 产生的文件。核心原则是：长期维护内容进入正式目录，运行时产物进入 `.runtime/`，最终交付文件进入 `workspace/YYYYMMDD/`，真实敏感数据只保留本地。
+本规范约束开发人员、AI Agent、测试脚本、构建脚本和 CI/CD 产生的文件。核心原则是：长期维护内容进入正式目录，运行时产物进入 `.runtime/`，最终交付文件进入 `workspace/YYYYMMDD/`。
 
 ## 2. 顶层目录总表
 
@@ -69,9 +69,7 @@ cache downloads logs reports scripts sheet_build uploads
 固定、不可变、被代码直接引用的样本和模板放 `fixtures/`；可变、按环境或场景切换的输入放 `data/`。`data/test_accounts/` 只允许脱敏样例。真实数据统一放 `data/private/`，该目录被 Git 忽略，不提交。
 
 ## 9. 敏感数据
-
-账号、Token、Cookie、订单号、SKU、客户信息、内网地址、真实业务规则和真实测试结果均为敏感数据。真实内容只保留本地，提交内容必须脱敏。`.env`、`data/private/`、`assets/knowledge_base/`、`.runtime/`、`workspace/`、`.venv/`、`browsers/` 默认不提交。
-
+`.env`、`data/private/`、`assets/knowledge_base/`、`.runtime/`、`workspace/`、`.venv/`、`browsers/` 默认不提交。
 ## 10. 根目录例外登记
 
 工具强制要求的根文件可以例外保留，但必须登记在本文件的“根目录例外登记表”中，并填写文件名、所属工具、保留原因、是否被 CI 使用、是否可迁移。本表由 `project_structure_auditor.py` 解析；修改列结构必须同步更新审核器和单元测试。

@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any
 
-from .template_builder import ALL_FIELDS
+from .template_builder import ALL_FIELDS, FIXED_CASE_CREATOR
 from .test_case_strategy import TestCaseScenario
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class TestCaseStyleFormatter:
         case["用例类型"] = self._format_case_type(scenario)
         case["用例状态"] = "正常"
         case["用例等级"] = scenario.case_level
-        case["创建人"] = "余小龙"
+        case["创建人"] = FIXED_CASE_CREATOR
         case["优先级"] = scenario.priority
         case["是否可自动化"] = scenario.automation_flag
         case["回归测试标识"] = self._format_regression_flag(scenario)

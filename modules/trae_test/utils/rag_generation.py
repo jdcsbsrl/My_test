@@ -18,10 +18,11 @@ from modules.trae_test.orchestrator.audit_gateway import AuditGateway
 from modules.trae_test.orchestrator.config import AuditConfig
 
 from .knowledge_retriever import KnowledgeRetriever
-from .template_builder import ALL_FIELDS
+from .template_builder import ALL_FIELDS, FIXED_CASE_CREATOR
 from .test_case_strategy import TestCaseScoreEngine, TestCaseStrategy
 
-DEFAULT_CASE_CREATOR = "余小龙"
+# 保留旧名称供外部导入兼容；实际生成统一使用模板契约中的固定值。
+DEFAULT_CASE_CREATOR = FIXED_CASE_CREATOR
 DEFAULT_LLM_TIMEOUT = 60
 DEFAULT_LLM_MODEL = "local-rag-generator"
 QUALITY_SCORE_GATE = 85.0
@@ -115,7 +116,8 @@ class LocalRuleRAGCaseGenerator:
 
     def __init__(self, retriever: KnowledgeRetriever | None = None, creator: str | None = None) -> None:
         self.retriever = retriever or KnowledgeRetriever()
-        self.creator = creator or os.getenv("RAG_TEST_CASE_CREATOR", DEFAULT_CASE_CREATOR)
+        # creator 参数和历史环境变量仅为兼容旧调用方，不能覆盖固定创建人。
+        self.creator = FIXED_CASE_CREATOR
 
     def generate_case(self, query: str) -> dict[str, Any]:
         retrieved = self.retriever.retrieve(query, mode="hybrid")
@@ -172,7 +174,8 @@ class SelfHostedLLMRAGCaseGenerator:
         self.retriever = retriever or KnowledgeRetriever()
         self.endpoint = endpoint or os.getenv("RAG_LLM_ENDPOINT", "")
         self.timeout = timeout or int(os.getenv("RAG_LLM_TIMEOUT", str(DEFAULT_LLM_TIMEOUT)))
-        self.creator = creator or os.getenv("RAG_TEST_CASE_CREATOR", DEFAULT_CASE_CREATOR)
+        # creator 参数和历史环境变量仅为兼容旧调用方，不能覆盖固定创建人。
+        self.creator = FIXED_CASE_CREATOR
         self.api_style = LLMAPIStyle(api_style or os.getenv("RAG_LLM_API_STYLE", LLMAPIStyle.GENERIC.value))
         self.model = model or os.getenv("RAG_LLM_MODEL", DEFAULT_LLM_MODEL)
         if not self.endpoint:
@@ -252,7 +255,8 @@ class SelfHostedLLMRAGCaseGenerator:
             data = data["case"]
         if not isinstance(data, dict):
             raise ValueError("LLM response must be a JSON object")
-        data["创建人"] = data.get("创建人") or self.creator
+        # 模型返回值也必须被固定字段处理覆盖，避免候选内容改变创建人。
+        data["创建人"] = FIXED_CASE_CREATOR
         return {field: data.get(field, "") for field in ALL_FIELDS}
 
     @staticmethod

@@ -16,7 +16,7 @@ from .dir_validator import _load_module_hierarchy
 from .excel_generator import ExcelGenerator
 from .knowledge_retriever import KnowledgeRetriever
 from .runtime_quality import attach_runtime_quality, read_runtime_quality
-from .template_builder import LEGACY_RUNTIME_FIELDS, ensure_template
+from .template_builder import FIXED_CASE_CREATOR, LEGACY_RUNTIME_FIELDS, ensure_template
 from .test_case_strategy import TestCaseOptimizer, TestCaseScoreEngine, TestCaseStrategy
 from .coverage_matrix import CoverageMatrix, build_requirement_coverage_matrix
 
@@ -182,7 +182,7 @@ class TestCaseGenerator:
             "用例类型": "功能测试",
             "用例状态": "正常",
             "用例等级": case_level,
-            "创建人": "余小龙",
+            "创建人": FIXED_CASE_CREATOR,
             "优先级": priority_p,
             "是否可自动化": "是",
             "回归测试标识": "否",

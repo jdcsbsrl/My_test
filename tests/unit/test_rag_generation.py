@@ -38,6 +38,13 @@ def test_local_rule_generator_returns_15_standard_fields(monkeypatch):
     assert "客户余额" in case["预期结果"]
 
 
+def test_creator_is_fixed_even_when_parameter_and_environment_try_to_override(monkeypatch):
+    monkeypatch.setenv("RAG_TEST_CASE_CREATOR", "闫海燕")
+    generator = LocalRuleRAGCaseGenerator(retriever=StubRetriever(), creator="其他人")
+
+    assert generator.generate_case("客户余额不足能否付款")["创建人"] == "余小龙"
+
+
 def test_case_contains_points_scores_expected_points():
     matched, hit_rate = case_contains_points(
         {"用例名称": "测试余额付款", "预期结果": "余额付款约束；客户余额不足时不能付款"},
@@ -111,6 +118,18 @@ def test_self_hosted_llm_provider_parses_15_field_case(monkeypatch):
     assert list(case.keys()) == ALL_FIELDS
     assert case["创建人"] == "余小龙"
     assert case["需求ID"] == ""
+
+
+def test_self_hosted_llm_creator_is_overwritten_by_fixed_value(monkeypatch):
+    monkeypatch.setenv("TEST_ENV", "test")
+    provider = SelfHostedLLMRAGCaseGenerator(
+        retriever=StubRetriever(),
+        endpoint="http://127.0.0.1:11434/generate",
+        creator="闫海燕",
+    )
+    case = provider._parse_case(json.dumps({"创建人": "模型指定的人"}, ensure_ascii=False))
+
+    assert case["创建人"] == "余小龙"
 
 
 def test_self_hosted_llm_provider_builds_ollama_payload(monkeypatch):

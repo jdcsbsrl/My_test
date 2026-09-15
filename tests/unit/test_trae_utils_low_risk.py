@@ -7,8 +7,15 @@ from modules.trae_test.utils import dir_validator
 from modules.trae_test.utils.business_rule_parser import BusinessRuleParser, parse_knowledge
 from modules.trae_test.utils.excel_generator import ExcelGenerator
 from modules.trae_test.utils.metadata_manager import MetadataManager
-from modules.trae_test.utils.template_builder import ALL_FIELDS, ensure_template, get_default_template_path
+from modules.trae_test.utils.template_builder import (
+    ALL_FIELDS,
+    FIXED_CASE_CREATOR,
+    ensure_template,
+    get_default_template_path,
+)
 from modules.trae_test.utils.test_case_generator import TestCaseGenerator
+from modules.trae_test.utils.test_case_strategy import TestCaseScenario as ScenarioUnderTest
+from modules.trae_test.utils.test_case_style_formatter import TestCaseStyleFormatter as FormatterUnderTest
 from modules.trae_test.utils.workspace_manager import WorkspaceManager
 
 pytestmark = pytest.mark.unit
@@ -23,6 +30,21 @@ def _case(**overrides):
 def test_directory_matching_uses_leaf_menu_to_resolve_full_hierarchy():
     hierarchy = {"产品": {"产品中心": ["主SKU", "库存SKU"]}}
     assert TestCaseGenerator._match_case_directory("库存SKU 批量加入采购计划", hierarchy) == "产品 - 产品中心 - 库存SKU"
+
+
+def test_empty_case_creator_is_fixed():
+    assert ExcelGenerator.create_empty_case(creator="闫海燕")["创建人"] == FIXED_CASE_CREATOR
+
+
+def test_style_formatter_uses_fixed_case_creator():
+    scenario = ScenarioUnderTest(
+        scenario_type="normal",
+        module="销售",
+        page_path="销售/订单",
+        case_name="创建订单",
+    )
+
+    assert FormatterUnderTest().format(scenario)["创建人"] == FIXED_CASE_CREATOR
 
 
 class TestBusinessRuleParser:
