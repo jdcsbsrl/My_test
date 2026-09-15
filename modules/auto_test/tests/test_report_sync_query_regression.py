@@ -14,7 +14,6 @@ from modules.auto_test.api.report_sync_query_api import (
     ReportSyncQueryAPI,
 )
 
-
 _TIME_FIELDS = ("sendDate", "platformShipTime", "storeDate")
 _TRANSSTOCKUP_ALIASES = ("transstockupTime", "transStockupTime")
 _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
@@ -95,13 +94,13 @@ def _assert_new_time_field_contract(orders: list[dict]) -> None:
         present_aliases = [field for field in _TRANSSTOCKUP_ALIASES if field in row]
         assert present_aliases, f"row {index} missing transstockupTime/transStockupTime"
         if len(present_aliases) == 2:
-            assert row[present_aliases[0]] == row[present_aliases[1]], (
-                f"row {index} has conflicting transstockupTime aliases"
-            )
+            assert (
+                row[present_aliases[0]] == row[present_aliases[1]]
+            ), f"row {index} has conflicting transstockupTime aliases"
         trans_value = row[present_aliases[0]]
-        assert trans_value is None or isinstance(trans_value, str), (
-            f"row {index} field {present_aliases[0]} has invalid type"
-        )
+        assert trans_value is None or isinstance(
+            trans_value, str
+        ), f"row {index} field {present_aliases[0]} has invalid type"
         if isinstance(trans_value, str) and trans_value:
             datetime.strptime(trans_value, _TIME_FORMAT)
             non_empty["transstockupTime"] += 1
