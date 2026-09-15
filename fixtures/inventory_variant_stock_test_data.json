@@ -1,0 +1,128 @@
+{
+  "storeId": "2083105892576489473",
+  "customerId": "2067079642879848450",
+  "productId": "8127531548774",
+  "title": "Inventory_sync",
+  "variants": [
+    {
+      "variantId": "46501778554982",
+      "platformSku": "Inventory_sync_00245",
+      "itemId": "DWOYX-LH002",
+      "skuColorSize": "Violet / XXXXL / 5"
+    },
+    {
+      "variantId": "46501778522214",
+      "platformSku": "Inventory_sync_00244",
+      "itemId": "Merge003",
+      "skuColorSize": "Violet / XXXXL / 4"
+    },
+    {
+      "variantId": "46501778489446",
+      "platformSku": "Inventory_sync_00243",
+      "itemId": "DWOYX-LH034",
+      "skuColorSize": "Violet / XXXXL / 3"
+    },
+    {
+      "variantId": "46501778456678",
+      "platformSku": "Inventory_sync_00242",
+      "itemId": "DWOYX-LI001",
+      "skuColorSize": "Violet / XXXXL / 2"
+    },
+    {
+      "variantId": "46501778423910",
+      "platformSku": "Inventory_sync_00241",
+      "itemId": "DWOYX-LC001",
+      "skuColorSize": "Violet / XXXXL / 8"
+    },
+    {
+      "variantId": "46501778391142",
+      "platformSku": "Inventory_sync_00240",
+      "itemId": "DWOYX-LB001",
+      "skuColorSize": "Violet / XXXL / 5"
+    },
+    {
+      "variantId": "46501778358374",
+      "platformSku": "Inventory_sync_00239",
+      "itemId": "DWOYX-LB002",
+      "skuColorSize": "Violet / XXXL / 4"
+    },
+    {
+      "variantId": "46501778325606",
+      "platformSku": "Inventory_sync_00238",
+      "itemId": "DWOYX-LC002",
+      "skuColorSize": "Violet / XXXL / 3"
+    },
+    {
+      "variantId": "46501778292838",
+      "platformSku": "Inventory_sync_00237",
+      "itemId": "DWOYX-LJ002",
+      "skuColorSize": "Violet / XXXL / 2"
+    },
+    {
+      "variantId": "46501778260070",
+      "platformSku": "Inventory_sync_00236",
+      "itemId": "DWOYX-LA001",
+      "skuColorSize": "Violet / XXXL / 8"
+    },
+    {
+      "variantId": "46501778227302",
+      "platformSku": "Inventory_sync_00235",
+      "itemId": "DWOYX-LD007",
+      "skuColorSize": "Violet / XXL / 5"
+    },
+    {
+      "variantId": "46501778194534",
+      "platformSku": "Inventory_sync_00234",
+      "itemId": "DWOYX-LD002",
+      "skuColorSize": "Violet / XXL / 4"
+    },
+    {
+      "variantId": "46501778161766",
+      "platformSku": "Inventory_sync_00233",
+      "itemId": "DWOYX-LE007",
+      "skuColorSize": "Violet / XXL / 3"
+    },
+    {
+      "variantId": "46501778128998",
+      "platformSku": "Inventory_sync_00232",
+      "itemId": "DWOYX-LE013",
+      "skuColorSize": "Violet / XXL / 2"
+    },
+    {
+      "variantId": "46501778096230",
+      "platformSku": "Inventory_sync_00231",
+      "itemId": "DWOYX-LF001",
+      "skuColorSize": "Violet / XXL / 8"
+    },
+    {
+      "variantId": "46501778063462",
+      "platformSku": "Inventory_sync_00230",
+      "itemId": "DWOYX-LG001",
+      "skuColorSize": "Violet / XL / 5"
+    },
+    {
+      "variantId": "46501778030694",
+      "platformSku": "Inventory_sync_00229",
+      "itemId": "Merge001",
+      "skuColorSize": "Violet / XL / 4"
+    },
+    {
+      "variantId": "46501777997926",
+      "platformSku": "Inventory_sync_00228",
+      "itemId": "Merge002",
+      "skuColorSize": "Violet / XL / 3"
+    },
+    {
+      "variantId": "46501777965158",
+      "platformSku": "Inventory_sync_00227",
+      "itemId": "DWOYX-LC001",
+      "skuColorSize": "Violet / XL / 2"
+    },
+    {
+      "variantId": "46501777932390",
+      "platformSku": "Inventory_sync_00226",
+      "itemId": "DWOYX-LB002",
+      "skuColorSize": "Violet / XL / 8"
+    }
+  ]
+}
