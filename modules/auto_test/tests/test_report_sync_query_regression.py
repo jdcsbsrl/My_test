@@ -15,6 +15,11 @@ from modules.auto_test.api.report_sync_query_api import (
 )
 
 
+_TIME_FIELDS = ("sendDate", "platformShipTime", "storeDate")
+_TRANSSTOCKUP_ALIASES = ("transstockupTime", "transStockupTime")
+_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
 def _lookback_minutes() -> list[int]:
     """Return adaptive windows, defaulting from one hour down to five minutes."""
     raw_minutes = os.getenv("REPORT_SYNC_LOOKBACK_MINUTES", "").strip()
@@ -68,6 +73,42 @@ def _orders_with_adaptive_window(api: ReportSyncQueryAPI, payload: dict) -> tupl
     raise AssertionError("报告查询在所有自适应时间窗口均未得到可用订单: " + ",".join(attempts))
 
 
+def _assert_new_time_field_contract(orders: list[dict]) -> None:
+    """Validate the requirement-1002990 fields on real report rows.
+
+    ``storeDate`` is a retained historical field.  Its presence and value
+    type are checked, but an empty value is valid and must not be interpreted
+    as a signing time.  The stock-up field accepts the interface spelling
+    ``transStockupTime`` and the legacy consumer spelling ``transstockupTime``.
+    """
+    non_empty: dict[str, int] = {field: 0 for field in (*_TIME_FIELDS, "transstockupTime")}
+
+    for index, row in enumerate(orders, start=1):
+        for field in _TIME_FIELDS:
+            assert field in row, f"row {index} missing required field {field}"
+            value = row[field]
+            assert value is None or isinstance(value, str), f"row {index} field {field} has invalid type"
+            if isinstance(value, str) and value:
+                datetime.strptime(value, _TIME_FORMAT)
+                non_empty[field] += 1
+
+        present_aliases = [field for field in _TRANSSTOCKUP_ALIASES if field in row]
+        assert present_aliases, f"row {index} missing transstockupTime/transStockupTime"
+        if len(present_aliases) == 2:
+            assert row[present_aliases[0]] == row[present_aliases[1]], (
+                f"row {index} has conflicting transstockupTime aliases"
+            )
+        trans_value = row[present_aliases[0]]
+        assert trans_value is None or isinstance(trans_value, str), (
+            f"row {index} field {present_aliases[0]} has invalid type"
+        )
+        if isinstance(trans_value, str) and trans_value:
+            datetime.strptime(trans_value, _TIME_FORMAT)
+            non_empty["transstockupTime"] += 1
+
+    print(f"[report_sync][new_time_fields] rows={len(orders)} non_empty={non_empty}")
+
+
 @pytest.mark.regression
 @pytest.mark.api
 @pytest.mark.p1
@@ -79,6 +120,7 @@ def test_report_sync_query_full_regression(authenticated_http_client, api_base_u
     assert len(order_nos) == len(set(order_nos)), "duplicate orders returned"
     assert ids == sorted(ids), "order ids are not ascending"
     assert all(row.get("orderNo") for row in orders)
+    _assert_new_time_field_contract(orders)
 
     sample = next((row for row in orders if row.get("customerNo")), orders[0])
     checks = {
