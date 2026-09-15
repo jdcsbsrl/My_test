@@ -68,17 +68,33 @@ class KnowledgeBaseManager:
                     result["content"].append({"filename": filename, "size": size, "size_kb": round(size / 1024, 2)})
 
         if os.path.exists(self.monitor.INDEX_DIR):
-            for filename in os.listdir(self.monitor.INDEX_DIR):
-                if filename.endswith(".json"):
-                    file_path = os.path.join(self.monitor.INDEX_DIR, filename)
+            for root, _, filenames in os.walk(self.monitor.INDEX_DIR):
+                for filename in filenames:
+                    if not filename.endswith((".json", ".gz")):
+                        continue
+                    file_path = os.path.join(root, filename)
+                    relative_path = os.path.relpath(file_path, self.monitor.INDEX_DIR).replace(os.sep, "/")
                     size = os.path.getsize(file_path)
-                    result["index"].append({"filename": filename, "size": size, "size_kb": round(size / 1024, 2)})
+                    result["index"].append({"filename": relative_path, "size": size, "size_kb": round(size / 1024, 2)})
+
+        for files in result.values():
+            if isinstance(files, list):
+                files.sort(key=lambda item: item["filename"])
 
         result["summary"] = {
             "original_count": len(result["original"]),
             "content_count": len(result["content"]),
             "index_count": len(result["index"]),
+            "original_size_kb": round(sum(file["size"] for file in result["original"]) / 1024, 2),
+            "content_size_kb": round(sum(file["size"] for file in result["content"]) / 1024, 2),
+            "index_size_kb": round(sum(file["size"] for file in result["index"]) / 1024, 2),
         }
+        result["summary"]["total_size_kb"] = round(
+            result["summary"]["original_size_kb"]
+            + result["summary"]["content_size_kb"]
+            + result["summary"]["index_size_kb"],
+            2,
+        )
 
         return result
 
@@ -515,9 +531,10 @@ def print_list_files(result: Dict):
         print("  (无)")
 
     print("\n【摘要】")
-    print(f"  原始文件: {result['summary']['original_count']} 个")
-    print(f"  内容块: {result['summary']['content_count']} 个")
-    print(f"  索引文件: {result['summary']['index_count']} 个")
+    print(f"  原始文件: {result['summary']['original_count']} 个，{result['summary']['original_size_kb']} KB")
+    print(f"  内容块: {result['summary']['content_count']} 个，{result['summary']['content_size_kb']} KB")
+    print(f"  索引文件: {result['summary']['index_count']} 个，{result['summary']['index_size_kb']} KB")
+    print(f"  知识库总占用: {result['summary']['total_size_kb']} KB")
 
 
 def print_split_result(result: Dict):
