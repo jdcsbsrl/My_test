@@ -49,6 +49,15 @@ MODULE_TAG_MAP: dict[str, list[str]] = {
 MODULE_NAMES: list[str] = list(MODULE_TAG_MAP.keys())
 DB_SEARCH_LIMIT = 50  # 数据库检索单表最大返回条数
 _REGISTRY_REFRESH_INTERVAL = 3600  # 注册表刷新间隔（秒）
+LIFECYCLE_STATUS_PRIORITY: dict[str, int] = {
+    "active": 0,
+    "legacy": 1,
+    "unknown": 2,
+    "deprecated": 3,
+    "superseded": 4,
+    "draft": 5,
+}
+LIFECYCLE_STATUSES = frozenset({"draft", "active", "deprecated", "superseded"})
 
 
 class KnowledgeRetriever:
@@ -417,14 +426,47 @@ class KnowledgeRetriever:
         logger.info("页面检索完成，关键词'%s'匹配到%d条结果", page_name, len(results))
         return results
 
-    def search_business_rules(self, keyword: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def _get_lifecycle_metadata(rule: Any) -> tuple[str, str]:
+        """Return a safe lifecycle label and its provenance for one rule.
+
+        Missing status is deliberately treated as ``legacy`` so existing
+        knowledge remains searchable.  An explicit but unsupported value is
+        surfaced as ``unknown`` rather than silently treated as active.
+        """
+        if not isinstance(rule, dict) or "status" not in rule:
+            return "legacy", "missing"
+        status = rule.get("status")
+        if isinstance(status, str) and status.strip() in LIFECYCLE_STATUSES:
+            return status.strip(), "explicit"
+        return "unknown", "explicit_invalid"
+
+    @staticmethod
+    def _lifecycle_result_allowed(status: str, include_history: bool, include_draft: bool) -> bool:
+        if status == "draft":
+            return include_draft
+        if status == "superseded":
+            return include_history
+        return True
+
+    def search_business_rules(
+        self,
+        keyword: str,
+        *,
+        include_history: bool = False,
+        include_draft: bool = False,
+    ) -> list[dict[str, Any]]:
         """按关键词检索业务规则（按需加载，避免全量预加载）
 
         Args:
             keyword: 搜索关键词
+            include_history: 显式包含已替代（superseded）规则；deprecated
+                规则默认可见但排序靠后
+            include_draft: 显式包含草稿规则；不会因 include_history 自动包含
 
         Returns:
-            匹配的业务规则列表
+            匹配的业务规则列表。每项均包含 lifecycle_status 和
+            status_source，分别表示有效生命周期标签和标签来源。
         """
         if not keyword:
             return []
@@ -452,6 +494,7 @@ class KnowledgeRetriever:
                     for file_info in self._rule_file_index
                     if any(
                         name.startswith(os.path.splitext(os.path.basename(file_info["original_path"]))[0])
+                        or name == os.path.basename(file_info.get("original_path", ""))
                         for name in source_names
                     )
                 ]
@@ -466,26 +509,56 @@ class KnowledgeRetriever:
             )
             candidate_files = self._rule_file_index
 
-        results: list[dict[str, Any]] = []
-        for file_info in candidate_files:
-            content = self._load_file_content(file_info)
-            if not content:
-                continue
-            rules = self._rule_extractor.extract_rules(content)
-            for rule in rules:
-                if self._rule_extractor.match_keyword_in_rule(rule, keyword):
-                    result_item: dict[str, Any] = {
-                        "file_id": file_info["file_id"],
-                        "file_title": file_info["title"],
-                        "module": file_info["classification"],
-                    }
-                    if isinstance(rule, dict):
-                        result_item.update(rule)
-                    else:
-                        result_item["rule"] = rule
-                    results.append(result_item)
+        def collect_matching_rules(files: list[dict[str, Any]]) -> list[tuple[int, int, dict[str, Any]]]:
+            matches: list[tuple[int, int, dict[str, Any]]] = []
+            for file_info in files:
+                content = self._load_file_content(file_info)
+                if not content:
+                    continue
+                rules = self._rule_extractor.extract_rules(content)
+                for rule_index, rule in enumerate(rules):
+                    if self._rule_extractor.match_keyword_in_rule(rule, keyword):
+                        lifecycle_status, status_source = self._get_lifecycle_metadata(rule)
+                        if not self._lifecycle_result_allowed(lifecycle_status, include_history, include_draft):
+                            continue
+                        result_item: dict[str, Any] = {
+                            "file_id": file_info["file_id"],
+                            "file_title": file_info["title"],
+                            "module": file_info["classification"],
+                        }
+                        if isinstance(rule, dict):
+                            result_item.update(rule)
+                        else:
+                            result_item["rule"] = rule
+                        # Put lifecycle metadata after rule expansion so a
+                        # malformed rule cannot spoof the result annotation.
+                        result_item["lifecycle_status"] = lifecycle_status
+                        result_item["status_source"] = status_source
+                        matches.append(
+                            (
+                                LIFECYCLE_STATUS_PRIORITY.get(lifecycle_status, LIFECYCLE_STATUS_PRIORITY["unknown"]),
+                                rule_index,
+                                result_item,
+                            )
+                        )
+            return matches
 
-        return results
+        results = collect_matching_rules(candidate_files)
+        if not results:
+            candidate_ids = {file_info["file_id"] for file_info in candidate_files}
+            remaining_files = [
+                file_info for file_info in self._rule_file_index if file_info["file_id"] not in candidate_ids
+            ]
+            if remaining_files:
+                logger.info(
+                    "关键词 '%s' 的候选文件未命中规则，降级扫描剩余 %d 个已登记规则文件",
+                    keyword,
+                    len(remaining_files),
+                )
+                results = collect_matching_rules(remaining_files)
+
+        results.sort(key=lambda item: (item[0], item[1]))
+        return [item[2] for item in results]
 
     def search_requirements(self, keyword: str = "", module: str = "") -> list[dict[str, Any]]:
         """检索需求清单（保持向后兼容）
@@ -710,7 +783,14 @@ class KnowledgeRetriever:
         results.sort(key=lambda item: item.get("hybrid_score", 0), reverse=True)
         return results[:top_k]
 
-    def retrieve(self, keyword: str, mode: str = "auto") -> Any:
+    def retrieve(
+        self,
+        keyword: str,
+        mode: str = "auto",
+        *,
+        include_history: bool = False,
+        include_draft: bool = False,
+    ) -> Any:
         """智能检索接口 - 按关键词检索知识库内容
 
         Args:
@@ -722,6 +802,8 @@ class KnowledgeRetriever:
                 - "requirements": 检索需求清单
                 - "semantic": 语义检索（显式启用）
                 - "hybrid": 倒排 + 语义混合检索（显式启用）
+            include_history: rules/auto 模式是否包含 superseded 规则
+            include_draft: rules/auto 模式是否包含 draft 规则
 
         Returns:
             检索结果
@@ -743,6 +825,12 @@ class KnowledgeRetriever:
             return None
 
         if mode == "rules":
+            if include_history or include_draft:
+                return self.search_business_rules(
+                    keyword,
+                    include_history=include_history,
+                    include_draft=include_draft,
+                )
             return self.search_business_rules(keyword)
 
         if mode == "requirements":
@@ -755,11 +843,12 @@ class KnowledgeRetriever:
             return self.retrieve_hybrid(keyword)
 
         # auto 模式
-        cache_result = self._search_cache(keyword, mode="auto")
+        lifecycle_expanded = include_history or include_draft
+        cache_result = None if lifecycle_expanded else self._search_cache(keyword, mode="auto")
         if cache_result is not None:
             return cache_result
 
-        db_result = self._search_db(keyword)
+        db_result = None if lifecycle_expanded else self._search_db(keyword)
         if db_result is not None:
             self._set_search_cache(keyword, db_result, mode="auto")
             return db_result
@@ -774,7 +863,14 @@ class KnowledgeRetriever:
                     break
 
         if not result:
-            result = self.search_business_rules(keyword)
+            if lifecycle_expanded:
+                result = self.search_business_rules(
+                    keyword,
+                    include_history=include_history,
+                    include_draft=include_draft,
+                )
+            else:
+                result = self.search_business_rules(keyword)
         if not result:
             result = self.search_requirements(keyword=keyword)
         if not result and ("流程" in keyword or "链路" in keyword):
@@ -782,12 +878,19 @@ class KnowledgeRetriever:
         if not result:
             result = self.search_by_inverted_index(keyword)
 
-        if result:
+        if result and not lifecycle_expanded:
             self._set_search_cache(keyword, result, mode="auto")
 
         return result or None
 
-    def batch_retrieve(self, keywords: list[str], mode: str = "auto") -> dict[str, Any]:
+    def batch_retrieve(
+        self,
+        keywords: list[str],
+        mode: str = "auto",
+        *,
+        include_history: bool = False,
+        include_draft: bool = False,
+    ) -> dict[str, Any]:
         """批量检索接口
 
         Args:
@@ -799,7 +902,12 @@ class KnowledgeRetriever:
         """
         results: dict[str, Any] = {}
         for kw in keywords:
-            results[kw] = self.retrieve(kw, mode)
+            results[kw] = self.retrieve(
+                kw,
+                mode,
+                include_history=include_history,
+                include_draft=include_draft,
+            )
         return results
 
     # ── 统计信息 ─────────────────────────────────────────────────
@@ -1073,6 +1181,12 @@ class KnowledgeRetriever:
         results: list[dict[str, Any]] = []
 
         for entry in entries:
+            if entry.get("source_type") == "original":
+                original_result = self._load_original_index_detail(entry)
+                if original_result:
+                    results.append(original_result)
+                continue
+
             source_file = entry.get("source_file", "")
             chunk_path = os.path.join(chunks_dir, source_file)
 
@@ -1094,6 +1208,42 @@ class KnowledgeRetriever:
                     logger.error("加载chunk失败 %s: %s", source_file, e)
 
         return results
+
+    def _load_original_index_detail(self, entry: dict[str, Any]) -> dict[str, Any] | None:
+        """Resolve a logical original-file index entry through metadata and repository APIs."""
+        file_info = self._get_file_by_id(entry.get("file_id", ""))
+        source_file = entry.get("source_file", "")
+        if not file_info and source_file:
+            registry_files = (self._registry or {}).get("files", {})
+            file_info = next(
+                (
+                    info
+                    for info in registry_files.values()
+                    if os.path.basename(info.get("original_path", "")) == source_file
+                ),
+                None,
+            )
+        if not file_info:
+            logger.warning("无法解析倒排索引原始文件条目: %s", entry.get("chunk_id", ""))
+            return None
+
+        content = self._load_file_content(file_info)
+        if content is None:
+            return None
+        snippet = json.dumps(content, ensure_ascii=False, separators=(",", ":"))[:200]
+        return {
+            "chunk_id": entry["chunk_id"],
+            "similarity_score": entry.get("weight", 0),
+            "source_file": source_file,
+            "source_type": "original",
+            "metadata": {
+                "file_id": file_info.get("file_id", entry.get("file_id", "")),
+                "title": file_info.get("title", ""),
+                "classification": file_info.get("classification", ""),
+            },
+            "content": content,
+            "snippet": snippet,
+        }
 
     def _extract_snippet(self, chunk: dict[str, Any], field: str) -> str:
         """提取检索结果的摘要片段

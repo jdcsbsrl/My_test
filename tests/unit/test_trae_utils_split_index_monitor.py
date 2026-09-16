@@ -212,6 +212,36 @@ class TestIndexBuilderV3:
             compressed = json.load(f)
         assert compressed["total_keywords"] >= 1
 
+    def test_inverted_index_includes_registered_unchunked_original(self, tmp_path, monkeypatch):
+        dirs = _patch_path_manager(monkeypatch, tmp_path / "kb")
+        original = dirs["original"] / "sales_order_split.json"
+        original.write_text(json.dumps({"rules": [{"rule": "销售订单拆分规则"}]}), encoding="utf-8")
+        (dirs["metadata"] / "file_registry.json").write_text(
+            json.dumps(
+                {
+                    "files": {
+                        "sales_order_split": {
+                            "file_id": "sales_order_split",
+                            "original_path": "data/original/sales_order_split.json",
+                            "classification": "销售模块",
+                            "chunk_count": 0,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = IndexBuilderV3().build_inverted_index()
+        index_data = json.loads((dirs["index"] / "inverted" / "inverted_index.json").read_text(encoding="utf-8"))
+        entries = [entry for values in index_data["index"].values() for entry in values]
+
+        assert result["success"] is True
+        assert result["indexed_originals"] == 1
+        assert any(
+            entry.get("source_type") == "original" and entry.get("file_id") == "sales_order_split" for entry in entries
+        )
+
     def test_build_index_save_index_and_progress(self, tmp_path, monkeypatch):
         dirs = _patch_path_manager(monkeypatch, tmp_path / "kb")
         source = dirs["original"] / "single.json"
@@ -247,7 +277,8 @@ class TestKnowledgeBaseMonitor:
         assert monitor.monitor_update_file(str(small), auto_process=False)["success"] is True
         scan = monitor.scan_all_files()
         assert scan["total_files"] == 2
-        assert {item["file"] for item in scan["already_processed"]} == {"small.json", "large.json"}
+        assert {item["file"] for item in scan["already_processed"]} == {"large.json"}
+        assert {item["file"] for item in scan["needs_processing"]} == {"small.json"}
 
     def test_process_file_complete_and_process_all_files_with_fakes(self, tmp_path, monkeypatch):
         _patch_path_manager(monkeypatch, tmp_path / "kb")

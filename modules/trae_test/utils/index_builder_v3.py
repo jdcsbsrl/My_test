@@ -826,24 +826,31 @@ class IndexBuilderV3:
         """
         print("[IndexBuilderV3] 开始构建倒排索引...")
 
-        result = {"success": False, "total_chunks": 0, "indexed_chunks": 0, "total_keywords": 0, "error": ""}
+        result = {
+            "success": False,
+            "total_chunks": 0,
+            "indexed_chunks": 0,
+            "total_originals": 0,
+            "indexed_originals": 0,
+            "total_keywords": 0,
+            "error": "",
+        }
 
         try:
-            if not os.path.exists(self.chunks_dir):
-                result["error"] = "chunk目录不存在"
-                return result
-
-            # 遍历所有chunk文件
+            # Small files deliberately remain in data/original. They are indexed
+            # as logical documents below, without duplicate physical chunks.
             chunk_files = self._traverse_chunk_files()
             result["total_chunks"] = len(chunk_files)
+            original_files = self._traverse_registered_unchunked_originals()
+            result["total_originals"] = len(original_files)
 
-            if not chunk_files:
-                print("[IndexBuilderV3] 未发现chunk文件")
+            if not chunk_files and not original_files:
+                print("[IndexBuilderV3] 未发现可索引的chunk或已登记原始文件")
                 result["success"] = True
                 return result
 
             # 构建倒排索引
-            inverted_index = self._construct_inverted_index(chunk_files)
+            inverted_index = self._construct_inverted_index(chunk_files, original_files)
             failed_chunks = getattr(self, "_last_inverted_failures", [])
             result["failed_chunks"] = failed_chunks
             if failed_chunks:
@@ -862,9 +869,11 @@ class IndexBuilderV3:
 
             result["success"] = True
             result["indexed_chunks"] = len(chunk_files)
+            result["indexed_originals"] = len(original_files)
 
             print(
-                f"[IndexBuilderV3] 倒排索引构建完成，共索引 {len(chunk_files)} 个chunk，{len(inverted_index)} 个关键词"
+                "[IndexBuilderV3] 倒排索引构建完成，共索引 "
+                f"{len(chunk_files)} 个chunk、{len(original_files)} 个原始文件，{len(inverted_index)} 个关键词"
             )
 
         except Exception as e:
@@ -889,6 +898,19 @@ class IndexBuilderV3:
                         chunk_files.append(os.path.join(root, filename))
 
         return chunk_files
+
+    def _traverse_registered_unchunked_originals(self) -> list[dict[str, Any]]:
+        """List registered original files that intentionally have no chunks."""
+        self._load_registry()
+        originals: list[dict[str, Any]] = []
+        for file_id, file_info in (self._registry or {}).get("files", {}).items():
+            original_path = file_info.get("original_path", "")
+            if not original_path or int(file_info.get("chunk_count", 0) or 0) > 0:
+                continue
+            full_path = os.path.join(self.knowledge_base_dir, original_path)
+            if os.path.isfile(full_path):
+                originals.append({"file_id": file_id, "file_info": file_info, "path": full_path})
+        return originals
 
     def _extract_keywords(self, chunk_content: dict[str, Any]) -> dict[str, float]:
         """提取chunk的关键词及其权重
@@ -967,7 +989,9 @@ class IndexBuilderV3:
 
         return keywords
 
-    def _construct_inverted_index(self, chunk_files: list[str]) -> dict[str, list[dict[str, Any]]]:
+    def _construct_inverted_index(
+        self, chunk_files: list[str], original_files: list[dict[str, Any]] | None = None
+    ) -> dict[str, list[dict[str, Any]]]:
         """构建倒排索引数据结构
 
         Args:
@@ -1002,12 +1026,43 @@ class IndexBuilderV3:
                             "weight": weight,
                             "field": "content",
                             "source_file": os.path.basename(chunk_path),
+                            "source_type": "chunk",
                         }
                     )
 
             except Exception as e:
                 print(f"[IndexBuilderV3] 处理chunk文件失败 {chunk_path}: {e}")
                 self._last_inverted_failures.append(chunk_path)
+
+        for original in original_files or []:
+            try:
+                with open(original["path"], encoding="utf-8") as f:
+                    content: Any = (
+                        json.load(f) if original["path"].lower().endswith(".json") else {"raw_markdown": f.read()}
+                    )
+                file_info = original["file_info"]
+                logical_document = {
+                    "metadata": {
+                        "module": file_info.get("classification", ""),
+                        "source_file": os.path.basename(original["path"]),
+                        "file_id": original["file_id"],
+                    },
+                    "content": {"original_rule": content},
+                }
+                for keyword, weight in self._extract_keywords(logical_document).items():
+                    inverted_index.setdefault(keyword, []).append(
+                        {
+                            "chunk_id": f"original:{original['file_id']}",
+                            "weight": weight,
+                            "field": "content",
+                            "source_file": os.path.basename(original["path"]),
+                            "source_type": "original",
+                            "file_id": original["file_id"],
+                        }
+                    )
+            except Exception as e:
+                print(f"[IndexBuilderV3] 处理原始知识文件失败 {original['path']}: {e}")
+                self._last_inverted_failures.append(original["path"])
 
         return inverted_index
 

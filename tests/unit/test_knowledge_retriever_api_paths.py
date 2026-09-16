@@ -189,6 +189,163 @@ def test_search_module_pages_rules_and_requirements(tmp_path, monkeypatch):
     assert retriever.search_requirements(keyword="missing") == []
 
 
+def test_search_business_rules_falls_back_after_index_candidates_do_not_match(tmp_path, monkeypatch):
+    """A chunk-index hit must not hide a matching, registered small rule file."""
+    retriever, _ = _retriever(tmp_path)
+    indexed_file = {
+        "file_id": "indexed-large-file",
+        "title": "Legacy workflow",
+        "classification": "sales",
+        "original_path": "legacy_workflow.json",
+    }
+    matching_small_file = {
+        "file_id": "sales-order-split",
+        "title": "New workflow",
+        "classification": "sales",
+        "original_path": "sales_order_split.json",
+    }
+    retriever._metadata_repository.rule_files = [indexed_file, matching_small_file]
+    retriever._file_repository.contents.update(
+        {
+            "indexed-large-file": {"rules": [{"rule": "legacy split workflow"}]},
+            "sales-order-split": {"rules": [{"rule_id": "SO_SPLIT_001", "rule": "sales order split"}]},
+        }
+    )
+    monkeypatch.setattr(
+        retriever,
+        "search_by_inverted_index",
+        lambda keyword, top_k: [{"source_file": "legacy_workflow_chunk_0.json"}],
+    )
+
+    rules = retriever.search_business_rules("sales order split")
+
+    assert rules == [
+        {
+            "file_id": "sales-order-split",
+            "file_title": "New workflow",
+            "module": "sales",
+            "rule_id": "SO_SPLIT_001",
+            "rule": "sales order split",
+            "lifecycle_status": "legacy",
+            "status_source": "missing",
+        }
+    ]
+
+
+def test_search_business_rules_default_lifecycle_filter_and_order(tmp_path):
+    retriever, _ = _retriever(tmp_path)
+    file_info = {
+        "file_id": "lifecycle-rules",
+        "title": "Lifecycle rules",
+        "classification": "sales",
+        "original_path": "lifecycle_rules.json",
+    }
+    retriever._metadata_repository.rule_files = [file_info]
+    retriever._file_repository.contents["lifecycle-rules"] = {
+        "rules": [
+            {"rule_id": "DRAFT", "rule": "split draft", "status": "draft"},
+            {"rule_id": "ACTIVE", "rule": "split active", "status": "active"},
+            {"rule_id": "LEGACY", "rule": "split legacy"},
+            {"rule_id": "UNKNOWN", "rule": "split unknown", "status": "future"},
+            {"rule_id": "DEPRECATED", "rule": "split deprecated", "status": "deprecated"},
+            {"rule_id": "SUPERSEDED", "rule": "split superseded", "status": "superseded", "supersedes": ["ACTIVE"]},
+        ]
+    }
+
+    results = retriever.search_business_rules("split")
+
+    assert [item["rule_id"] for item in results] == ["ACTIVE", "LEGACY", "UNKNOWN", "DEPRECATED"]
+    assert results[0]["lifecycle_status"] == "active"
+    assert results[1]["status_source"] == "missing"
+    assert results[2]["lifecycle_status"] == "unknown"
+    assert results[2]["status_source"] == "explicit_invalid"
+    assert results[3]["lifecycle_status"] == "deprecated"
+
+
+def test_search_business_rules_explicit_history_and_draft_views(tmp_path):
+    retriever, _ = _retriever(tmp_path)
+    file_info = {
+        "file_id": "lifecycle-rules",
+        "title": "Lifecycle rules",
+        "classification": "sales",
+        "original_path": "lifecycle_rules.json",
+    }
+    retriever._metadata_repository.rule_files = [file_info]
+    retriever._file_repository.contents["lifecycle-rules"] = {
+        "rules": [
+            {"rule_id": "ACTIVE", "rule": "split active", "status": "active"},
+            {"rule_id": "DRAFT", "rule": "split draft", "status": "draft"},
+            {"rule_id": "SUPERSEDED", "rule": "split superseded", "status": "superseded", "supersedes": ["ACTIVE"]},
+        ]
+    }
+
+    history = retriever.search_business_rules("split", include_history=True)
+    draft_view = retriever.search_business_rules("split", include_draft=True)
+    all_views = retriever.search_business_rules("split", include_history=True, include_draft=True)
+
+    assert [item["rule_id"] for item in history] == ["ACTIVE", "SUPERSEDED"]
+    assert [item["rule_id"] for item in draft_view] == ["ACTIVE", "DRAFT"]
+    assert [item["rule_id"] for item in all_views] == ["ACTIVE", "SUPERSEDED", "DRAFT"]
+    assert all_views[1]["lifecycle_status"] == "superseded"
+
+
+def test_retrieve_forwards_expanded_lifecycle_views_without_using_default_cache(tmp_path, monkeypatch):
+    retriever, _ = _retriever(tmp_path)
+    calls = []
+
+    def search_rules(keyword, **kwargs):
+        calls.append((keyword, kwargs))
+        return [{"rule_id": "R1", "lifecycle_status": "superseded" if kwargs.get("include_history") else "active"}]
+
+    monkeypatch.setattr(retriever, "search_business_rules", search_rules)
+    monkeypatch.setattr(retriever, "_search_cache", lambda *args, **kwargs: [{"rule_id": "CACHE"}])
+    monkeypatch.setattr(retriever, "_search_db", lambda *args, **kwargs: [{"rule_id": "DB"}])
+
+    result = retriever.retrieve("split", mode="rules", include_history=True)
+
+    assert result[0]["lifecycle_status"] == "superseded"
+    assert calls == [("split", {"include_history": True, "include_draft": False})]
+
+
+def test_search_by_inverted_index_resolves_logical_original_through_repository(tmp_path):
+    retriever, kb_dir = _retriever(tmp_path)
+    original = {
+        "file_id": "sales_order_split",
+        "title": "Sales order split",
+        "classification": "sales",
+        "original_path": "data/original/sales_order_split.json",
+    }
+    retriever._metadata_repository.registry = {"files": {"sales_order_split": original}}
+    retriever._registry = retriever._metadata_repository.registry
+    retriever._file_repository.contents["sales_order_split"] = {"rules": [{"rule_id": "SO_SPLIT_001"}]}
+    (kb_dir / "index" / "inverted" / "inverted_index.json").write_text(
+        json.dumps(
+            {
+                "index": {
+                    "拆分": [
+                        {
+                            "chunk_id": "original:sales_order_split",
+                            "weight": 1.0,
+                            "field": "content",
+                            "source_file": "sales_order_split.json",
+                            "source_type": "original",
+                            "file_id": "sales_order_split",
+                        }
+                    ]
+                },
+                "total_keywords": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    results = retriever.search_by_inverted_index("拆分")
+
+    assert results[0]["source_type"] == "original"
+    assert results[0]["metadata"]["file_id"] == "sales_order_split"
+    assert results[0]["content"]["rules"][0]["rule_id"] == "SO_SPLIT_001"
+
+
 def test_specialized_search_methods_use_single_and_multiple_file_helpers(tmp_path, monkeypatch):
     retriever, _ = _retriever(tmp_path)
     calls = []

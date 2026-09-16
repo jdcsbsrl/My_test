@@ -153,7 +153,7 @@ class KnowledgeBaseMonitor:
                     os.path.join(self.INDEX_DIR, index_file)
                 )
 
-                if size_check["exceeds_threshold"] and not index_exists:
+                if not index_exists:
                     result["needs_processing"].append({"file": filename, "file_size": size_check["file_size"]})
                 else:
                     result["already_processed"].append({"file": filename, "file_size": size_check["file_size"]})

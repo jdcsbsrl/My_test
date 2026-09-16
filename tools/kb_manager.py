@@ -2,11 +2,13 @@
 """知识库管理CLI工具 - 支持批量操作、分割、索引、验证和迁移"""
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import sys
-from typing import Dict
+import unicodedata
+from typing import Any, Dict, Iterable
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,6 +39,8 @@ from modules.trae_test.utils.rag_semantic import SemanticIndexer
 
 class KnowledgeBaseManager:
     """知识库管理器，提供各种管理功能"""
+
+    LIFECYCLE_STATUSES = frozenset({"draft", "active", "deprecated", "superseded"})
 
     def __init__(self):
         """初始化管理器"""
@@ -132,7 +136,181 @@ class KnowledgeBaseManager:
             result["index_path"] = index_path
         return result
 
-    def process_file(self, file_path: str, sync_vector: bool = False) -> Dict:
+    def _sync_secondary_indexes(self) -> Dict:
+        """Rebuild only derived indexes after a successful source-file lifecycle step."""
+        global_result = self.index_builder.build_global_index()
+        if not global_result.get("success"):
+            return {"success": False, "global": global_result, "inverted": {}, "error": global_result.get("error", "")}
+        inverted_result = self.index_builder.build_inverted_index()
+        return {
+            "success": bool(inverted_result.get("success")),
+            "global": global_result,
+            "inverted": inverted_result,
+            "error": inverted_result.get("error", ""),
+        }
+
+    def _refresh_retriever_state(self) -> Dict:
+        """Discard retriever caches after derived indexes have been rebuilt.
+
+        ``refresh_registry`` clears the registry, file, rule, and inverted-index
+        caches before loading the current registry.  Keeping this step separate
+        from index construction makes a successful lifecycle operation mean the
+        manager's retriever can immediately observe the newly written indexes.
+        """
+        try:
+            self.retriever.refresh_registry()
+            return {"success": True}
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+
+    @staticmethod
+    def validate_rule_contract(document: Any, strict: bool = False) -> Dict:
+        """Validate structured ``business_rules`` identifiers and retrieval keywords.
+
+        Legacy knowledge files deliberately remain valid in non-strict mode.  A
+        strict caller (new JSON migration or an explicitly requested update)
+        receives actionable errors instead of allowing an entry that cannot be
+        asserted by rule id and business keyword after import.
+        """
+        result = {"success": True, "strict": strict, "checked_rules": 0, "errors": [], "warnings": []}
+        if not isinstance(document, dict):
+            message = "structured knowledge document must be a JSON object"
+            (result["errors"] if strict else result["warnings"]).append(message)
+            result["success"] = not strict
+            return result
+
+        rules = document.get("business_rules")
+        if rules is None:
+            message = "missing business_rules"
+            (result["errors"] if strict else result["warnings"]).append(message)
+            result["success"] = not strict
+            return result
+        if not isinstance(rules, list):
+            message = "business_rules must be a list"
+            (result["errors"] if strict else result["warnings"]).append(message)
+            result["success"] = not strict
+            return result
+        if strict and not rules:
+            result["errors"].append("business_rules must contain at least one rule")
+
+        seen_rule_ids: set[str] = set()
+        rule_id_by_index: dict[int, str] = {}
+        for index, rule in enumerate(rules):
+            location = f"business_rules[{index}]"
+            if not isinstance(rule, dict):
+                message = f"{location} must be an object"
+                (result["errors"] if strict else result["warnings"]).append(message)
+                continue
+            result["checked_rules"] += 1
+            rule_id = rule.get("rule_id")
+            keywords = rule.get("keywords")
+            content = rule.get("content")
+            if not isinstance(rule_id, str) or not rule_id.strip():
+                (result["errors"] if strict else result["warnings"]).append(
+                    f"{location}.rule_id must be a non-empty string"
+                )
+            elif rule_id in seen_rule_ids:
+                (result["errors"] if strict else result["warnings"]).append(f"duplicate rule_id: {rule_id}")
+            else:
+                seen_rule_ids.add(rule_id)
+                rule_id_by_index[index] = rule_id
+            if (
+                not isinstance(keywords, list)
+                or not keywords
+                or any(not isinstance(item, str) or not item.strip() for item in keywords)
+            ):
+                (result["errors"] if strict else result["warnings"]).append(
+                    f"{location}.keywords must be a non-empty list of non-empty strings"
+                )
+            if strict and (not isinstance(content, str) or not content.strip()):
+                result["errors"].append(f"{location}.content must be a non-empty string")
+
+        # Lifecycle metadata is optional for compatibility with existing
+        # knowledge.  When present, it is validated without attempting any
+        # automatic status transition, merge, or deletion.
+        same_file_rule_ids = set(rule_id_by_index.values())
+        lifecycle_warnings: list[str] = []
+        for index, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                continue
+            location = f"business_rules[{index}]"
+            rule_id = rule_id_by_index.get(index, "")
+            status_present = "status" in rule
+            status = rule.get("status")
+            normalized_status = status.strip() if isinstance(status, str) else None
+            if status_present and normalized_status not in KnowledgeBaseManager.LIFECYCLE_STATUSES:
+                issue = (
+                    f"{location}.status must be one of: "
+                    f"{', '.join(sorted(KnowledgeBaseManager.LIFECYCLE_STATUSES))}"
+                )
+                (result["errors"] if strict else result["warnings"]).append(issue)
+                normalized_status = None
+
+            supersedes_present = "supersedes" in rule
+            supersedes = rule.get("supersedes")
+            if supersedes_present and (
+                not isinstance(supersedes, list)
+                or any(not isinstance(item, str) or not item.strip() for item in supersedes)
+                or len(set(supersedes)) != len(supersedes)
+            ):
+                issue = f"{location}.supersedes must be a list of unique non-empty rule_id strings"
+                (result["errors"] if strict else result["warnings"]).append(issue)
+                supersedes = []
+
+            if normalized_status == "superseded" and not supersedes:
+                issue = f"{location}.supersedes is required when status is superseded"
+                (result["errors"] if strict else result["warnings"]).append(issue)
+
+            if isinstance(supersedes, list):
+                normalized_targets = [item.strip() for item in supersedes if isinstance(item, str) and item.strip()]
+                if rule_id and rule_id in normalized_targets:
+                    issue = f"{location}.supersedes must not reference its own rule_id: {rule_id}"
+                    (result["errors"] if strict else result["warnings"]).append(issue)
+                for target in normalized_targets:
+                    if target not in same_file_rule_ids:
+                        lifecycle_warnings.append(
+                            f"{location}.supersedes target not found in this file; "
+                            f"verify cross-file reference: {target}"
+                        )
+
+        if lifecycle_warnings:
+            # Keep the historical result shape unchanged for documents that do
+            # not use lifecycle metadata, while exposing cross-file checks when
+            # they are relevant to the caller.
+            result["lifecycle_warnings"] = lifecycle_warnings
+
+        result["success"] = not result["errors"]
+        return result
+
+    @classmethod
+    def validate_rule_contract_file(cls, file_path: str, strict: bool = False) -> Dict:
+        """Validate a JSON knowledge source without changing it.
+
+        Markdown and other unstructured legacy sources are explicitly skipped;
+        the contract only applies to structured rule documents.
+        """
+        result = {
+            "success": True,
+            "file_path": file_path,
+            "strict": strict,
+            "skipped": False,
+            "errors": [],
+            "warnings": [],
+        }
+        if not file_path.lower().endswith(".json"):
+            result["skipped"] = True
+            return result
+        try:
+            with open(file_path, encoding="utf-8") as source:
+                document = json.load(source)
+        except (OSError, json.JSONDecodeError) as exc:
+            result.update({"success": False, "errors": [f"invalid json: {exc}"]})
+            return result
+        result.update(cls.validate_rule_contract(document, strict=strict))
+        result["file_path"] = file_path
+        return result
+
+    def process_file(self, file_path: str, sync_vector: bool = False, strict_rules: bool = False) -> Dict:
         """完整处理文件（分割+索引）
 
         Args:
@@ -141,8 +319,30 @@ class KnowledgeBaseManager:
         Returns:
             处理结果
         """
+        if strict_rules:
+            contract = self.validate_rule_contract_file(file_path, strict=True)
+            if not contract["success"]:
+                return {
+                    "success": False,
+                    "file_path": file_path,
+                    "rule_contract": contract,
+                    "error": "rule contract validation failed",
+                }
+
         result = self.monitor.process_file_complete(file_path)
-        if sync_vector:
+        if strict_rules:
+            result["rule_contract"] = contract
+        if result.get("success"):
+            result["secondary_indexes"] = self._sync_secondary_indexes()
+            if not result["secondary_indexes"]["success"]:
+                result["success"] = False
+                result["error"] = result["secondary_indexes"].get("error", "二级索引同步失败")
+        if result.get("success"):
+            result["retriever_refresh"] = self._refresh_retriever_state()
+            if not result["retriever_refresh"]["success"]:
+                result["success"] = False
+                result["error"] = result["retriever_refresh"].get("error", "检索缓存刷新失败")
+        if result.get("success") and sync_vector:
             result["vector"] = self.sync_vector_file(file_path)
         return result
 
@@ -237,7 +437,13 @@ class KnowledgeBaseManager:
             result["error"] = str(e)
             return result
 
-    def validate_file(self, file_title: str, keyword: str = "") -> Dict:
+    def validate_file(
+        self,
+        file_title: str,
+        keyword: str | Iterable[str] = "",
+        expected_rule_ids: Iterable[str] | None = None,
+        strict_rules: bool = False,
+    ) -> Dict:
         """Validate local KB availability through registry, index, content, and retrieval."""
         result = {
             "success": False,
@@ -248,6 +454,10 @@ class KnowledgeBaseManager:
             "content_loaded": False,
             "retrieval_hit": False,
             "matched_rule_ids": [],
+            "keyword_results": [],
+            "expected_rule_ids": [],
+            "missing_expected_rule_ids": [],
+            "rule_contract": None,
             "error": "",
         }
 
@@ -276,15 +486,46 @@ class KnowledgeBaseManager:
             content = self.retriever.load_aggregated_data(file_title)
             result["content_loaded"] = bool(content)
 
-            if keyword:
-                matches = self.retriever.search_business_rules(keyword)
-                hits = [item for item in matches if item.get("file_id") == file_id]
-                result["retrieval_hit"] = bool(hits)
-                result["matched_rule_ids"] = [item.get("rule_id", item.get("id", "")) for item in hits]
-                if not result["retrieval_hit"] and isinstance(content, dict):
-                    result["retrieval_hit"] = keyword.lower() in content.get("raw_markdown", "").lower()
+            keywords = [keyword] if isinstance(keyword, str) else list(keyword or [])
+            keywords = [item.strip() for item in keywords if isinstance(item, str) and item.strip()]
+            expected_ids = [
+                item.strip() for item in (expected_rule_ids or []) if isinstance(item, str) and item.strip()
+            ]
+            result["expected_rule_ids"] = expected_ids
+            all_hits = []
+            if keywords:
+                for search_keyword in keywords:
+                    matches = self.retriever.search_business_rules(search_keyword)
+                    hits = [item for item in matches if item.get("file_id") == file_id]
+                    api_hit = bool(hits)
+                    fallback_hit = False
+                    if not api_hit and isinstance(content, dict):
+                        fallback_hit = search_keyword.lower() in content.get("raw_markdown", "").lower()
+                    all_hits.extend(hits)
+                    result["keyword_results"].append(
+                        {
+                            "keyword": search_keyword,
+                            "retrieval_hit": api_hit or fallback_hit,
+                            "matched_rule_ids": [item.get("rule_id", item.get("id", "")) for item in hits],
+                        }
+                    )
+                result["retrieval_hit"] = all(item["retrieval_hit"] for item in result["keyword_results"])
+                result["matched_rule_ids"] = list(
+                    dict.fromkeys(
+                        item.get("rule_id", item.get("id", ""))
+                        for item in all_hits
+                        if item.get("rule_id", item.get("id", ""))
+                    )
+                )
             else:
                 result["retrieval_hit"] = True
+
+            matched_ids = set(result["matched_rule_ids"])
+            result["missing_expected_rule_ids"] = [rule_id for rule_id in expected_ids if rule_id not in matched_ids]
+            if strict_rules and original_path.lower().endswith(".json"):
+                result["rule_contract"] = self.validate_rule_contract_file(original_path, strict=True)
+            elif original_path.lower().endswith(".json"):
+                result["rule_contract"] = self.validate_rule_contract_file(original_path, strict=False)
 
             result["success"] = all(
                 [
@@ -293,6 +534,8 @@ class KnowledgeBaseManager:
                     result["index_exists"],
                     result["content_loaded"],
                     result["retrieval_hit"],
+                    not result["missing_expected_rule_ids"],
+                    result["rule_contract"] is None or result["rule_contract"]["success"],
                 ]
             )
             return result
@@ -362,6 +605,7 @@ class KnowledgeBaseManager:
         result = {"success": False, "source_path": source_path, "target_path": "", "processed": None, "error": ""}
         previous_target = None
         previous_backup = None
+        process_result: Dict = {}
 
         try:
             if not os.path.exists(source_path):
@@ -375,6 +619,14 @@ class KnowledgeBaseManager:
             if source_ext not in {".json", ".md"}:
                 result["error"] = f"不支持的知识库文件类型: {source_ext or '(无扩展名)'}"
                 return result
+            # New structured knowledge must be queryable by stable rule id and
+            # declared business keywords before it enters the local KB.  Legacy
+            # files are not revalidated merely because they already exist.
+            contract = self.validate_rule_contract_file(source_path, strict=True)
+            result["rule_contract"] = contract
+            if not contract["success"]:
+                result["error"] = "rule contract validation failed"
+                return result
             target_filename = f"{target_title}{source_ext}"
             target_path = os.path.join(self.monitor.ORIGINAL_DIR, target_filename)
 
@@ -387,20 +639,26 @@ class KnowledgeBaseManager:
             shutil.copy2(source_path, target_path)
             result["target_path"] = target_path
 
-            process_result = self.process_file(target_path)
-            result["processed"] = process_result
-            result["success"] = process_result["success"]
-            if result["success"]:
-                registry_result = MetadataManager().scan_and_register_all()
-                if not registry_result.get("success"):
-                    result["success"] = False
-                    result["error"] = registry_result.get("error", "注册表更新失败")
-                    result["registry"] = registry_result
+            # Registration precedes processing so a small original is eligible
+            # for logical-document inverted indexing in the same migration.
+            registry_result = MetadataManager().scan_and_register_all()
+            result["registry"] = registry_result
+            if registry_result.get("success"):
+                process_result = self.process_file(target_path)
+                result["processed"] = process_result
+                result["success"] = process_result["success"]
+            else:
+                result["error"] = registry_result.get("error", "注册表更新失败")
             if not result["success"]:
                 if previous_backup:
                     shutil.copy2(previous_backup, previous_target)
                 elif os.path.exists(target_path):
                     os.unlink(target_path)
+                # The source rollback changes the set of registered originals;
+                # regenerate metadata and derived indexes to match that state.
+                result["rollback_registry"] = MetadataManager().scan_and_register_all()
+                if result["rollback_registry"].get("success"):
+                    result["rollback_secondary_indexes"] = self._sync_secondary_indexes()
 
             # 接入审核：迁移完成后执行审核
             audit_input = {
@@ -501,6 +759,174 @@ class KnowledgeBaseManager:
             处理结果
         """
         return self.monitor.process_all_files()
+
+    @staticmethod
+    def _normalize_duplicate_text(value: Any) -> str:
+        """Normalize text for deterministic duplicate comparisons only.
+
+        This deliberately does not infer business equivalence: Unicode form,
+        case and whitespace are the only differences ignored.
+        """
+        if not isinstance(value, str):
+            return ""
+        return " ".join(unicodedata.normalize("NFKC", value).casefold().split())
+
+    def _registered_file_records(self) -> list[dict[str, str]]:
+        """Return registered files through the public retriever API.
+
+        The governance commands must not bypass ``KnowledgeRetriever`` to read
+        raw knowledge sources.  A global index supplies titles where available;
+        registry-only entries remain visible with their file id as a fallback.
+        """
+        index = self.retriever.get_index() or {}
+        indexed = {
+            item.get("file_id"): item
+            for item in index.get("files", [])
+            if isinstance(item, dict) and isinstance(item.get("file_id"), str)
+        }
+        records = []
+        for file_id in sorted(set(self.retriever.list_available_files() or [])):
+            item = indexed.get(file_id, {})
+            records.append({"file_id": file_id, "title": item.get("title") or file_id})
+        return records
+
+    def health_check(self) -> Dict:
+        """Return a read-only knowledge-base health report.
+
+        No registry, index, source file, or derived artifact is changed.
+        """
+        scan = self.scan_all()
+        index = self.retriever.get_index() or {}
+        index_status = index.get("index_status", {}) if isinstance(index, dict) else {}
+        files = self._registered_file_records()
+        errors = list(scan.get("errors", []))
+        if index_status and not index_status.get("valid", False):
+            errors.append({"component": "global_index", "error": "registry/index mismatch"})
+        return {
+            "success": not errors,
+            "read_only": True,
+            "registered_file_count": len(files),
+            "scan": scan,
+            "index_status": index_status,
+            "errors": errors,
+        }
+
+    def dedupe_report(self, similarity_threshold: float = 0.80) -> Dict:
+        """Report duplicate candidates without changing any knowledge content.
+
+        Exact findings are based on normalized title, rule id, and SHA-256 of
+        normalized rule content.  Similarity candidates are lexical character
+        bigram Jaccard scores only; they are explicitly advisory and never
+        imply that two ERP rules are semantically equivalent.
+        """
+        records = self._registered_file_records()
+        title_groups: dict[str, list[dict[str, str]]] = {}
+        rule_id_groups: dict[str, list[dict[str, str]]] = {}
+        content_groups: dict[str, list[dict[str, str]]] = {}
+        rules: list[dict[str, str]] = []
+        unreadable: list[dict[str, str]] = []
+
+        for record in records:
+            title_key = self._normalize_duplicate_text(record["title"])
+            if title_key:
+                title_groups.setdefault(title_key, []).append(record)
+            try:
+                document = self.retriever.load_aggregated_data(record["title"])
+            except Exception as exc:
+                unreadable.append({"file_id": record["file_id"], "error": str(exc)})
+                continue
+            if not isinstance(document, dict):
+                continue
+            for rule in document.get("business_rules", []):
+                if not isinstance(rule, dict):
+                    continue
+                rule_id = rule.get("rule_id")
+                content = rule.get("content")
+                if not isinstance(rule_id, str) or not rule_id.strip():
+                    continue
+                entry = {
+                    "file_id": record["file_id"],
+                    "file_title": record["title"],
+                    "rule_id": rule_id.strip(),
+                    "content": content if isinstance(content, str) else "",
+                }
+                rules.append(entry)
+                rule_id_groups.setdefault(entry["rule_id"], []).append(entry)
+                normalized_content = self._normalize_duplicate_text(entry["content"])
+                if normalized_content:
+                    fingerprint = hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()
+                    content_groups.setdefault(fingerprint, []).append(entry)
+
+        def duplicates(groups: dict[str, list[dict[str, str]]], kind: str) -> list[dict[str, Any]]:
+            findings = []
+            for key, entries in sorted(groups.items()):
+                file_ids = sorted({entry["file_id"] for entry in entries})
+                if len(file_ids) > 1:
+                    public_entries = [
+                        {field: entry[field] for field in ("file_id", "file_title", "rule_id") if field in entry}
+                        for entry in entries
+                    ]
+                    findings.append(
+                        {
+                            "type": kind,
+                            "key": key,
+                            "entries": sorted(
+                                public_entries,
+                                key=lambda item: (item["file_id"], item.get("rule_id", "")),
+                            ),
+                        }
+                    )
+            return findings
+
+        similarity_candidates = []
+        content_rules = [rule for rule in rules if self._normalize_duplicate_text(rule["content"])]
+        for left_index, left in enumerate(content_rules):
+            left_text = self._normalize_duplicate_text(left["content"])
+            left_terms = {left_text[index : index + 2] for index in range(max(1, len(left_text) - 1))}
+            for right in content_rules[left_index + 1 :]:
+                if left["file_id"] == right["file_id"]:
+                    continue
+                right_text = self._normalize_duplicate_text(right["content"])
+                if left_text == right_text:
+                    continue
+                right_terms = {right_text[index : index + 2] for index in range(max(1, len(right_text) - 1))}
+                score = len(left_terms & right_terms) / len(left_terms | right_terms)
+                if score >= similarity_threshold:
+                    similarity_candidates.append(
+                        {
+                            "method": "character_bigram_jaccard",
+                            "score": round(score, 4),
+                            "left": {key: left[key] for key in ("file_id", "file_title", "rule_id")},
+                            "right": {key: right[key] for key in ("file_id", "file_title", "rule_id")},
+                        }
+                    )
+
+        report = {
+            "success": not unreadable,
+            "read_only": True,
+            "similarity_threshold": similarity_threshold,
+            "normalized_title_duplicates": duplicates(title_groups, "normalized_title"),
+            "cross_file_rule_id_duplicates": duplicates(rule_id_groups, "rule_id"),
+            "exact_content_duplicates": duplicates(content_groups, "content_fingerprint"),
+            "similarity_candidates": sorted(
+                similarity_candidates,
+                key=lambda item: (
+                    -item["score"],
+                    item["left"]["file_id"],
+                    item["right"]["file_id"],
+                ),
+            ),
+            "unreadable_files": unreadable,
+        }
+        report["summary"] = {
+            "registered_file_count": len(records),
+            "structured_rule_count": len(rules),
+            "normalized_title_duplicate_count": len(report["normalized_title_duplicates"]),
+            "cross_file_rule_id_duplicate_count": len(report["cross_file_rule_id_duplicates"]),
+            "exact_content_duplicate_count": len(report["exact_content_duplicates"]),
+            "similarity_candidate_count": len(report["similarity_candidates"]),
+        }
+        return report
 
 
 def print_list_files(result: Dict):
@@ -707,6 +1133,25 @@ def print_validate_result(result: Dict):
         print("matched rules:")
         for rule_id in result["matched_rule_ids"]:
             print(f"  - {rule_id}")
+    for item in result.get("keyword_results", []):
+        print(f"keyword {item['keyword']}: {OK_SIGN if item['retrieval_hit'] else FAIL_SIGN}")
+    if result.get("missing_expected_rule_ids"):
+        print("missing expected rule ids:")
+        for rule_id in result["missing_expected_rule_ids"]:
+            print(f"  - {rule_id}")
+    contract = result.get("rule_contract")
+    if contract is not None and not contract.get("success", False):
+        print("rule contract errors:")
+        for error in contract.get("errors", []):
+            print(f"  - {error}")
+    if contract is not None and contract.get("warnings"):
+        print("rule contract warnings:")
+        for warning in contract["warnings"]:
+            print(f"  - {warning}")
+    if contract is not None and contract.get("lifecycle_warnings"):
+        print("lifecycle warnings:")
+        for warning in contract["lifecycle_warnings"]:
+            print(f"  - {warning}")
     if result["error"]:
         print(f"error: {result['error']}")
 
@@ -763,6 +1208,11 @@ def main():
     process_parser = subparsers.add_parser("process", help="完整处理文件（分割+索引）")
     process_parser.add_argument("--file", required=True, help="要处理的文件路径")
     process_parser.add_argument("--sync-vector", action="store_true", help="同步写入 RAG 本地语义向量索引")
+    process_parser.add_argument(
+        "--strict-rules",
+        action="store_true",
+        help="Require structured rule ids, keywords, and content",
+    )
 
     # verify 命令
     verify_parser = subparsers.add_parser("verify", help="验证文件完整性")
@@ -770,7 +1220,23 @@ def main():
 
     validate_parser = subparsers.add_parser("validate", help="Validate a KB file through registry/index/retrieval")
     validate_parser.add_argument("--title", required=True, help="Knowledge file title without extension")
-    validate_parser.add_argument("--keyword", default="", help="Keyword that must retrieve this file")
+    validate_parser.add_argument(
+        "--keyword",
+        action="append",
+        default=[],
+        help="Keyword that must retrieve this file; repeatable",
+    )
+    validate_parser.add_argument(
+        "--expect-rule-id",
+        action="append",
+        default=[],
+        help="Expected matched rule id; repeatable",
+    )
+    validate_parser.add_argument(
+        "--strict-rules",
+        action="store_true",
+        help="Fail validation when the structured rule contract is invalid",
+    )
 
     lint_parser = subparsers.add_parser("lint", help="Lint a knowledge source for sensitive content")
     lint_parser.add_argument("--file", required=True, help="Knowledge source file path")
@@ -782,6 +1248,18 @@ def main():
 
     # scan 命令
     scan_parser = subparsers.add_parser("scan", help="扫描知识库")
+
+    health_parser = subparsers.add_parser("health", help="只读检查知识库健康状态")
+    health_parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+
+    dedupe_parser = subparsers.add_parser("dedupe", help="只读报告知识库重复候选")
+    dedupe_parser.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    dedupe_parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.80,
+        help="报告相似规则候选的字符二元组 Jaccard 阈值（默认 0.80）",
+    )
 
     # process-all 命令
     process_all_parser = subparsers.add_parser("process-all", help="批量处理所有需要处理的文件")
@@ -801,10 +1279,10 @@ def main():
         result = manager.index_file(args.file)
         print_index_result(result)
     elif args.command == "process":
-        result = manager.process_file(args.file, sync_vector=args.sync_vector)
-        if result["split"]:
+        result = manager.process_file(args.file, sync_vector=args.sync_vector, strict_rules=args.strict_rules)
+        if result.get("split"):
             print_split_result(result["split"])
-        if result["index"]:
+        if result.get("index"):
             print_index_result(result["index"])
         if result.get("vector"):
             print_vector_result(result["vector"])
@@ -820,7 +1298,12 @@ def main():
         result = manager.verify_file(args.title)
         print_verify_result(result)
     elif args.command == "validate":
-        result = manager.validate_file(args.title, args.keyword)
+        result = manager.validate_file(
+            args.title,
+            args.keyword,
+            expected_rule_ids=args.expect_rule_id,
+            strict_rules=args.strict_rules,
+        )
         print_validate_result(result)
     elif args.command == "lint":
         result = manager.lint_file(args.file)
@@ -832,6 +1315,16 @@ def main():
         result = manager.scan_all()
         print_scan_result(result)
         exit_code = 0 if not result.get("errors") else 1
+    elif args.command == "health":
+        result = manager.health_check()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        exit_code = 0 if result.get("success", False) else 1
+    elif args.command == "dedupe":
+        if not 0.0 <= args.similarity_threshold <= 1.0:
+            parser.error("--similarity-threshold must be between 0 and 1")
+        result = manager.dedupe_report(args.similarity_threshold)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        exit_code = 0 if result.get("success", False) else 1
     elif args.command == "process-all":
         result = manager.process_all()
         print_process_all_result(result)
