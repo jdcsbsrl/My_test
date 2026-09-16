@@ -24,7 +24,9 @@ class TestSalesExportSimple:
         sales_order_page.navigate_to("sales/order/saleOrder")
         logged_in_page.wait_for_load_state("networkidle")
 
-        sales_order_page.click_tab("待处理")
+        # The seeded CI order fixture is visible in the all-orders view.  The
+        # previous pending-only assumption made this test account-dependent.
+        sales_order_page.click_tab("全部订单")
         logged_in_page.wait_for_load_state("networkidle")
 
         order_numbers = sales_order_page.get_sorted_order_numbers(limit=10)

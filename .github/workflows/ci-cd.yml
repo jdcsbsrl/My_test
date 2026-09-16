@@ -218,8 +218,9 @@ jobs:
       TEST_ENV: test
       # CI is an explicitly authorized test-environment execution.
       AUTO_TEST_AUTHORIZED: "true"
-      # Sales/report tests include the large-data export scenario, so use the
-      # administrator account with the broadest data visibility.
+      # Sales/report tests use the administrator account.  Order-export
+      # regression tests requiring the seeded order fixture run in the leader
+      # lane below, whose account owns that test data scope.
       TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
       TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
@@ -233,12 +234,10 @@ jobs:
         include:
           - shard: 1
             test_files: "modules/auto_test/tests/test_login_regression.py modules/auto_test/tests/test_sku_search_regression.py"
-          - shard: 2
-            test_files: "modules/auto_test/tests/test_sales_export_simple.py modules/auto_test/tests/test_sales_order_export_sort.py"
           - shard: 3
-            test_files: "modules/auto_test/tests/test_export_download.py modules/auto_test/tests/test_export_flow_precise.py"
+            test_files: "modules/auto_test/tests/test_export_download.py"
           - shard: 4
-            test_files: "modules/auto_test/tests/test_export_full_flow.py modules/auto_test/tests/test_export_system_order_no.py"
+            test_files: "modules/auto_test/tests/test_export_full_flow.py"
           - shard: 10
             test_files: "modules/auto_test/tests/test_sales_report_regression.py"
           - shard: 11
@@ -312,8 +311,8 @@ jobs:
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: "true"
-      # Inventory pages do not require system-administrator permissions.
-      # Use the business-group-leader account to keep data scope separate.
+      # Inventory pages and order-export regression tests use the
+      # business-group-leader account, which owns the seeded order fixture.
       TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
       TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
@@ -322,7 +321,7 @@ jobs:
       matrix:
         include:
           - shard: 5
-            test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py"
+            test_files: "modules/auto_test/tests/test_export_with_order_data.py modules/auto_test/tests/test_inventory_query_export.py modules/auto_test/tests/test_sales_export_simple.py modules/auto_test/tests/test_sales_order_export_sort.py modules/auto_test/tests/test_export_flow_precise.py modules/auto_test/tests/test_export_system_order_no.py"
           - shard: 6
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k TestInventorySKUSearch"
           - shard: 7

@@ -1,6 +1,6 @@
-from typing import Any
-
 import re
+import time
+from typing import Any
 
 import allure
 from playwright.sync_api import Page, expect
@@ -623,26 +623,53 @@ class SalesOrderPage(BasePage):
         return results
 
     @allure.step("点击排序下拉菜单")
-    def click_sort_dropdown(self) -> None:
-        """点击排序下拉菜单"""
+    def click_sort_dropdown(self, timeout: int = 30000) -> None:
+        """点击排序下拉菜单，等待 SPA 控件完成挂载。"""
         # The page also has a batch-operation dropdown.  Generic dropdown
         # selectors can click that menu and make the later sort assertion fail
         # with a misleading "订单金额 not found" error.  Select only a visible
         # control whose rendered label is the actual sort control.
-        candidates = self.page.locator("button:visible, [role='button']:visible").all()
-        for candidate in candidates:
+        deadline = time.monotonic() + max(timeout, 1) / 1000
+        last_labels: list[str] = []
+        while time.monotonic() < deadline:
             try:
-                label = " ".join((candidate.text_content() or "").split())
-                if not (label.startswith("排序：") or label.startswith("排序:")):
-                    continue
-                candidate.click()
-                logger.info("成功点击排序下拉菜单: {}", label)
-                self.wait_for_load_state()
-                self.wait_for_loading_complete(timeout=10000)
-                return
-            except Exception as e:
-                logger.debug("尝试排序控件失败: {}", type(e).__name__)
+                candidates = self.page.locator(
+                    "button:visible, [role='button']:visible, [class*='sort']:visible, [aria-label*='排序']:visible"
+                ).all()
+            except Exception:
+                candidates = []
 
+            labels: list[str] = []
+            for candidate in candidates:
+                try:
+                    label = " ".join((candidate.text_content() or "").split())
+                    if label:
+                        labels.append(label)
+                    if not (label.startswith("排序：") or label.startswith("排序:")):
+                        continue
+                    candidate.click()
+                    logger.info("成功点击排序下拉菜单: {}", label)
+                    self.wait_for_load_state()
+                    self.wait_for_loading_complete(timeout=10000)
+                    return
+                except Exception as e:
+                    logger.debug("尝试排序控件失败: {}", type(e).__name__)
+            last_labels = labels
+
+            # Some Vue renders expose the control only after the first data
+            # request completes.  A bounded poll handles that race without
+            # clicking an unrelated batch-operation dropdown.
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+            try:
+                self.wait_for_poll_interval(min(500, remaining_ms))
+            except Exception:
+                break
+
+        logger.warning(
+            "排序控件在限定时间内未挂载: url={}, visible_labels={}",
+            self._redact_url(self.page.url),
+            last_labels[:20],
+        )
         raise ValueError("无法找到带有排序标签的排序下拉菜单")
 
     @allure.step("选择排序列: {column_name}")
@@ -1303,8 +1330,9 @@ class SalesOrderPage(BasePage):
             return 0.0
 
     @allure.step("等待表格数据加载完成")
-    def wait_for_table_data(self, timeout: int = 15000) -> None:
-        """等待表格数据加载完成"""
+    def wait_for_table_data(self, timeout: int = 15000) -> bool:
+        """在总预算内等待表格数据，避免每个选择器重复消耗完整超时。"""
+        deadline = time.monotonic() + max(timeout, 1) / 1000
         selectors = [
             "//tbody//tr[contains(@class, 'el-table__row')]",
             "//div[contains(@class, 'el-table__body-wrapper')]//tr",
@@ -1312,16 +1340,19 @@ class SalesOrderPage(BasePage):
         ]
         for selector in selectors:
             try:
-                self.page.locator(selector).first.wait_for(state="visible", timeout=timeout)
-                return
+                remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+                self.page.locator(selector).first.wait_for(state="visible", timeout=remaining_ms)
+                return True
             except Exception:
                 continue
         try:
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
             self.page.locator("//div[contains(@class, 'el-loading-mask')]").first.wait_for(
-                state="hidden", timeout=timeout
+                state="hidden", timeout=remaining_ms
             )
         except Exception:
             pass
+        return False
 
     @allure.step("等待订单行和复选框稳定")
     def wait_for_order_rows_ready(self, timeout: int = 30000) -> None:

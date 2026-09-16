@@ -25,8 +25,11 @@ class SalesOrderExportPage(BasePage):
     EXPORT_READY_SELECTORS = (
         'input[placeholder*="选择导出模板"]:visible',
         'input[placeholder*="请选择导出模板"]:visible',
+        'input[placeholder*="模板"]:visible',
         ".el-select:visible",
+        ".el-select__wrapper:visible",
         ".ant-select:visible",
+        '[role="combobox"]:visible',
         'button:has-text("实时导出"):visible',
         'button:has-text("非实时导出"):visible',
     )
@@ -38,24 +41,51 @@ class SalesOrderExportPage(BasePage):
     @allure.step("等待导出页面加载")
     def wait_for_export_page(self, timeout: int = 30000) -> bool:
         try:
-            start_time = time.time()
-            while time.time() - start_time < timeout / 1000:
-                if self.export_url_pattern in self.page.url:
-                    self.wait_for_page_settle(timeout=5000)
-                    if self._export_controls_ready():
-                        logger.info("导出页面已跳转且业务控件已挂载")
-                        return True
+            start_time = time.monotonic()
+            deadline = start_time + max(timeout, 1) / 1000
+            route_reload_attempted = False
+            original_page = self.page
+            while time.monotonic() < deadline:
+                try:
+                    pages = list(self.page.context.pages)
+                except Exception:
+                    pages = [self.page]
+                if self.page not in pages:
+                    pages.insert(0, self.page)
 
-                pages = self.page.context.pages
                 for pg in pages:
-                    if self.export_url_pattern in pg.url:
-                        self.page = pg
-                        self.wait_for_page_settle(timeout=5000)
+                    if self.export_url_pattern not in pg.url:
+                        continue
+                    self.page = pg
+                    candidate_ready = False
+                    try:
+                        self.wait_for_page_settle(timeout=min(5000, max(1, int((deadline - time.monotonic()) * 1000))))
                         if self._export_controls_ready():
-                            logger.info("已切换到导出页面且业务控件已挂载")
+                            candidate_ready = True
+                            logger.info("导出页面已跳转且业务控件已挂载")
                             return True
+                    except Exception as exc:
+                        logger.debug("导出页面候选控件尚未就绪: {}", type(exc).__name__)
+                    finally:
+                        if not candidate_ready:
+                            self.page = original_page
 
-                if int(time.time() - start_time) % 5 == 0:
+                elapsed = time.monotonic() - start_time
+                if not route_reload_attempted and elapsed >= max(timeout / 1000 / 2, 1):
+                    route_reload_attempted = True
+                    route_page = next((pg for pg in pages if self.export_url_pattern in pg.url), None)
+                    if route_page is not None:
+                        try:
+                            reload_timeout = max(1, int((deadline - time.monotonic()) * 1000))
+                            route_page.reload(
+                                wait_until="domcontentloaded",
+                                timeout=min(60000, reload_timeout),
+                            )
+                            logger.info("导出页控件未及时挂载，已执行一次同路由刷新重试")
+                        except Exception as exc:
+                            logger.debug("导出页刷新重试失败: {}", type(exc).__name__)
+
+                if int(time.monotonic() - start_time) % 5 == 0:
                     pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
                     logger.info(
                         "当前所有页面: {}",
@@ -63,8 +93,13 @@ class SalesOrderExportPage(BasePage):
                     )
                     logger.info("当前页面URL: {}, 标题: {}", self._redact_url(self.page.url), self.page.title())
 
-                self.wait_for_poll_interval(1000)
+                self.wait_for_poll_interval(min(500, max(1, int((deadline - time.monotonic()) * 1000))))
 
+            self.page = original_page
+            try:
+                pages = list(self.page.context.pages)
+            except Exception:
+                pages = [self.page]
             pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
             logger.warning(
                 "超时，所有页面: {}",

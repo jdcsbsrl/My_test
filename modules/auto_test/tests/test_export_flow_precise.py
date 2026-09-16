@@ -38,9 +38,11 @@ class TestExportFlowPrecise:
         print("URL: same-origin sales order route reached")
 
         print("\n" + "=" * 70)
-        print("Step 2: Click pending tab")
+        print("Step 2: Open all-orders tab")
         print("=" * 70)
-        sales_order_page.click_tab("待处理")
+        # The seeded CI order fixture belongs to the all-orders view; pending
+        # is a status-specific view and may legitimately be empty.
+        sales_order_page.click_tab("全部订单")
         logged_in_page.wait_for_load_state("networkidle")
 
         print("\n" + "=" * 70)

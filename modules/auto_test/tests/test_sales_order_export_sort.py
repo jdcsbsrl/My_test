@@ -94,7 +94,7 @@ class TestSalesOrderExportSort:
         sales_order_page.navigate_to("sales/order/saleOrder")
         sales_order_page.wait_for_table_data()
 
-        sales_order_page.click_tab("待处理")
+        sales_order_page.click_tab("全部订单")
         sales_order_page.wait_for_table_data()
 
         sales_order_page.select_sort_order("付款时间", is_ascending=True)
@@ -142,7 +142,7 @@ class TestSalesOrderExportSort:
         sales_order_page.navigate_to("sales/order/saleOrder")
         sales_order_page.wait_for_table_data()
 
-        sales_order_page.click_tab("待处理")
+        sales_order_page.click_tab("全部订单")
         sales_order_page.wait_for_table_data()
 
         sales_order_page.select_sort_order("付款时间", is_ascending=False)

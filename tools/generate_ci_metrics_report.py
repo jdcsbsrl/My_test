@@ -21,6 +21,43 @@ CATEGORY_PATTERNS = {
     "测试收集": re.compile(r"collection error|collected 0 items|ERROR collecting", re.IGNORECASE),
 }
 
+# Pytest writes the same failure several times: once in the traceback, once
+# in the short summary, and often once more in the Actions wrapper.  Counting
+# every occurrence makes a single failing test look like dozens of failures.
+# The progress line is ``nodeid FAILED [ 33%]``; only the final summary has a
+# pytest node id after ``FAILED`` (and therefore contains ``::``).
+FAILED_TEST_PATTERN = re.compile(r"\bFAILED\s+(?P<nodeid>\S*::\S+)(?:\s+-\s+(?P<reason>.*))?$")
+
+
+def _failure_evidence(logs: str) -> str:
+    """Return one concise evidence line per failed test when available.
+
+    The report is intended to describe failures, not implementation details
+    from dependency installation or successful setup steps.  Prefer pytest's
+    final ``FAILED nodeid - reason`` records and fall back to explicit error
+    markers for logs that were truncated before the pytest summary.
+    """
+    failed_records: dict[str, str] = {}
+    fallback_lines: list[str] = []
+    for raw_line in logs.splitlines():
+        line = raw_line.strip()
+        match = FAILED_TEST_PATTERN.search(line)
+        if match:
+            nodeid = match.group("nodeid")
+            reason = (match.group("reason") or "").strip()
+            # Match categories against the failure reason only.  A test name
+            # such as ``test_timeout`` must not inflate the timeout count.
+            failed_records.setdefault(nodeid, reason)
+            continue
+        if "##[error]" in line or re.search(r"\bE\s{2,}", line) or "ERROR collecting" in line:
+            fallback_lines.append(line)
+
+    if failed_records:
+        return "\n".join(reason for reason in failed_records.values() if reason)
+
+    # Deduplicate repeated wrapper/traceback lines while preserving order.
+    return "\n".join(dict.fromkeys(fallback_lines))
+
 
 def parse_time(value: str | None) -> datetime | None:
     if not value:
@@ -78,8 +115,12 @@ def build_metrics(jobs: list[dict[str, Any]], logs: str, repository: str, run_id
             }
         )
 
+    evidence = _failure_evidence(logs)
+    evidence_lines = [line for line in evidence.splitlines() if line]
     category_counts = {
-        category: len(pattern.findall(logs)) for category, pattern in CATEGORY_PATTERNS.items() if pattern.search(logs)
+        category: sum(bool(pattern.search(line)) for line in evidence_lines)
+        for category, pattern in CATEGORY_PATTERNS.items()
+        if any(pattern.search(line) for line in evidence_lines)
     }
     category_counts = dict(sorted(category_counts.items(), key=lambda item: (-item[1], item[0])))
 
