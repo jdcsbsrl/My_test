@@ -92,9 +92,30 @@ def _decimal(row: dict[str, Any], field: str) -> Decimal | None:
     return Decimal(str(value))
 
 
+def _stock_total(row: dict[str, Any]) -> Decimal | None:
+    """Return the inventory total, treating a missing stock detail as zero.
+
+    ``stockQty`` is the total stock field.  The inventory API uses ``null``
+    when no stock detail exists; according to the business contract that is
+    equivalent to a total of zero.  ``availableInventory`` is the available
+    stock field and must not be used as a fallback because it has different
+    semantics.
+    """
+    if "stockQty" not in row:
+        return None
+    if row["stockQty"] is None:
+        return Decimal("0")
+    return _decimal(row, "stockQty")
+
+
 def _expected_stock_state(row: dict[str, Any]) -> str | None:
-    """Translate the supplied UI rules into a testable state when boundaries are clear."""
-    stock_qty = _decimal(row, "stockQty")
+    """Calculate stockState from the inventory-query result.
+
+    The inventory query is authoritative for the state calculation.  A null
+    ``stockQty`` means that no stock detail exists and therefore contributes
+    zero to the total-stock formula.
+    """
+    stock_qty = _stock_total(row)
     in_transit = _decimal(row, "inTransitQty")
     # The online-stock endpoint exposes the corresponding pending quantity as
     # ``pendingFulfillment``; in listNew data it aligns with ``unTransitQty``.
@@ -127,6 +148,38 @@ def _expected_stock_state(row: dict[str, Any]) -> str | None:
     if projected > sale_thirty:
         return "4"
     return None
+
+
+@pytest.mark.unit
+def test_null_stock_total_is_treated_as_zero_without_using_available_inventory() -> None:
+    """A null total-stock field follows the zero-stock state rule."""
+    row = {
+        "stockQty": None,
+        "availableInventory": 0,
+        "inTransitQty": 0,
+        "unTransitQty": 0,
+        "saleSeven": 0,
+        "saleFifteen": 0,
+        "saleThirty": 0,
+    }
+
+    assert _expected_stock_state(row) == "0"
+
+
+@pytest.mark.unit
+def test_stock_state_uses_stock_total_not_available_inventory() -> None:
+    """Available inventory must not replace the total-stock input."""
+    row = {
+        "stockQty": 1,
+        "availableInventory": -55,
+        "inTransitQty": 0,
+        "unTransitQty": 0,
+        "saleSeven": 0,
+        "saleFifteen": 0,
+        "saleThirty": 0,
+    }
+
+    assert _expected_stock_state(row) == "1"
 
 
 def _is_empty(value: Any) -> bool:
@@ -202,7 +255,7 @@ def test_inventory_list_returns_each_normal_bound_item(
 @pytest.mark.api
 @pytest.mark.p0
 def test_inventory_list_exposes_stock_state_calculation_inputs(inventory_sku_api) -> None:
-    """库存接口返回状态计算需要的库存、在途、未发货和销量字段。"""
+    """库存接口返回状态计算字段；无库存明细时 stockQty 可以为 null。"""
     body = inventory_sku_api.list_page(_inventory_payload("DWOYX-LI001"))
     inventory_sku_api.assert_success(body)
     rows = inventory_sku_api.rows(body)
@@ -211,6 +264,8 @@ def test_inventory_list_exposes_stock_state_calculation_inputs(inventory_sku_api
     for row in rows:
         for field in INVENTORY_FIELDS:
             assert field in row, f"库存 SKU 响应缺少状态计算字段 {field}: {row}"
+            if field == "stockQty" and row[field] is None:
+                continue
             assert _decimal(row, field) is not None, f"状态计算字段 {field} 不应为空: {row}"
 
 
@@ -224,7 +279,7 @@ def test_variant_stock_state_matches_inventory_calculation(
     variant_id: str,
     item_id: str,
 ) -> None:
-    """普通 SKU 的库存状态应符合截图中的状态计算规则。"""
+    """以库存查询结果为权威，线上库存状态应符合库存状态计算规则。"""
     inventory_body = inventory_sku_api.list_page(_inventory_payload(item_id))
     inventory_sku_api.assert_success(inventory_body)
     inventory_rows = inventory_sku_api.rows(inventory_body)
