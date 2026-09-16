@@ -461,23 +461,18 @@ class TestSalesReportRegression:
         )
 
     def test_sku_create_date_condition_query_negative(self, sales_report: SalesReportPage) -> None:
-        first_row = sales_report.first_row()
-        created_at = first_row.get("创建时间", "")
-        match = created_at[:10] if len(created_at) >= 10 else ""
-        if not match:
-            pytest.skip("Current page has no usable created date")
-
+        future_date = "2100-01-01"
         sales_report.reset()
-        sales_report.fill_sku_create_date(f"{match} 00:00:00", f"{match} 00:00:00")
+        sales_report.fill_sku_create_date(future_date, future_date)
         input_values = sales_report.sku_create_date_values()
         sales_report.search()
 
         passed = sales_report.total_count() == 0
         _record_query_detail(
             "SKU 创建日期查询",
-            {"SKU创建日期开始时间": match, "SKU创建日期结束时间": match},
+            {"SKU创建日期开始时间": future_date, "SKU创建日期结束时间": future_date},
             sales_report,
-            "配合页面默认最近 30 天付款时间，返回总数应为 0",
+            "未来日期范围没有 SKU 数据，返回总数应为 0",
             passed,
             (
                 f"输入框实际值={input_values}；请求payload={sales_report.last_search_payload}；"

@@ -136,40 +136,15 @@ class SalesReportPage(BasePage):
         end_date = end_date or start_date
         start_value = start_date if len(start_date) > 10 else f"{start_date} 00:00:00"
         end_value = end_date if len(end_date) > 10 else f"{end_date} 23:59:59"
-        filled = self.page.evaluate(
-            """([startValue, endValue]) => {
-                const visible = (el) => {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 0 && rect.height > 0
-                        && style.display !== 'none'
-                        && style.visibility !== 'hidden';
-                };
-                const items = Array.from(document.querySelectorAll('.el-form-item')).filter(visible);
-                const item = items.find((el) => {
-                    const label = el.querySelector('.el-form-item__label');
-                    return label && (label.innerText || label.textContent || '').includes('SKU创建日期');
-                });
-                if (!item) return false;
-                const inputs = Array.from(item.querySelectorAll('input'));
-                if (inputs.length < 2) return false;
-                const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-                [startValue, endValue].forEach((value, index) => {
-                    const input = inputs[index];
-                    input.removeAttribute('readonly');
-                    setter.call(input, value);
-                    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter' }));
-                    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter' }));
-                    input.blur();
-                });
-                return true;
-            }""",
-            [start_value, end_value],
-        )
-        if not filled:
+        item = self.page.locator(".el-form-item:visible").filter(has_text="SKU创建日期").first
+        inputs = item.locator("input")
+        if inputs.count() < 2:
             raise ValueError("SKU create date range inputs were not found")
+        for index, value in enumerate((start_value, end_value)):
+            input_locator = inputs.nth(index)
+            input_locator.evaluate("element => element.removeAttribute('readonly')")
+            input_locator.fill(value)
+            input_locator.press("Tab")
         self.page.keyboard.press("Escape")
 
     def sku_create_date_values(self) -> list[str]:
