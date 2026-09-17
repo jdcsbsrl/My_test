@@ -1809,6 +1809,9 @@ class SalesOrderPage(BasePage):
         获取系统单号（SO开头，如SO20260627000069）
         """
         results = []
+        limit = max(0, int(limit))
+        if limit == 0:
+            return results
 
         try:
             self.wait_for_load_state()
@@ -1818,59 +1821,84 @@ class SalesOrderPage(BasePage):
                 return []
             if data_state == "timeout":
                 raise TimeoutError("销售订单列表未在限定时间内进入有数据或明确无数据状态")
-            import time
-
-            try:
-                self.page.wait_for_function(
-                    """
-                    () => {
-                        const blocks = [...document.querySelectorAll('.order-block')];
-                        if (!blocks.length) {
-                            return true;
+            order_number_script = """
+                (limit) => {
+                    const orderPattern = /\\bSO(?=[A-Z0-9_-]*\\d)[A-Z0-9_-]+\\b/gi;
+                    const containerSelector = [
+                        '.order-block',
+                        '.el-table__body-wrapper tbody tr',
+                        'table.el-table__body tbody tr',
+                        '.el-table__body tbody tr',
+                        '[role="row"]',
+                    ].join(', ');
+                    const attributeNames = [
+                        'data-order-no',
+                        'data-order-number',
+                        'data-system-order-no',
+                        'data-system-order-number',
+                        'aria-label',
+                        'title',
+                    ];
+                    const candidateSelector = [
+                        '[data-order-no]',
+                        '[data-order-number]',
+                        '[data-system-order-no]',
+                        '[data-system-order-number]',
+                        '.el-text--primary',
+                        '[class*="order-no"]',
+                        '[class*="order-number"]',
+                        '[class*="system-order"]',
+                    ].join(', ');
+                    const visible = (node) => {
+                        if (!node) return false;
+                        const style = window.getComputedStyle(node);
+                        return style.display !== 'none'
+                            && style.visibility !== 'hidden'
+                            && node.getClientRects().length > 0;
+                    };
+                    const orderNumbers = [];
+                    const seen = new Set();
+                    const addValue = (value) => {
+                        const matches = String(value || '').match(orderPattern) || [];
+                        for (const match of matches) {
+                            const orderNumber = match.trim();
+                            if (!seen.has(orderNumber)) {
+                                seen.add(orderNumber);
+                                orderNumbers.push(orderNumber);
+                            }
+                            if (orderNumbers.length >= limit) return;
                         }
-                        return blocks.some((block) =>
-                            /^SO\\d+$/.test((block.getAttribute('data-order-no') || '').trim())
-                        );
+                    };
+                    const containers = Array.from(document.querySelectorAll(containerSelector))
+                        .filter(visible);
+                    for (const container of containers) {
+                        for (const attributeName of attributeNames) {
+                            addValue(container.getAttribute(attributeName));
+                            if (orderNumbers.length >= limit) return orderNumbers;
+                        }
+                        addValue(container.innerText || container.textContent);
+                        if (orderNumbers.length >= limit) return orderNumbers;
+                        for (const node of container.querySelectorAll(candidateSelector)) {
+                            addValue(node.innerText || node.textContent);
+                            for (const attributeName of attributeNames) {
+                                addValue(node.getAttribute(attributeName));
+                                if (orderNumbers.length >= limit) return orderNumbers;
+                            }
+                            if (orderNumbers.length >= limit) return orderNumbers;
+                        }
                     }
-                    """,
-                    timeout=10000,
-                )
-            except Exception as exc:
-                logger.debug(f"等待订单卡片业务标识完成超时，继续兼容回退提取: {exc}")
-            time.sleep(5)
-
-            order_block_script = f"""
-                    () => {{
-                        const orderBlocks = document.querySelectorAll('.order-block');
-                        const orderNumbers = [];
-                        for (let i = 0; i < Math.min({limit}, orderBlocks.length); i++) {{
-                            const block = orderBlocks[i];
-                            const dataOrderNo = (block.getAttribute('data-order-no') || '').trim();
-                            if (/^SO\\d+$/.test(dataOrderNo)) {{
-                                orderNumbers.push(dataOrderNo);
-                                continue;
-                            }}
-                            const spans = block.querySelectorAll('span.el-text--primary');
-                            for (const span of spans) {{
-                                const text = span.innerText.trim();
-                                if (text.match(/^SO\\d+$/)) {{
-                                    orderNumbers.push(text);
-                                    break;
-                                }}
-                            }}
-                        }}
-                        return orderNumbers;
-                    }}
-                    """
+                    return orderNumbers;
+                }
+                """
             for attempt in range(3):
                 try:
-                    script_result = self.page.evaluate(order_block_script)
+                    script_result = self.page.evaluate(order_number_script, limit)
                     if script_result:
                         results = script_result
-                        logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
+                        logger.info("通过订单行候选字段获取到 {} 个系统单号", len(results))
                         break
                 except Exception as e:
-                    logger.debug(f"通过order-block获取订单号失败（第 {attempt + 1} 次）: {e}")
+                    logger.debug(f"通过订单行候选字段获取订单号失败（第 {attempt + 1} 次）: {e}")
                 if attempt < 2:
                     self.page.wait_for_timeout(1000)
 
@@ -1891,7 +1919,7 @@ class SalesOrderPage(BasePage):
                     script_result = self.page.evaluate(f"""
                         () => {{
                             const text = document.body.innerText;
-                            const matches = text.match(/SO\\d{{14,}}/g);
+                            const matches = text.match(/\\bSO(?=[A-Z0-9_-]*\\d)[A-Z0-9_-]+\\b/gi);
                             if (matches) {{
                                 const unique = [...new Set(matches)];
                                 return unique.slice(0, {limit});

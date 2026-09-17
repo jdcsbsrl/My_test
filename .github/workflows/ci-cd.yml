@@ -172,6 +172,7 @@ jobs:
       TEST_ENV: test
       # CI is an explicitly authorized test-environment execution.
       AUTO_TEST_AUTHORIZED: "true"
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
       TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
       TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
@@ -191,7 +192,7 @@ jobs:
       - name: Install Playwright browsers
         run: playwright install --with-deps chromium
       - name: Validate CI endpoints
-        run: python tools/validate_ci_environment.py
+        run: python tools/validate_ci_environment.py --require-ui
       - name: Run integration tests
         run: |
           mkdir -p .runtime/reports/allure-results
