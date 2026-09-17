@@ -208,7 +208,8 @@ class InventorySKUFacade:
             导出结果信息（含分页设置耗时、选中数量等）
         """
         page_set_time = self.sku_page.set_page_size(page_size)
-        self.page.wait_for_load_state("networkidle")
+        # set_page_size() already waits for the table data to settle.  Do not
+        # wait for global network idle on this long-lived SPA page.
 
         result_count = self.sku_page.get_result_count()
         selected_count = min(result_count, page_size) if result_count > 0 else 0

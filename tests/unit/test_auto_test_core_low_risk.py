@@ -94,7 +94,9 @@ class TestEnvironment:
         assert env.endpoints.api_base_url == "https://erp.test/api"
         assert env.endpoints.auth_url == "https://erp.test/api/oms-admin/auth/login"
 
-    def test_environment_uses_normalized_config_manager_endpoints(self):
+    def test_environment_uses_normalized_config_manager_endpoints(self, monkeypatch):
+        monkeypatch.setenv("TEST_WEB_BASE_URL", "https://erptest.dayoneerp.com/oms-ui")
+        monkeypatch.setenv("TEST_WEB_API_BASE_URL", "https://erptest.dayoneerp.com/oms-api")
         env = environment.Environment("test")
 
         assert env.endpoints.base_url == "https://erptest.dayoneerp.com/oms-ui"

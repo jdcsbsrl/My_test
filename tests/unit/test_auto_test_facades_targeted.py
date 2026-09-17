@@ -312,7 +312,7 @@ def test_inventory_sku_facade_export_with_page_size_adds_counts(monkeypatch):
         "result_count": 12,
         "selected_count": 10,
     }
-    page.wait_for_load_state.assert_called_once_with("networkidle")
+    page.wait_for_load_state.assert_not_called()
     facade.export_current_search.assert_called_once_with(
         select_all_fields=False, fields=["sku"], download_dir="downloads"
     )
