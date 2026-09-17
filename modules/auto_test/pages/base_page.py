@@ -173,13 +173,18 @@ class BasePage:
         try:
             wait_for_required_controls(initial_timeout)
             ready_locator.wait_for(state="visible", timeout=initial_timeout)
-        except PlaywrightTimeoutError:
+        except PlaywrightTimeoutError as initial_error:
             logger.warning(
                 "{} business controls not ready after {}s; retrying route: url={}, title={}",
                 page_name,
                 initial_timeout // 1000,
                 self._redact_url(self.page.url),
                 self._redact_text(self.page.title()),
+            )
+            logger.warning(
+                "{} business readiness diagnostics: {}",
+                page_name,
+                self._business_ready_diagnostics(selectors, required_selectors, error=initial_error),
             )
             try:
                 self.take_screenshot(f"{page_name}_bootstrap_timeout")
@@ -210,11 +215,65 @@ class BasePage:
                             self._redact_url(self.page.url),
                             self._redact_text(self.page.title()),
                         )
+            logger.warning(
+                "{} business readiness final diagnostics: {}",
+                page_name,
+                self._business_ready_diagnostics(selectors, required_selectors, error=last_error),
+            )
             raise PlaywrightTimeoutError(
                 f"{page_name} business controls were not ready after initial wait and "
                 f"{max_route_retries} route retries"
             ) from last_error
         logger.info("{} business controls are ready", page_name)
+
+    def _business_ready_diagnostics(
+        self,
+        selectors: list[str],
+        required_selectors: list[str] | None = None,
+        *,
+        error: Exception | None = None,
+    ) -> dict[str, object]:
+        """Collect safe, low-volume diagnostics for a route readiness timeout."""
+        try:
+            url = self._redact_url(self.page.url)
+        except Exception:
+            url = "[unavailable]"
+        try:
+            title = self._redact_text(self.page.title())
+        except Exception:
+            title = "[unavailable]"
+
+        candidates = [item.strip() for item in [*(selectors or []), *(required_selectors or [])] if item.strip()]
+        selector_counts: dict[str, int | str] = {}
+        for candidate in candidates:
+            try:
+                selector_counts[candidate] = self.page.locator(candidate).count()
+            except Exception as count_error:
+                selector_counts[candidate] = f"error:{type(count_error).__name__}"
+
+        diagnostics: dict[str, object] = {
+            "url": url,
+            "title": title,
+            "selector_counts": selector_counts,
+        }
+        try:
+            diagnostics["document"] = self.page.evaluate("""() => ({
+                    ready_state: document.readyState,
+                    script_count: document.scripts.length,
+                    visible_loading_indicators: Array.from(document.querySelectorAll(
+                        '.el-loading-mask, .ant-spin-spinning, [aria-busy="true"]'
+                    )).filter((element) => {
+                        const style = window.getComputedStyle(element);
+                        const rect = element.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none' && style.visibility !== 'hidden';
+                    }).length
+                })""")
+        except Exception as evaluate_error:
+            diagnostics["document"] = f"error:{type(evaluate_error).__name__}"
+        if error is not None:
+            diagnostics["error"] = self._redact_text(error)
+        return diagnostics
 
     @allure.step("Click element: {selector}")
     def click(self, selector: str) -> None:

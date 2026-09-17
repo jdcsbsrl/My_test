@@ -517,3 +517,11 @@ class TestBaseAndExportPage:
         assert result["success"]
         assert ("get", 180000) in timeouts
         assert ("post", 180000) in timeouts
+
+    def test_inventory_export_accepts_supported_column_response_envelopes(self):
+        columns = {"OmsInventory": [{"label": "SKU", "prop": "sku"}], "OmsLocation": []}
+
+        assert InventoryExportPage._extract_inventory_column_data({"data": columns}) == columns
+        assert InventoryExportPage._extract_inventory_column_data({"result": columns}) == columns
+        assert InventoryExportPage._extract_inventory_column_data(columns) == columns
+        assert InventoryExportPage._extract_inventory_column_data({"data": []}) is None

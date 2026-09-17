@@ -82,6 +82,8 @@ config/*.yaml
 configs/*.yaml
 !configs/README.md
 !configs/env_config.example.yaml
+!configs/test.yaml
+!configs/uat.yaml
 configs/*.yml
 configs/*.json
 !configs/*.example.*
