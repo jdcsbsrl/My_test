@@ -78,6 +78,34 @@ def test_checker_rejects_removed_tool_reference(tmp_path):
     assert any(issue["type"] == "removed_tool_reference" for issue in result["issues"])
 
 
+def test_checker_rejects_stale_document_reference(tmp_path):
+    write_core_docs(tmp_path)
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "doc_consistency_checker.py").write_text("# tool\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text(valid_agents(), encoding="utf-8")
+    (tmp_path / "docs" / "USAGE_EXAMPLES.md").write_text(
+        "python tools/multi_agent_runner.py --task test_case\n", encoding="utf-8"
+    )
+
+    result = DocConsistencyChecker(tmp_path).run()
+
+    assert result["exit_code"] == 2
+    assert any(issue["type"] == "stale_document_reference" for issue in result["issues"])
+
+
+def test_checker_rejects_missing_links_in_all_project_documents(tmp_path):
+    write_core_docs(tmp_path)
+    (tmp_path / "tools").mkdir()
+    (tmp_path / "tools" / "doc_consistency_checker.py").write_text("# tool\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text(valid_agents(), encoding="utf-8")
+    (tmp_path / "docs" / "USAGE_EXAMPLES.md").write_text("[missing](../tools/not_existing.py)\n", encoding="utf-8")
+
+    result = DocConsistencyChecker(tmp_path).run()
+
+    assert result["exit_code"] == 2
+    assert any(issue["type"] == "missing_entry_point" for issue in result["issues"])
+
+
 def test_checker_rejects_missing_frontmatter(tmp_path):
     write_core_docs(tmp_path)
     (tmp_path / "AGENTS.md").write_text(valid_agents(), encoding="utf-8")

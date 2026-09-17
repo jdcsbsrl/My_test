@@ -558,10 +558,15 @@ class SalesOrderPage(BasePage):
     @allure.step("等待销售订单页面业务控件就绪")
     def wait_for_order_page_ready(self, timeout: int = 30000) -> None:
         """Wait for SPA business controls without requiring network idle."""
-        self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
+        self.wait_for_business_ready(
+            ['button:visible:has-text("搜索")'],
+            page_name="销售订单页面",
+            required_selectors=[".store-select-trigger:visible"],
+            initial_timeout=timeout,
+            retry_timeout=timeout,
+            max_route_retries=1,
+        )
         self.wait_for_loading_complete(timeout=timeout)
-        self.page.get_by_role("button", name="搜索", exact=True).wait_for(state="visible", timeout=timeout)
-        self.page.locator(".store-select-trigger:visible").first.wait_for(state="visible", timeout=timeout)
 
     @allure.step("获取所有标签页")
     def get_all_tabs(self) -> list[str]:
@@ -1331,28 +1336,48 @@ class SalesOrderPage(BasePage):
 
     @allure.step("等待表格数据加载完成")
     def wait_for_table_data(self, timeout: int = 15000) -> bool:
-        """在总预算内等待表格数据，避免每个选择器重复消耗完整超时。"""
+        """在总预算内等待表格行；空结果页返回 ``False``。"""
+        return self.wait_for_order_data_state(timeout) == "rows"
+
+    @allure.step("等待订单列表状态")
+    def wait_for_order_data_state(self, timeout: int = 15000) -> str:
+        """Distinguish a loading page from an explicitly empty order result.
+
+        Returns ``rows`` when visible order rows are available, ``empty`` when
+        the UI renders its empty-state component, and ``timeout`` when neither
+        state is observable before the deadline.
+        """
         deadline = time.monotonic() + max(timeout, 1) / 1000
-        selectors = [
-            "//tbody//tr[contains(@class, 'el-table__row')]",
-            "//div[contains(@class, 'el-table__body-wrapper')]//tr",
-            "//table//tbody//tr",
+        row_selectors = [
+            ".order-block:visible",
+            "tbody tr.el-table__row:visible",
+            ".el-table__body-wrapper tbody tr:visible",
+            "table tbody tr:visible",
         ]
-        for selector in selectors:
-            try:
-                remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-                self.page.locator(selector).first.wait_for(state="visible", timeout=remaining_ms)
-                return True
-            except Exception:
-                continue
-        try:
-            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-            self.page.locator("//div[contains(@class, 'el-loading-mask')]").first.wait_for(
-                state="hidden", timeout=remaining_ms
-            )
-        except Exception:
-            pass
-        return False
+        empty_selectors = [
+            ".el-table__empty-block:visible",
+            ".el-table__empty-text:visible",
+            ".el-empty:visible",
+            ".ant-empty:visible",
+            ".ant-table-placeholder:visible",
+        ]
+
+        while time.monotonic() < deadline:
+            for selector in row_selectors:
+                try:
+                    if self.page.locator(selector).count() > 0:
+                        return "rows"
+                except Exception:
+                    continue
+            for selector in empty_selectors:
+                try:
+                    if self.page.locator(selector).count() > 0:
+                        return "empty"
+                except Exception:
+                    continue
+            self.wait_for_poll_interval(min(250, max(1, int((deadline - time.monotonic()) * 1000))))
+
+        return "timeout"
 
     @allure.step("等待订单行和复选框稳定")
     def wait_for_order_rows_ready(self, timeout: int = 30000) -> None:
@@ -1381,11 +1406,18 @@ class SalesOrderPage(BasePage):
         )
 
     @allure.step("等待排序完成")
-    def wait_for_sort_complete(self, timeout: int = 10000) -> None:
-        """等待排序完成（等待业务加载结束 + 订单行刷新）"""
+    def wait_for_sort_complete(self, timeout: int = 10000) -> str:
+        """等待排序完成，并区分有数据、空数据和真实超时。"""
         self.page.wait_for_load_state("domcontentloaded")
         self.wait_for_loading_complete(timeout=timeout)
+        data_state = self.wait_for_order_data_state(timeout=max(timeout, 30000))
+        if data_state == "empty":
+            logger.info("排序完成，但当前销售订单查询结果为空")
+            return data_state
+        if data_state == "timeout":
+            raise TimeoutError("排序后销售订单列表未在限定时间内进入有数据或明确无数据状态")
         self.wait_for_order_rows_ready(timeout=max(timeout, 30000))
+        return data_state
 
     @allure.step("等待选中数量更新")
     def verify_selected_count(self, timeout: int = 5000) -> int:
@@ -1780,17 +1812,44 @@ class SalesOrderPage(BasePage):
 
         try:
             self.wait_for_load_state()
+            data_state = self.wait_for_order_data_state(timeout=30000)
+            if data_state == "empty":
+                logger.info("销售订单页面已完成加载，但当前查询结果为空")
+                return []
+            if data_state == "timeout":
+                raise TimeoutError("销售订单列表未在限定时间内进入有数据或明确无数据状态")
             import time
 
+            try:
+                self.page.wait_for_function(
+                    """
+                    () => {
+                        const blocks = [...document.querySelectorAll('.order-block')];
+                        if (!blocks.length) {
+                            return true;
+                        }
+                        return blocks.some((block) =>
+                            /^SO\\d+$/.test((block.getAttribute('data-order-no') || '').trim())
+                        );
+                    }
+                    """,
+                    timeout=10000,
+                )
+            except Exception as exc:
+                logger.debug(f"等待订单卡片业务标识完成超时，继续兼容回退提取: {exc}")
             time.sleep(5)
 
-            try:
-                script_result = self.page.evaluate(f"""
+            order_block_script = f"""
                     () => {{
                         const orderBlocks = document.querySelectorAll('.order-block');
                         const orderNumbers = [];
                         for (let i = 0; i < Math.min({limit}, orderBlocks.length); i++) {{
                             const block = orderBlocks[i];
+                            const dataOrderNo = (block.getAttribute('data-order-no') || '').trim();
+                            if (/^SO\\d+$/.test(dataOrderNo)) {{
+                                orderNumbers.push(dataOrderNo);
+                                continue;
+                            }}
                             const spans = block.querySelectorAll('span.el-text--primary');
                             for (const span of spans) {{
                                 const text = span.innerText.trim();
@@ -1802,12 +1861,30 @@ class SalesOrderPage(BasePage):
                         }}
                         return orderNumbers;
                     }}
-                    """)
-                if script_result:
-                    results = script_result
-                    logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
-            except Exception as e:
-                logger.debug(f"通过order-block获取订单号失败: {e}")
+                    """
+            for attempt in range(3):
+                try:
+                    script_result = self.page.evaluate(order_block_script)
+                    if script_result:
+                        results = script_result
+                        logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
+                        break
+                except Exception as e:
+                    logger.debug(f"通过order-block获取订单号失败（第 {attempt + 1} 次）: {e}")
+                if attempt < 2:
+                    self.page.wait_for_timeout(1000)
+
+            if not results:
+                try:
+                    order_blocks = self.page.locator(".order-block:visible")
+                    for index in range(min(limit, order_blocks.count())):
+                        data_order_no = (order_blocks.nth(index).get_attribute("data-order-no") or "").strip()
+                        if re.fullmatch(r"SO\d+", data_order_no):
+                            results.append(data_order_no)
+                    if results:
+                        logger.info("通过 Locator 属性回退获取到 {} 个系统单号", len(results))
+                except Exception as e:
+                    logger.debug(f"通过 Locator 属性获取订单号失败: {e}")
 
             if not results:
                 try:
@@ -1837,6 +1914,8 @@ class SalesOrderPage(BasePage):
                         unique_results.append(num)
                 results = unique_results[:limit]
                 logger.info("去重后订单号数量: {}", len(results))
+        except TimeoutError:
+            raise
         except Exception as e:
             logger.warning(f"获取排序后订单号失败: {e}")
 

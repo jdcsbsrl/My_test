@@ -2,6 +2,7 @@ import os
 import re
 import time
 import uuid
+from typing import Any
 from urllib.parse import unquote, urljoin
 
 import allure
@@ -37,9 +38,92 @@ class SalesOrderExportPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.export_url_pattern = "sales/order/exportPage"
+        self.last_wait_diagnostics: dict[str, Any] = {}
+
+    def _attach_wait_diagnostics(
+        self,
+        page: Page,
+        diagnostics: dict[str, list[dict[str, Any]]],
+        listeners: list[tuple[Any, str, Any]],
+        observed_pages: set[int],
+    ) -> None:
+        """Capture browser failures that explain an export route timeout."""
+        page_id = id(page)
+        if page_id in observed_pages:
+            return
+        observed_pages.add(page_id)
+        on = getattr(page, "on", None)
+        if not callable(on):
+            return
+
+        def record(category: str, value: dict[str, Any]) -> None:
+            if len(diagnostics[category]) < 20:
+                diagnostics[category].append(value)
+
+        def on_response(response: Any) -> None:
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and status >= 400:
+                record(
+                    "http_errors",
+                    {"status": status, "url": self._redact_url(getattr(response, "url", ""))},
+                )
+
+        def on_request_failed(request: Any) -> None:
+            failure = getattr(request, "failure", None)
+            if callable(failure):
+                failure = failure()
+            record(
+                "request_failures",
+                {
+                    "url": self._redact_url(getattr(request, "url", "")),
+                    "failure": self._redact_text(failure),
+                },
+            )
+
+        def on_console(message: Any) -> None:
+            message_type = str(getattr(message, "type", ""))
+            if message_type in {"error", "warning"}:
+                record(
+                    "console_messages",
+                    {"type": message_type, "text": self._redact_text(getattr(message, "text", ""))},
+                )
+
+        def on_page_error(error: Any) -> None:
+            record("page_errors", {"text": self._redact_text(error)})
+
+        handlers = {
+            "response": on_response,
+            "requestfailed": on_request_failed,
+            "console": on_console,
+            "pageerror": on_page_error,
+        }
+        for event, handler in handlers.items():
+            try:
+                on(event, handler)
+                listeners.append((page, event, handler))
+            except Exception:
+                continue
+
+    def _detach_wait_diagnostics(self, listeners: list[tuple[Any, str, Any]]) -> None:
+        for page, event, handler in listeners:
+            remove_listener = getattr(page, "remove_listener", None)
+            if not callable(remove_listener):
+                continue
+            try:
+                remove_listener(event, handler)
+            except Exception:
+                continue
 
     @allure.step("等待导出页面加载")
     def wait_for_export_page(self, timeout: int = 30000) -> bool:
+        diagnostics: dict[str, list[dict[str, Any]]] = {
+            "http_errors": [],
+            "request_failures": [],
+            "console_messages": [],
+            "page_errors": [],
+        }
+        listeners: list[tuple[Any, str, Any]] = []
+        observed_pages: set[int] = set()
         try:
             start_time = time.monotonic()
             deadline = start_time + max(timeout, 1) / 1000
@@ -52,6 +136,8 @@ class SalesOrderExportPage(BasePage):
                     pages = [self.page]
                 if self.page not in pages:
                     pages.insert(0, self.page)
+                for pg in pages:
+                    self._attach_wait_diagnostics(pg, diagnostics, listeners, observed_pages)
 
                 for pg in pages:
                     if self.export_url_pattern not in pg.url:
@@ -101,15 +187,22 @@ class SalesOrderExportPage(BasePage):
             except Exception:
                 pages = [self.page]
             pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
+            diagnostics["pages"] = [
+                {"url": self._redact_url(item["url"]), "title": self._redact_text(item["title"])} for item in pages_info
+            ]
+            self.last_wait_diagnostics = diagnostics
             logger.warning(
-                "超时，所有页面: {}",
-                [{**item, "url": self._redact_url(item["url"])} for item in pages_info],
+                "导出页面未就绪，诊断信息: {}",
+                diagnostics,
             )
             logger.warning("未找到导出页面，当前页面URL: {}", self._redact_url(self.page.url))
             return False
         except Exception as e:
+            self.last_wait_diagnostics = diagnostics
             logger.warning(f"等待导出页面超时: {e}")
             return False
+        finally:
+            self._detach_wait_diagnostics(listeners)
 
     def _export_controls_ready(self) -> bool:
         """Return true only after the export SPA has mounted its real controls.

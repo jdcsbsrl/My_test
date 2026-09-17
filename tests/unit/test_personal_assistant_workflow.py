@@ -264,3 +264,25 @@ def test_harness_core_skip_changes_success_exit_code(tmp_path, monkeypatch):
     session = SimpleNamespace(config=SimpleNamespace(), exitstatus=0, testscollected=1)
     plugin.pytest_sessionfinish(session, 0)
     assert session.exitstatus == 2
+
+
+def test_harness_optional_all_skip_keeps_success_exit_code(tmp_path, monkeypatch):
+    import json
+
+    import fixtures.harness_plugin as plugin
+
+    state = {
+        "results": [{"nodeid": "optional-test", "outcome": "skipped", "critical": False}],
+        "attempts": {},
+        "metrics": None,
+    }
+    monkeypatch.setattr(plugin, "_state", lambda config: state)
+    monkeypatch.setattr(plugin, "_ensure_runtime_directories", lambda config: None)
+    monkeypatch.setattr(plugin, "_runtime_reports_dir", lambda config: tmp_path)
+    session = SimpleNamespace(config=SimpleNamespace(), exitstatus=0, testscollected=1)
+
+    plugin.pytest_sessionfinish(session, 0)
+
+    assert session.exitstatus == 0
+    summary = json.loads((tmp_path / "test-summary.json").read_text(encoding="utf-8"))
+    assert summary["verification_incomplete"] is True

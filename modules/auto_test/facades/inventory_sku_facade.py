@@ -118,7 +118,11 @@ class InventorySKUFacade:
         self.sku_page.select_export_current_search()
         self.export_page = InventoryExportPage(self.page)
         if not self.export_page.wait_for_export_page():
-            return {"success": False, "error": "导出页面加载失败"}
+            result = {"success": False, "error": "导出页面加载失败"}
+            diagnostics = getattr(self.export_page, "last_wait_diagnostics", None)
+            if isinstance(diagnostics, dict) and diagnostics:
+                result["diagnostics"] = diagnostics
+            return result
 
         self.export_page.select_first_template_if_available()
 
@@ -162,7 +166,11 @@ class InventorySKUFacade:
         self.sku_page.select_export_selected()
         self.export_page = InventoryExportPage(self.page)
         if not self.export_page.wait_for_export_page():
-            return {"success": False, "error": "导出页面加载失败"}
+            result = {"success": False, "error": "导出页面加载失败"}
+            diagnostics = getattr(self.export_page, "last_wait_diagnostics", None)
+            if isinstance(diagnostics, dict) and diagnostics:
+                result["diagnostics"] = diagnostics
+            return result
 
         self.export_page.select_first_template_if_available()
 

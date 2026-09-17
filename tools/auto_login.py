@@ -11,8 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "modules" / "auto_test"))
 
-from modules.auto_test.core.config_manager import ConfigManager, get_config
-from modules.auto_test.core.environment import validate_environment
+from modules.auto_test.core.config_manager import ConfigManager, get_config, validate_environment
 from modules.auto_test.core.login_service import get_login_service
 from modules.auto_test.core.secret_manager import get_secret_manager
 from modules.auto_test.core.token_manager import get_token_manager

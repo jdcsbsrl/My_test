@@ -105,6 +105,17 @@ def test_empty_unregistered_root_directory_is_ignored(tmp_path):
     assert not auditor.issues
 
 
+def test_codex_external_agents_directory_is_ignored(tmp_path):
+    agents_dir = tmp_path / ".agents"
+    agents_dir.mkdir()
+    (agents_dir / "runtime.md").write_text("external runtime metadata", encoding="utf-8")
+    auditor = auditor_for(tmp_path)
+
+    auditor._check_root_directories()
+
+    assert not auditor.issues
+
+
 def test_bare_relative_write_path_is_warning(tmp_path):
     source = tmp_path / "tools"
     source.mkdir()

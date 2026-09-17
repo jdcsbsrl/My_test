@@ -1,7 +1,7 @@
 from pathlib import Path
 
+from modules.trae_test.orchestrator.agent_orchestrator import AgentOrchestrator
 from tools.report_generator import TestReportGenerator as ReportGenerator
-from tools.multi_agent_runner import create_orchestrator
 import tools.auto_login as auto_login
 
 
@@ -53,7 +53,7 @@ def test_auto_login_returns_failure_status_when_any_environment_fails(monkeypatc
 
 
 def test_code_review_does_not_run_environment_audit(capsys):
-    orchestrator = create_orchestrator()
+    orchestrator = AgentOrchestrator()
 
     result = orchestrator.execute_code_review("def hello():\n    return 1")
 

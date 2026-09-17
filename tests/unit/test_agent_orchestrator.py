@@ -107,26 +107,10 @@ class TestAgentOrchestratorExecution:
 
 class TestAgentOrchestratorWorkflows:
     def test_execute_test_case_generation(self):
-        """测试用例生成工作流：使用非空用例列表以通过审计硬阻断。"""
-        from modules.trae_test.orchestrator.config import (
-            AuditConfig,
-            OrchestratorConfig,
-            OutputMode,
-            RetryConfig,
-            WorkflowConfig,
-        )
-
-        # 使用关闭硬阻断的配置，避免空用例列表触发 AuditFailedException
-        config = OrchestratorConfig(
-            audit_config=AuditConfig(enforce_hard_block=False),
-            workflow_config=WorkflowConfig(generate_report=False),
-            retry_config=RetryConfig(enabled=False),
-            output_mode=OutputMode.CONSOLE,
-        )
-        o = AgentOrchestrator(config)
-        test_cases = [{"用例名称": "测试用例1", "用例目录": "测试模块", "用例步骤": "步骤1", "预期结果": "成功"}]
-        result = o.execute_test_case_generation(requirement_id="1001", requirement_name="test", test_cases=test_cases)
-        assert isinstance(result, str)
+        """旧测试用例生成工作流必须明确拒绝并指向当前入口。"""
+        o = AgentOrchestrator()
+        with pytest.raises(RuntimeError, match="case_generator_cli.py"):
+            o.execute_test_case_generation(requirement_id="1001", requirement_name="test", test_cases=[])
 
     def test_execute_code_review(self):
         o = AgentOrchestrator()

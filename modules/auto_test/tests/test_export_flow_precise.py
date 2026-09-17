@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import warnings
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")
@@ -17,6 +18,15 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 def _skip_ci_environment_issue(reason: str) -> None:
     if os.getenv("CI", "").lower() in {"1", "true", "yes"}:
         pytest.skip(f"CI测试环境页面/接口未就绪，跳过本次UI用例: {reason}")
+
+
+def _require_order_data(sales_order_page: SalesOrderPage, phase: str) -> None:
+    """Skip this optional export flow when the test account has no orders."""
+    data_state = sales_order_page.wait_for_order_data_state(timeout=60000)
+    if data_state == "empty":
+        pytest.skip(f"{phase}前当前销售订单查询结果为空，跳过依赖业务数据的导出用例")
+    if data_state == "timeout":
+        pytest.fail(f"{phase}前销售订单页面未进入有数据或明确无数据状态")
 
 
 @pytest.mark.regression
@@ -44,6 +54,7 @@ class TestExportFlowPrecise:
         # is a status-specific view and may legitimately be empty.
         sales_order_page.click_tab("全部订单")
         logged_in_page.wait_for_load_state("networkidle")
+        _require_order_data(sales_order_page, "排序")
 
         print("\n" + "=" * 70)
         print("Step 3: Get order numbers before sort")
@@ -59,6 +70,7 @@ class TestExportFlowPrecise:
 
         sales_order_page.select_sort_order("付款时间", is_ascending=True)
         logged_in_page.wait_for_load_state("networkidle")
+        _require_order_data(sales_order_page, "导出")
 
         print("\n" + "=" * 70)
         print("Step 5: Get order numbers after sort")
@@ -187,7 +199,13 @@ class TestExportFlowPrecise:
         print("=" * 70)
         import openpyxl
 
-        wb = openpyxl.load_workbook(file_path)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Workbook contains no default style.*",
+                category=UserWarning,
+            )
+            wb = openpyxl.load_workbook(file_path)
         ws = wb.active
 
         order_numbers = []

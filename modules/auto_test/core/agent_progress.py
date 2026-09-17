@@ -8,7 +8,7 @@ from typing import Any
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parents[3]
 
 
 _PROGRESS_REL = Path(".agents") / "progress.json"

@@ -28,6 +28,7 @@ class InventoryExportPage(BasePage):
 
     def __init__(self, page: Page) -> None:
         super().__init__(page)
+        self.last_wait_diagnostics: dict[str, str] = {}
 
     @allure.step("等待导出页面加载")
     def wait_for_export_page(self, timeout: int = 30000) -> bool:
@@ -50,10 +51,22 @@ class InventoryExportPage(BasePage):
                 self.wait_for_poll_interval(1000)
 
             logger.warning("未找到导出页面，当前页面URL: {}", self._redact_url(self.page.url))
+            self.last_wait_diagnostics = self._wait_failure_diagnostics()
             return False
         except Exception as e:
+            self.last_wait_diagnostics = self._wait_failure_diagnostics(error=e)
             logger.warning(f"等待导出页面超时: {e}")
             return False
+
+    def _wait_failure_diagnostics(self, error: Exception | None = None) -> dict[str, str]:
+        """Return safe route diagnostics for facade-level failure reports."""
+        diagnostics = {
+            "url": self._redact_url(self.page.url),
+            "title": self._redact_text(self.page.title()),
+        }
+        if error is not None:
+            diagnostics["error"] = self._redact_text(error)
+        return diagnostics
 
     @allure.step("检查是否在导出页面")
     def _wait_for_export_content(self, timeout: int = 15000) -> None:

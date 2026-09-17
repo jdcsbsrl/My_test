@@ -42,7 +42,7 @@
 
 | 任务类型 | 必读专项规范 | 代码/工具入口 | 验证入口 |
 |---|---|---|---|
-| 测试用例生成 | [TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | `test_case_generator.py`、`case_generator_cli.py` | 测试用例测试与人工审核 |
+| 测试用例生成 | [TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | `case_generation_service.py`、`case_generator_cli.py` | 测试用例测试与人工审核 |
 | 自动化测试执行 | [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) | `run_regression.py`、`auto_test/` | 目标测试与报告 |
 | 知识库检索 | [KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | `KnowledgeRetriever` | 检索 API 测试 |
 | 知识库更新 | [KNOWLEDGE_BASE_UPDATE_WORKFLOW.md](docs/KNOWLEDGE_BASE_UPDATE_WORKFLOW.md) | `tools/kb_manager.py` | lint / scan / validate |
@@ -72,7 +72,8 @@
 
 ### 测试用例生成
 
-- [test_case_generator.py](modules/trae_test/utils/test_case_generator.py)：标准字段生成。
+- [case_generation_service.py](modules/trae_test/utils/case_generation_service.py)：正式需求到用例生成服务。
+- [test_case_generator.py](modules/trae_test/utils/test_case_generator.py)：历史低层生成器，仅保留兼容和评估调用。
 - [test_case_strategy.py](modules/trae_test/utils/test_case_strategy.py)：评分、优化和 `TestCaseRegenerationLoop`。
 - [excel_generator.py](modules/trae_test/utils/excel_generator.py)：统一 Excel 生成。
 - [case_generator_cli.py](tools/case_generator_cli.py)：命令行入口。
@@ -88,7 +89,7 @@
 
 - [audit_agent_enhanced.py](modules/trae_test/orchestrator/audit_agent_enhanced.py)：`AuditAgent` 阻塞式审核入口。
 - [audit_models.py](modules/trae_test/orchestrator/audit_models.py)：`AuditResult` / `AuditIssue` 结果契约。
-- [multi_agent_runner.py](tools/multi_agent_runner.py)：多 Agent 协同编排入口。
+- [agent_orchestrator.py](modules/trae_test/orchestrator/agent_orchestrator.py)：通用审核工作流兼容层；测试用例生成不再从此处进入。
 
 ## 7. 文件、产物与 workspace 索引
 
@@ -116,7 +117,7 @@
 
 审核结果复用 `AuditResult.to_dict()`，不创建平行结果格式。审核退出码统一为：`0` 通过、`1` 警告、`2` 阻断。独立 CI 结构审核 job 不依赖允许失败的代码质量 job。
 
-本地 pre-commit 对任何非零退出码均阻断提交，这是预期行为；CI 对退出码 `1` 记录警告，对退出码 `2` 阻断合并。
+本地 pre-commit 对任何非零退出码均阻断提交，这是预期行为；CI 对退出码 `1` 记录警告，对退出码 `2` 阻断合并。pytest 核心/P0 用例跳过时使用退出码 `2`；仅包含非核心可选用例的全跳过 shard 保留不完整标记但不强制退出码 `2`。
 
 ## 9. Git 与交付
 
@@ -141,7 +142,7 @@
 
 ## 11. 完整索引
 
-- Agent 配置索引：Trae 专属配置已移除，通用规则见 [AGENT_RULES.md](docs/AGENT_RULES.md)。
+- Agent 配置索引：通用规则见 [AGENT_RULES.md](docs/AGENT_RULES.md)。
 - 知识库全局索引：`assets/knowledge_base/index/global/`。
 - 逐文件索引：`assets/knowledge_base/index/files/`。
 - 向量索引：`assets/knowledge_base/index/vector/`。

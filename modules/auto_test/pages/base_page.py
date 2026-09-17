@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
@@ -138,6 +139,7 @@ class BasePage:
         selectors: list[str],
         *,
         page_name: str,
+        required_selectors: list[str] | None = None,
         initial_timeout: int = 30000,
         retry_timeout: int = 45000,
         max_route_retries: int = 1,
@@ -156,8 +158,20 @@ class BasePage:
         if max_route_retries < 0:
             raise ValueError("max_route_retries cannot be negative")
         ready_locator = self.page.locator(selector).first
+
+        required_locators = [
+            self.page.locator(item.strip()).first for item in (required_selectors or []) if item.strip()
+        ]
+
+        def wait_for_required_controls(timeout: int) -> None:
+            deadline = time.monotonic() + max(timeout, 1) / 1000
+            for locator in required_locators:
+                remaining = max(1, int((deadline - time.monotonic()) * 1000))
+                locator.wait_for(state="visible", timeout=remaining)
+
         self.wait_for_load_state("domcontentloaded")
         try:
+            wait_for_required_controls(initial_timeout)
             ready_locator.wait_for(state="visible", timeout=initial_timeout)
         except PlaywrightTimeoutError:
             logger.warning(
@@ -175,6 +189,7 @@ class BasePage:
             for retry_index in range(1, max_route_retries + 1):
                 try:
                     self.page.reload(wait_until="domcontentloaded", timeout=60000)
+                    wait_for_required_controls(retry_timeout)
                     ready_locator.wait_for(state="visible", timeout=retry_timeout)
                     logger.info(
                         "{} business controls became ready after route retry {}/{}",

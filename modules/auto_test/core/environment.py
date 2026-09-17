@@ -1,33 +1,33 @@
+"""Backward-compatible environment facade.
+
+The canonical configuration and endpoint validation live in
+``modules.auto_test.core.config_manager``.  This module keeps the historical
+``Environment`` API for existing callers while sourcing its configuration and
+security policy from that canonical implementation.
+"""
+
 import copy
 import os
 from dataclasses import dataclass
-from enum import Enum
-from pathlib import Path
 from typing import Any
 
-import yaml
-from dotenv import load_dotenv
+from modules.auto_test.core.config_manager import (
+    EnvironmentSecurityError,
+    EnvironmentType,
+    get_config,
+    validate_environment as _validate_canonical_environment,
+)
 
-load_dotenv()
-
-
-class EnvironmentType(Enum):
-    TEST = "test"
-    TEST_ENV = "test_env"
-    UAT = "uat"
-    PRODUCTION = "production"
-
-    @classmethod
-    def is_allowed(cls, env: str) -> bool:
-        return env.lower() in [cls.TEST.value, cls.TEST_ENV.value, cls.UAT.value]
-
-    @classmethod
-    def is_production(cls, env: str) -> bool:
-        return env.lower() == cls.PRODUCTION.value
-
-
-class EnvironmentSecurityError(Exception):
-    pass
+__all__ = [
+    "APIConfig",
+    "BrowserConfig",
+    "EndpointConfig",
+    "Environment",
+    "EnvironmentSecurityError",
+    "EnvironmentType",
+    "get_environment",
+    "validate_environment",
+]
 
 
 @dataclass
@@ -73,23 +73,13 @@ class Environment:
         self._load_endpoints(env)
 
     def _validate_environment(self, env: str) -> None:
-        if not EnvironmentType.is_allowed(env):
-            raise EnvironmentSecurityError(
-                f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"
-                f"当前环境: {env}\n"
-                f"允许的环境: test, uat\n"
-                f"如需执行测试，请联系项目负责人获取授权。"
-            )
+        _validate_canonical_environment(env)
 
     def _load_config(self, env: str) -> None:
-        config_path = Path(__file__).parent.parent / "configs" / f"{env}.yaml"
-        if not config_path.exists():
-            raise FileNotFoundError(f"Config file not found: {config_path}")
-
-        with open(config_path, encoding="utf-8") as f:
-            self._config = yaml.safe_load(f)
-
-        self._config = self._resolve_env_vars(self._config)
+        # Reuse the canonical loader so legacy callers cannot select a
+        # different config path or bypass endpoint validation.
+        self._canonical_config = get_config(env)
+        self._config = self._canonical_config.config
         self._config["env"] = env
 
     def _resolve_env_vars(self, obj: Any) -> Any:
@@ -106,15 +96,20 @@ class Environment:
         return obj
 
     def _load_endpoints(self, env: str) -> None:
-        origin = self._config.get("origin", os.getenv("TEST_WEB_API_BASE_URL"))
-        ui_path = self._config.get("ui_path", "")
-        api_path = self._config.get("api_path", "/oms-uat-api")
+        # ConfigManager owns endpoint normalization and authentication-path
+        # validation.  Keep the legacy dataclass shape, but never rebuild
+        # URLs from the removed origin/ui_path/api_path fields here.
+        canonical_config = getattr(self, "_canonical_config", None)
+        if canonical_config is None or canonical_config.env != env:
+            canonical_config = get_config(env)
+            self._canonical_config = canonical_config
+        endpoints = canonical_config.endpoints
 
         self.endpoints = EndpointConfig(
-            base_url=f"{origin}{ui_path}",
-            api_base_url=f"{origin}{api_path}",
-            auth_url=f"{origin}{api_path}/oms-admin/auth/login",
-            admin_path="/oms-admin",
+            base_url=endpoints.base_url,
+            api_base_url=endpoints.api_base_url,
+            auth_url=endpoints.auth_url,
+            admin_path=endpoints.admin_path,
         )
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -184,17 +179,5 @@ def get_environment(env: str | None = None) -> Environment:
 
 
 def validate_environment(env: str) -> None:
-    """Validate the environment using the single supported policy."""
-    if not EnvironmentType.is_allowed(env):
-        raise EnvironmentSecurityError(
-            f"环境安全异常: 禁止在生产环境 (production) 执行自动化测试。\n"
-            f"当前环境: {env}\n"
-            f"允许的环境: test, uat\n"
-            f"如需执行测试，请联系项目负责人获取授权。"
-        )
-
-    # Keep this legacy module compatible while making ConfigManager the
-    # authoritative configuration implementation.
-    from modules.auto_test.core.config_manager import get_config
-
-    get_config(env)
+    """Validate the environment using the canonical configuration policy."""
+    _validate_canonical_environment(env)

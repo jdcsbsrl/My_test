@@ -7,6 +7,10 @@ authority: 专项规范
 ---
 # 智能体配置与交互规则
 
+> 本文中的 `TestCaseGenerator` 表示测试用例生成职责；正式实现入口是
+> `CaseGenerationService` / `tools/case_generator_cli.py`。历史低层
+> `modules/trae_test/utils/test_case_generator.py` 仅保留兼容和评估调用。
+
 > 版本：3.2.0
 > 生效日期：2026-09-01
 > 维护人：Test ERP Team
@@ -574,87 +578,25 @@ AuditAgent接收
 
 **用户请求**: "执行销售订单创建测试用例"
 
-**Step 1: 初始化数据工厂**
-```python
-from modules.auto_test.core.test_data_factory import TestDataFactory
-from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager
-
-factory = TestDataFactory()
-lifecycle = TestDataLifecycleManager()
-
-# 注册生命周期回调
-factory.set_lifecycle_manager(lifecycle)
+**Step 1: 预览回归范围**
+```powershell
+python tools/run_regression.py --env test --scope module
 ```
 
-**Step 2: 加载测试数据**
-```python
-# 使用DataLoader加载外部数据
-loader = factory.get_data_loader()
-test_data = loader.load("data/test_data/sales_order.json", mode="lazy")
-# 大文件自动使用懒加载模式
+**Step 2: 按需求影响范围预览**
+```powershell
+python tools/run_regression.py `
+  --env test `
+  --requirement-id REQ-DEMO `
+  --impact-query "销售订单创建完整业务规则"
 ```
 
-**Step 3: 动态数据生成**
-```python
-# 使用DynamicDataGenerator生成动态数据
-generator = factory.get_dynamic_generator()
-dynamic_data = generator.generate({
-    "type": "email",
-    "count": 10,
-    "cache": True
-})
-# 启用缓存避免重复生成
+**Step 3: 确认后执行已登记脚本**
+```powershell
+python tools/run_regression.py --env test --case-id CASE-ID --execute
 ```
 
-**Step 4: 数据版本管理**
-```python
-# 使用DataVersionManager创建快照
-version_manager = factory.get_version_manager()
-version_id = version_manager.create_snapshot("sales_order_test_data")
-# 记录当前数据版本，便于回溯
-```
-
-**Step 5: 执行setUp（拓扑排序）**
-```python
-# 注册setUp任务（自动处理依赖）
-lifecycle.register_set_up("create_customer", priority=1)
-lifecycle.register_set_up("create_product", priority=1, dependencies=["create_customer"])
-lifecycle.register_set_up("create_order", priority=2, dependencies=["create_product"])
-
-# 拓扑排序执行
-lifecycle.execute_set_up()
-# 执行顺序：create_customer → create_product → create_order
-```
-
-**Step 6: 执行测试脚本**
-```python
-# 加载并执行测试脚本
-from modules.auto_test.drivers import BrowserDriver
-driver = BrowserDriver()
-driver.execute_test("tests/sales_order_create_test.py")
-```
-
-**Step 7: 执行cleanup（级联删除）**
-```python
-# 注册cleanup任务
-lifecycle.register_cleanup("delete_order", priority=1)
-lifecycle.register_cleanup("delete_product", priority=2, dependencies=["delete_order"])
-lifecycle.register_cleanup("delete_customer", priority=3, dependencies=["delete_product"])
-
-# 级联删除（按优先级逆序）
-lifecycle.execute_cleanup()
-# 执行顺序：delete_order → delete_product → delete_customer
-
-# DB兜底清理（如果级联删除失败）
-lifecycle.fallback_cleanup()
-```
-
-**Step 8: 生成测试报告**
-```python
-from tools.report_generator import ReportGenerator
-report_gen = ReportGenerator()
-report_gen.generate(test_results, ".runtime/reports/测试报告_销售订单创建.html")
-```
+回归入口会统一处理环境安全校验、已登记用例的 `script_id`、数据生命周期、执行证据和 HTML/JSON 报告。报告写入 `.runtime/reports/`；没有有效脚本关联的自然语言用例不能直接执行。
 
 ### 9.3 关键规则摘要
 

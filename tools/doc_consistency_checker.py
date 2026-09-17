@@ -39,6 +39,21 @@ REMOVED_REFERENCES = (
     ".trae/rules/project_rules.md",
 )
 
+DOCUMENT_ROOTS = ("AGENTS.md", "README.md", "docs", "configs/README.md")
+
+STALE_REFERENCES = (
+    ("tools/multi_agent_runner.py", "旧多 Agent 入口不应出现在正式文档中"),
+    ("modules.auto_test.api.api_client", "旧 API 模块路径已不存在"),
+    ("modules/auto_test/api/api_client.py", "旧 API 模块路径已不存在"),
+    ("tools/verify_test_env.py", "环境验证脚本已不存在"),
+    ("tools/customer_openapi_field_compare.py", "客户 OpenAPI 比较脚本已不存在"),
+    ("configs/test_env.yaml", "test_env 当前没有独立的已提交 YAML"),
+    ("export_to_json(", "测试用例不再通过旧 JSON 导出接口交接"),
+    ("import_results(", "测试结果不再通过旧 JSON 导回接口交接"),
+    ("run_tests(", "自动化执行不再通过旧 ApiClient.run_tests 接口"),
+    ("workspace/test_erp/", "旧工作区输出路径已废弃"),
+)
+
 
 class DocConsistencyChecker:
     """Check links, routes, entry points, stale references and frontmatter."""
@@ -54,6 +69,17 @@ class DocConsistencyChecker:
     def _warning(self, rule: str, message: str, location: str = "") -> None:
         self.warnings.append({"type": rule, "message": message, "location": location})
 
+    def _iter_document_paths(self):
+        """Return project documents whose local references must remain valid."""
+        seen = set()
+        for relative_root in DOCUMENT_ROOTS:
+            root = self.project_root / relative_root
+            candidates = sorted(root.glob("*.md")) if root.is_dir() else [root]
+            for path in candidates:
+                if path.is_file() and path not in seen:
+                    seen.add(path)
+                    yield path
+
     def _read_agents(self) -> str:
         path = self.project_root / "AGENTS.md"
         if not path.exists():
@@ -68,16 +94,27 @@ class DocConsistencyChecker:
             if not (self.project_root / target).exists():
                 self._issue("missing_route_target", f"路由目标不存在：{target}", target)
 
-    def check_cross_file_links(self, content: str) -> None:
+    def check_cross_file_links(self, content: str, source_path: Path | None = None) -> None:
+        source_path = source_path or (self.project_root / "AGENTS.md")
         for raw_link in re.findall(r"\[[^\]]+\]\(([^)]+)\)", content):
-            link = raw_link.split("#", 1)[0]
-            if not link or link.startswith(("#", "http:", "https:")):
+            link = raw_link.strip().strip("<>").split("#", 1)[0].split("?", 1)[0]
+            if not link or link.startswith(("#", "http:", "https:", "mailto:")):
                 continue
-            if link.startswith(("assets/knowledge_base/", "workspace/")):
+            normalized = link.replace("\\", "/")
+            if normalized.startswith(("assets/knowledge_base/", "workspace/")):
                 continue
-            if link.startswith(("docs/", "modules/", "tools/", "tests/")):
-                if not (self.project_root / link).exists():
-                    self._issue("missing_entry_point", f"入口不存在：{link}", link)
+
+            target = (
+                (self.project_root / normalized)
+                if normalized.startswith(("configs/", "data/", "docs/", "fixtures/", "modules/", "tests/", "tools/"))
+                else (source_path.parent / normalized)
+            )
+            if not target.exists():
+                self._issue(
+                    "missing_entry_point",
+                    f"文档链接目标不存在：{link}",
+                    f"{source_path.relative_to(self.project_root)} -> {link}",
+                )
 
     def check_frontmatter(self) -> None:
         for relative_path in CORE_DOCS:
@@ -133,10 +170,7 @@ class DocConsistencyChecker:
                 )
 
     def check_removed_references(self) -> None:
-        candidates = [self.project_root / "AGENTS.md", *sorted((self.project_root / "docs").glob("*.md"))]
-        for path in candidates:
-            if not path.exists():
-                continue
+        for path in self._iter_document_paths():
             content = path.read_text(encoding="utf-8")
             for reference in REMOVED_REFERENCES:
                 if reference in content:
@@ -146,12 +180,26 @@ class DocConsistencyChecker:
                         str(path.relative_to(self.project_root)),
                     )
 
+    def check_stale_references(self) -> None:
+        """Reject known retired commands, modules and output paths in docs."""
+        for path in self._iter_document_paths():
+            content = path.read_text(encoding="utf-8")
+            for reference, reason in STALE_REFERENCES:
+                if reference in content:
+                    self._issue(
+                        "stale_document_reference",
+                        f"{reason}：{reference}",
+                        str(path.relative_to(self.project_root)),
+                    )
+
     def run(self) -> dict[str, object]:
         content = self._read_agents()
         self.check_route_closure(content)
-        self.check_cross_file_links(content)
+        for path in self._iter_document_paths():
+            self.check_cross_file_links(path.read_text(encoding="utf-8"), path)
         self.check_frontmatter()
         self.check_removed_references()
+        self.check_stale_references()
         return {
             "passed": not self.issues,
             "issues": self.issues,

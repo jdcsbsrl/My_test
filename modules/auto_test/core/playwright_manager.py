@@ -1,3 +1,9 @@
+"""Backward-compatible Playwright manager facade.
+
+New browser flows should use ``BrowserDriver`` directly.  This wrapper keeps
+the historical single-context ``start``/``stop`` API for existing callers.
+"""
+
 from typing import Any
 
 from playwright.sync_api import BrowserContext, Page

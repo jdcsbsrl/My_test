@@ -1,4 +1,9 @@
-"""Simple HTTP driver for API requests."""
+"""Backward-compatible HTTP driver facade.
+
+New code should use ``modules.auto_test.drivers.http_driver.HttpDriver``.
+This module keeps the historical request semantics for existing callers and
+tests while sharing the current transport's redaction helpers.
+"""
 
 import json
 import re

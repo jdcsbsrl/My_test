@@ -8,6 +8,7 @@
 venv/
 env/
 ENV/
+.agents/
 
 # ========== Python缓存 ==========
 __pycache__/

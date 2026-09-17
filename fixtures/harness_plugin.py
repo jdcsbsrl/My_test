@@ -218,20 +218,20 @@ def pytest_configure(config: pytest.Config) -> None:
         info = bootstrap_agent_workspace(phase=phase, domain=domain)
         if info.get("ok"):
             logger.info(
-                "Agent workspace bootstrap: manifest OK (%s documents, phase=%s, domain=%s, recommended=%s)",
-                len(info.get("documents", [])),
-                info.get("phase"),
-                info.get("domain"),
-                (info.get("recommended_documents") or [])[:5],
+                f"Agent workspace bootstrap: manifest OK ("
+                f"{len(info.get('documents', []))} documents, phase={info.get('phase')}, "
+                f"domain={info.get('domain')}, recommended={(info.get('recommended_documents') or [])[:5]})"
             )
+        elif info.get("missing"):
+            logger.warning(f"Agent workspace bootstrap: missing paths {info.get('missing')}")
         else:
-            logger.warning("Agent workspace bootstrap: missing paths %s", info.get("missing"))
+            logger.info(f"Agent workspace bootstrap unavailable: {info.get('error', 'manifest unavailable')}")
         if info.get("progress_summary"):
-            logger.info("Agent progress summary: %s", info["progress_summary"])
+            logger.info(f"Agent progress summary: {info['progress_summary']}")
         if info.get("context_advisory"):
-            logger.warning("%s", info["context_advisory"])
+            logger.warning(f"{info['context_advisory']}")
     except Exception as exc:
-        logger.warning("Agent workspace bootstrap skipped: %s", exc)
+        logger.warning(f"Agent workspace bootstrap skipped: {exc}")
 
     try:
         if metrics_enabled():
@@ -239,7 +239,7 @@ def pytest_configure(config: pytest.Config) -> None:
             metrics.session_start(pytest_version=pytest.__version__, cwd=os.getcwd())
             state["metrics"] = metrics
     except Exception as exc:
-        logger.debug("harness metrics init skipped: %s", exc)
+        logger.debug(f"harness metrics init skipped: {exc}")
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -265,7 +265,10 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             summary["categories"][category] = summary["categories"].get(category, 0) + 1
     incomplete = any(r.get("outcome") == "skipped" and r.get("critical") for r in latest.values())
     all_skipped = bool(latest) and all(r.get("outcome") == "skipped" for r in latest.values())
-    if exitstatus == 0 and (incomplete or all_skipped):
+    # A shard containing only optional/data-dependent tests may legitimately
+    # skip every item.  Keep that fact in the report, but reserve pytest's
+    # blocking exit code for skipped core/P0 coverage.
+    if exitstatus == 0 and incomplete:
         session.exitstatus = 2
         exitstatus = 2
     summary.update(
@@ -286,7 +289,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         if metrics is not None:
             metrics.session_end(exitstatus=exitstatus)
     except Exception as exc:
-        logger.debug("harness session finalization: %s", exc)
+        logger.debug(f"harness session finalization: {exc}")
     finally:
         state["metrics"] = None
         state["attempts"].clear()
@@ -345,7 +348,7 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo):
                 keywords=sorted(item.keywords),
             )
         except Exception as exc:
-            logger.debug("harness metrics: %s", exc)
+            logger.debug(f"harness metrics: {exc}")
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
@@ -353,7 +356,7 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
         try:
             append_auto_failure_record(report)
         except Exception as exc:
-            logger.debug("agent feedback: %s", exc)
+            logger.debug(f"agent feedback: {exc}")
 
 
 def _classify_failure(report: pytest.TestReport) -> str:
@@ -581,7 +584,7 @@ def logged_in_page(
     try:
         _assert_authenticated_page(page, config_manager.base_url, timeout=60000)
     except Exception as exc:
-        logger.warning("认证状态失效，尝试在当前 context 重新登录: %s", exc)
+        logger.warning(f"认证状态失效，尝试在当前 context 重新登录: {exc}")
         try:
             if getattr(request.node, "_auth_refresh_attempted", False):
                 raise RuntimeError("同一测试内认证刷新次数已达到上限")

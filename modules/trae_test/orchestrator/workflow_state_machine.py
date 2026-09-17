@@ -1,4 +1,9 @@
-"""工作流状态机 - 支持审核状态与超时处理"""
+"""历史测试工作流状态机。
+
+本模块保留旧的“生成、审核、自动化方案、用户确认”状态转换和超时处理，
+供历史集成测试使用。当前正式生成和回归流程由服务层与质量门禁负责，
+不再通过此状态机驱动。
+"""
 
 from collections.abc import Callable
 from datetime import datetime
@@ -171,9 +176,11 @@ class WorkflowStateMachine:
                 if target_state in self.timeout_handlers:
                     self._start_timeout_monitor(workflow, target_state)
 
-                print(
-                    f"[WorkflowStateMachine] 工作流 {workflow.workflow_id} 状态变更: {current_state.value} -> {target_state.value}"
+                message = (
+                    f"[WorkflowStateMachine] 工作流 {workflow.workflow_id} 状态变更: "
+                    f"{current_state.value} -> {target_state.value}"
                 )
+                print(message)
                 return True
 
         return False

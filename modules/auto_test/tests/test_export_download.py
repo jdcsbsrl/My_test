@@ -43,7 +43,9 @@ class TestExportDownload:
         print("\n=== Step 2: Navigate to export page ===")
         timestamp = str(int(time.time() * 1000))
         export_page.navigate_to(f"sales/order/exportPage?t={timestamp}&orderNo={order_numbers[0]}")
-        assert export_page.wait_for_export_page(timeout=30000), "导出页面未完成加载"
+        assert export_page.wait_for_export_page(timeout=30000), (
+            "导出页面未完成加载: " f"{export_page.last_wait_diagnostics}"
+        )
 
         print("URL: same-origin export route reached")
 
