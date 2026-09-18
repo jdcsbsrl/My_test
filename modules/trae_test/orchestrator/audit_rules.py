@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from ..utils.template_builder import FIXED_CASE_CREATOR
+
 logger = logging.getLogger(__name__)
 
 # 默认 YAML 配置文件路径（相对于项目根目录）
@@ -106,10 +108,10 @@ class RuleManager:
                 "error_message": "回归测试标识必须为'是'或'否'",
             },
             "创建人": {
-                "valid_values": ["余小龙", "闫海燕"],
-                "default_value": "余小龙",
+                "valid_values": [FIXED_CASE_CREATOR],
+                "default_value": FIXED_CASE_CREATOR,
                 "required": True,
-                "error_message": "创建人必须为有效测试人员姓名，当前仅允许：余小龙、闫海燕",
+                "error_message": f"创建人必须固定为：{FIXED_CASE_CREATOR}",
             },
         }
 

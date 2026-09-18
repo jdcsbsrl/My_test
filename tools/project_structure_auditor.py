@@ -51,6 +51,9 @@ class ProjectStructureAuditor:
         "tools",
         "workspace",
     }
+    # Codex may create this external runtime directory while working in the repo.
+    # It is not a project directory and must not be added to the artifact policy.
+    EXTERNAL_ROOT_DIRS = {".agents"}
     REQUIRED_GITIGNORE_RULES = (
         ".runtime/**",
         "!.runtime/.keep",
@@ -176,7 +179,7 @@ class ProjectStructureAuditor:
         print("检查顶层目录登记...")
         root = Path(self.PROJECT_ROOT)
         for path in sorted(root.iterdir(), key=lambda item: item.name):
-            if not path.is_dir() or path.name in self.ALLOWED_ROOT_DIRS:
+            if not path.is_dir() or path.name in self.ALLOWED_ROOT_DIRS | self.EXTERNAL_ROOT_DIRS:
                 continue
             try:
                 has_content = next(path.iterdir(), None) is not None

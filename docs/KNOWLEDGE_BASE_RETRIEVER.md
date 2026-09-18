@@ -148,12 +148,28 @@ assets/knowledge_base/
 result = retriever.search_module("销售")
 ```
 
-#### search_business_rules(keyword)
-按关键词检索业务规则
+#### search_business_rules(keyword, *, include_history=False, include_draft=False)
+按关键词检索业务规则，并按规则生命周期过滤。
+
+默认结果包含明确为 `active` 的规则、没有 `status` 的历史规则
+（标记为 `lifecycle_status=legacy`），以及明确为 `deprecated` 的规则；
+其中 `deprecated` 会排在生效规则之后。明确为 `superseded` 的规则默认不作为主结果，
+草稿 `draft` 默认不返回。`include_history=True` 可查看 `superseded` 历史规则，
+`include_draft=True` 可显式查看草稿；两个参数可以同时使用。
+
+每条结果包含：
+
+- `lifecycle_status`：`active`、`deprecated`、`superseded`、`draft`、`legacy` 或 `unknown`；
+- `status_source`：`explicit`、`missing` 或 `explicit_invalid`，说明状态来自规则字段还是兼容推断。
+
+历史规则没有 `status` 时不会突然消失；显式未知状态不会静默当作 `active`，而会标记为
+`unknown` 并按低优先级返回。状态、版本和替代关系属于业务治理信息，不能由检索器自动修改。
 
 **示例**：
 ```python
 rules = retriever.search_business_rules("订单状态")
+# 需要排查历史替代关系时显式打开
+history = retriever.search_business_rules("订单状态", include_history=True)
 ```
 
 #### search_requirements(keyword="", module="")

@@ -1,4 +1,8 @@
-"""测试用例生成器 - 15字段标准格式生成
+"""历史低层测试用例生成器 - 15字段标准格式兼容实现
+
+正式需求生成入口是 ``CaseGenerationService`` 和
+``tools/case_generator_cli.py``。本模块仍供历史评估、策略代码和兼容调用
+使用，不应作为新的 CLI 或编排器入口。
 
 核心功能：
 - 从知识库检索业务规则和需求
@@ -16,7 +20,7 @@ from .dir_validator import _load_module_hierarchy
 from .excel_generator import ExcelGenerator
 from .knowledge_retriever import KnowledgeRetriever
 from .runtime_quality import attach_runtime_quality, read_runtime_quality
-from .template_builder import LEGACY_RUNTIME_FIELDS, ensure_template
+from .template_builder import FIXED_CASE_CREATOR, LEGACY_RUNTIME_FIELDS, ensure_template
 from .test_case_strategy import TestCaseOptimizer, TestCaseScoreEngine, TestCaseStrategy
 from .coverage_matrix import CoverageMatrix, build_requirement_coverage_matrix
 
@@ -31,6 +35,9 @@ class TestCaseGenerator:
 
     负责根据知识库内容生成标准化的测试用例，确保输出符合15字段规范。
     """
+
+    # This is a production class imported by tests; prevent pytest collection.
+    __test__ = False
 
     def __init__(self, retriever: KnowledgeRetriever | None = None):
         """初始化测试用例生成器
@@ -182,7 +189,7 @@ class TestCaseGenerator:
             "用例类型": "功能测试",
             "用例状态": "正常",
             "用例等级": case_level,
-            "创建人": "余小龙",
+            "创建人": FIXED_CASE_CREATOR,
             "优先级": priority_p,
             "是否可自动化": "是",
             "回归测试标识": "否",

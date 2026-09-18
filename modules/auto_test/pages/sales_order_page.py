@@ -1,6 +1,6 @@
-from typing import Any
-
 import re
+import time
+from typing import Any
 
 import allure
 from playwright.sync_api import Page, expect
@@ -558,10 +558,15 @@ class SalesOrderPage(BasePage):
     @allure.step("等待销售订单页面业务控件就绪")
     def wait_for_order_page_ready(self, timeout: int = 30000) -> None:
         """Wait for SPA business controls without requiring network idle."""
-        self.page.wait_for_load_state("domcontentloaded", timeout=timeout)
+        self.wait_for_business_ready(
+            ['button:visible:has-text("搜索")'],
+            page_name="销售订单页面",
+            required_selectors=[".store-select-trigger:visible"],
+            initial_timeout=timeout,
+            retry_timeout=timeout,
+            max_route_retries=1,
+        )
         self.wait_for_loading_complete(timeout=timeout)
-        self.page.get_by_role("button", name="搜索", exact=True).wait_for(state="visible", timeout=timeout)
-        self.page.locator(".store-select-trigger:visible").first.wait_for(state="visible", timeout=timeout)
 
     @allure.step("获取所有标签页")
     def get_all_tabs(self) -> list[str]:
@@ -623,26 +628,53 @@ class SalesOrderPage(BasePage):
         return results
 
     @allure.step("点击排序下拉菜单")
-    def click_sort_dropdown(self) -> None:
-        """点击排序下拉菜单"""
+    def click_sort_dropdown(self, timeout: int = 30000) -> None:
+        """点击排序下拉菜单，等待 SPA 控件完成挂载。"""
         # The page also has a batch-operation dropdown.  Generic dropdown
         # selectors can click that menu and make the later sort assertion fail
         # with a misleading "订单金额 not found" error.  Select only a visible
         # control whose rendered label is the actual sort control.
-        candidates = self.page.locator("button:visible, [role='button']:visible").all()
-        for candidate in candidates:
+        deadline = time.monotonic() + max(timeout, 1) / 1000
+        last_labels: list[str] = []
+        while time.monotonic() < deadline:
             try:
-                label = " ".join((candidate.text_content() or "").split())
-                if not (label.startswith("排序：") or label.startswith("排序:")):
-                    continue
-                candidate.click()
-                logger.info("成功点击排序下拉菜单: {}", label)
-                self.wait_for_load_state()
-                self.wait_for_loading_complete(timeout=10000)
-                return
-            except Exception as e:
-                logger.debug("尝试排序控件失败: {}", type(e).__name__)
+                candidates = self.page.locator(
+                    "button:visible, [role='button']:visible, [class*='sort']:visible, [aria-label*='排序']:visible"
+                ).all()
+            except Exception:
+                candidates = []
 
+            labels: list[str] = []
+            for candidate in candidates:
+                try:
+                    label = " ".join((candidate.text_content() or "").split())
+                    if label:
+                        labels.append(label)
+                    if not (label.startswith("排序：") or label.startswith("排序:")):
+                        continue
+                    candidate.click()
+                    logger.info("成功点击排序下拉菜单: {}", label)
+                    self.wait_for_load_state()
+                    self.wait_for_loading_complete(timeout=10000)
+                    return
+                except Exception as e:
+                    logger.debug("尝试排序控件失败: {}", type(e).__name__)
+            last_labels = labels
+
+            # Some Vue renders expose the control only after the first data
+            # request completes.  A bounded poll handles that race without
+            # clicking an unrelated batch-operation dropdown.
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+            try:
+                self.wait_for_poll_interval(min(500, remaining_ms))
+            except Exception:
+                break
+
+        logger.warning(
+            "排序控件在限定时间内未挂载: url={}, visible_labels={}",
+            self._redact_url(self.page.url),
+            last_labels[:20],
+        )
         raise ValueError("无法找到带有排序标签的排序下拉菜单")
 
     @allure.step("选择排序列: {column_name}")
@@ -1303,25 +1335,49 @@ class SalesOrderPage(BasePage):
             return 0.0
 
     @allure.step("等待表格数据加载完成")
-    def wait_for_table_data(self, timeout: int = 15000) -> None:
-        """等待表格数据加载完成"""
-        selectors = [
-            "//tbody//tr[contains(@class, 'el-table__row')]",
-            "//div[contains(@class, 'el-table__body-wrapper')]//tr",
-            "//table//tbody//tr",
+    def wait_for_table_data(self, timeout: int = 15000) -> bool:
+        """在总预算内等待表格行；空结果页返回 ``False``。"""
+        return self.wait_for_order_data_state(timeout) == "rows"
+
+    @allure.step("等待订单列表状态")
+    def wait_for_order_data_state(self, timeout: int = 15000) -> str:
+        """Distinguish a loading page from an explicitly empty order result.
+
+        Returns ``rows`` when visible order rows are available, ``empty`` when
+        the UI renders its empty-state component, and ``timeout`` when neither
+        state is observable before the deadline.
+        """
+        deadline = time.monotonic() + max(timeout, 1) / 1000
+        row_selectors = [
+            ".order-block:visible",
+            "tbody tr.el-table__row:visible",
+            ".el-table__body-wrapper tbody tr:visible",
+            "table tbody tr:visible",
         ]
-        for selector in selectors:
-            try:
-                self.page.locator(selector).first.wait_for(state="visible", timeout=timeout)
-                return
-            except Exception:
-                continue
-        try:
-            self.page.locator("//div[contains(@class, 'el-loading-mask')]").first.wait_for(
-                state="hidden", timeout=timeout
-            )
-        except Exception:
-            pass
+        empty_selectors = [
+            ".el-table__empty-block:visible",
+            ".el-table__empty-text:visible",
+            ".el-empty:visible",
+            ".ant-empty:visible",
+            ".ant-table-placeholder:visible",
+        ]
+
+        while time.monotonic() < deadline:
+            for selector in row_selectors:
+                try:
+                    if self.page.locator(selector).count() > 0:
+                        return "rows"
+                except Exception:
+                    continue
+            for selector in empty_selectors:
+                try:
+                    if self.page.locator(selector).count() > 0:
+                        return "empty"
+                except Exception:
+                    continue
+            self.wait_for_poll_interval(min(250, max(1, int((deadline - time.monotonic()) * 1000))))
+
+        return "timeout"
 
     @allure.step("等待订单行和复选框稳定")
     def wait_for_order_rows_ready(self, timeout: int = 30000) -> None:
@@ -1350,11 +1406,18 @@ class SalesOrderPage(BasePage):
         )
 
     @allure.step("等待排序完成")
-    def wait_for_sort_complete(self, timeout: int = 10000) -> None:
-        """等待排序完成（等待业务加载结束 + 订单行刷新）"""
+    def wait_for_sort_complete(self, timeout: int = 10000) -> str:
+        """等待排序完成，并区分有数据、空数据和真实超时。"""
         self.page.wait_for_load_state("domcontentloaded")
         self.wait_for_loading_complete(timeout=timeout)
+        data_state = self.wait_for_order_data_state(timeout=max(timeout, 30000))
+        if data_state == "empty":
+            logger.info("排序完成，但当前销售订单查询结果为空")
+            return data_state
+        if data_state == "timeout":
+            raise TimeoutError("排序后销售订单列表未在限定时间内进入有数据或明确无数据状态")
         self.wait_for_order_rows_ready(timeout=max(timeout, 30000))
+        return data_state
 
     @allure.step("等待选中数量更新")
     def verify_selected_count(self, timeout: int = 5000) -> int:
@@ -1746,44 +1809,117 @@ class SalesOrderPage(BasePage):
         获取系统单号（SO开头，如SO20260627000069）
         """
         results = []
+        limit = max(0, int(limit))
+        if limit == 0:
+            return results
 
         try:
             self.wait_for_load_state()
-            import time
+            data_state = self.wait_for_order_data_state(timeout=30000)
+            if data_state == "empty":
+                logger.info("销售订单页面已完成加载，但当前查询结果为空")
+                return []
+            if data_state == "timeout":
+                raise TimeoutError("销售订单列表未在限定时间内进入有数据或明确无数据状态")
+            order_number_script = """
+                (limit) => {
+                    const orderPattern = /\\bSO(?=[A-Z0-9_-]*\\d)[A-Z0-9_-]+\\b/gi;
+                    const containerSelector = [
+                        '.order-block',
+                        '.el-table__body-wrapper tbody tr',
+                        'table.el-table__body tbody tr',
+                        '.el-table__body tbody tr',
+                        '[role="row"]',
+                    ].join(', ');
+                    const attributeNames = [
+                        'data-order-no',
+                        'data-order-number',
+                        'data-system-order-no',
+                        'data-system-order-number',
+                        'aria-label',
+                        'title',
+                    ];
+                    const candidateSelector = [
+                        '[data-order-no]',
+                        '[data-order-number]',
+                        '[data-system-order-no]',
+                        '[data-system-order-number]',
+                        '.el-text--primary',
+                        '[class*="order-no"]',
+                        '[class*="order-number"]',
+                        '[class*="system-order"]',
+                    ].join(', ');
+                    const visible = (node) => {
+                        if (!node) return false;
+                        const style = window.getComputedStyle(node);
+                        return style.display !== 'none'
+                            && style.visibility !== 'hidden'
+                            && node.getClientRects().length > 0;
+                    };
+                    const orderNumbers = [];
+                    const seen = new Set();
+                    const addValue = (value) => {
+                        const matches = String(value || '').match(orderPattern) || [];
+                        for (const match of matches) {
+                            const orderNumber = match.trim();
+                            if (!seen.has(orderNumber)) {
+                                seen.add(orderNumber);
+                                orderNumbers.push(orderNumber);
+                            }
+                            if (orderNumbers.length >= limit) return;
+                        }
+                    };
+                    const containers = Array.from(document.querySelectorAll(containerSelector))
+                        .filter(visible);
+                    for (const container of containers) {
+                        for (const attributeName of attributeNames) {
+                            addValue(container.getAttribute(attributeName));
+                            if (orderNumbers.length >= limit) return orderNumbers;
+                        }
+                        addValue(container.innerText || container.textContent);
+                        if (orderNumbers.length >= limit) return orderNumbers;
+                        for (const node of container.querySelectorAll(candidateSelector)) {
+                            addValue(node.innerText || node.textContent);
+                            for (const attributeName of attributeNames) {
+                                addValue(node.getAttribute(attributeName));
+                                if (orderNumbers.length >= limit) return orderNumbers;
+                            }
+                            if (orderNumbers.length >= limit) return orderNumbers;
+                        }
+                    }
+                    return orderNumbers;
+                }
+                """
+            for attempt in range(3):
+                try:
+                    script_result = self.page.evaluate(order_number_script, limit)
+                    if script_result:
+                        results = script_result
+                        logger.info("通过订单行候选字段获取到 {} 个系统单号", len(results))
+                        break
+                except Exception as e:
+                    logger.debug(f"通过订单行候选字段获取订单号失败（第 {attempt + 1} 次）: {e}")
+                if attempt < 2:
+                    self.page.wait_for_timeout(1000)
 
-            time.sleep(5)
-
-            try:
-                script_result = self.page.evaluate(f"""
-                    () => {{
-                        const orderBlocks = document.querySelectorAll('.order-block');
-                        const orderNumbers = [];
-                        for (let i = 0; i < Math.min({limit}, orderBlocks.length); i++) {{
-                            const block = orderBlocks[i];
-                            const spans = block.querySelectorAll('span.el-text--primary');
-                            for (const span of spans) {{
-                                const text = span.innerText.trim();
-                                if (text.match(/^SO\\d+$/)) {{
-                                    orderNumbers.push(text);
-                                    break;
-                                }}
-                            }}
-                        }}
-                        return orderNumbers;
-                    }}
-                    """)
-                if script_result:
-                    results = script_result
-                    logger.info("通过 order-block 获取到 {} 个系统单号", len(results))
-            except Exception as e:
-                logger.debug(f"通过order-block获取订单号失败: {e}")
+            if not results:
+                try:
+                    order_blocks = self.page.locator(".order-block:visible")
+                    for index in range(min(limit, order_blocks.count())):
+                        data_order_no = (order_blocks.nth(index).get_attribute("data-order-no") or "").strip()
+                        if re.fullmatch(r"SO\d+", data_order_no):
+                            results.append(data_order_no)
+                    if results:
+                        logger.info("通过 Locator 属性回退获取到 {} 个系统单号", len(results))
+                except Exception as e:
+                    logger.debug(f"通过 Locator 属性获取订单号失败: {e}")
 
             if not results:
                 try:
                     script_result = self.page.evaluate(f"""
                         () => {{
                             const text = document.body.innerText;
-                            const matches = text.match(/SO\\d{{14,}}/g);
+                            const matches = text.match(/\\bSO(?=[A-Z0-9_-]*\\d)[A-Z0-9_-]+\\b/gi);
                             if (matches) {{
                                 const unique = [...new Set(matches)];
                                 return unique.slice(0, {limit});
@@ -1806,6 +1942,8 @@ class SalesOrderPage(BasePage):
                         unique_results.append(num)
                 results = unique_results[:limit]
                 logger.info("去重后订单号数量: {}", len(results))
+        except TimeoutError:
+            raise
         except Exception as e:
             logger.warning(f"获取排序后订单号失败: {e}")
 

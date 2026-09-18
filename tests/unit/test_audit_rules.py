@@ -41,6 +41,14 @@ class TestRuleManager:
         assert valid is False
         assert "只能" in msg
 
+    def test_creator_only_allows_fixed_value(self):
+        from modules.trae_test.orchestrator.audit_rules import RuleManager
+
+        rm = RuleManager()
+        valid, msg = rm.validate_field_value("创建人", "闫海燕")
+        assert valid is False
+        assert "余小龙" in msg
+
     def test_validate_unknown_field(self):
         from modules.trae_test.orchestrator.audit_rules import RuleManager
 

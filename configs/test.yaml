@@ -1,0 +1,23 @@
+# 脱敏测试环境配置。
+# 实际地址由 TEST_WEB_BASE_URL / TEST_WEB_API_BASE_URL 注入；未注入时保留占位地址，
+# ConfigManager 会拒绝连接到未批准的主机，不会误连外部环境。
+env: test
+base_url: "${TEST_WEB_BASE_URL:-https://your-test-erp.example.com/oms-ui}"
+api_base_url: "${TEST_WEB_API_BASE_URL:-https://your-test-erp.example.com/oms-api}"
+
+playwright:
+  headless: true
+  browser: chromium
+  slow_mo: 0
+  viewport:
+    width: 1920
+    height: 1080
+  screenshot: off
+  video: off
+  trace: off
+
+api:
+  timeout: 60
+  retries: 3
+  verify_ssl: true
+  auth_login_path: /oms-admin/auth/login

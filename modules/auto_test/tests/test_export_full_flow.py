@@ -19,14 +19,17 @@ class TestExportFullFlow:
         export_page = SalesOrderExportPage(logged_in_page)
 
         sales_order_page.navigate_to("sales/order/saleOrder")
-        logged_in_page.wait_for_function(
-            "() => document.querySelectorAll('.order-block, .el-table__body-wrapper tbody tr').length > 0",
-            timeout=30000,
-        )
+        sales_order_page.wait_for_order_page_ready(timeout=60000)
         try:
             sales_order_page.click_tab("待处理")
         except Exception as exc:
             pytest.fail(f"无法切换到待处理标签: {type(exc).__name__}")
+
+        data_state = sales_order_page.wait_for_order_data_state(timeout=60000)
+        if data_state == "timeout":
+            pytest.fail("销售订单页控件已就绪，但订单列表未明确进入有数据或无数据状态")
+        if data_state == "empty":
+            pytest.skip("当前待处理销售订单查询结果为空，跳过依赖业务数据的导出全流程")
 
         order_numbers = []
         for attempt in range(3):
@@ -34,14 +37,18 @@ class TestExportFullFlow:
             if order_numbers:
                 break
             print(f"\n⚠️ 第 {attempt + 1}/3 次未获取到订单号，等待订单列表刷新")
-            sales_order_page.wait_for_table_data()
+            data_state = sales_order_page.wait_for_order_data_state(timeout=30000)
+            if data_state == "empty":
+                pytest.skip("订单列表刷新后变为空，跳过依赖业务数据的导出全流程")
+            if data_state == "timeout":
+                pytest.fail("订单列表刷新超时，未能确认页面状态")
 
         if not order_numbers:
             pytest.skip("当前销售订单页没有可用于实时导出的订单，跳过依赖 UAT 数据的导出全流程")
 
         order_param = quote(",".join(order_numbers))
         export_page.navigate_to(f"sales/order/exportPage?t={int(time.time() * 1000)}&orderNo={order_param}")
-        assert export_page.wait_for_export_page(), "Export page failed to load"
+        assert export_page.wait_for_export_page(), "Export page failed to load: " f"{export_page.last_wait_diagnostics}"
         logged_in_page.locator(".el-select:visible").first.wait_for(state="visible", timeout=30000)
 
         print("\n✅ 已导航到同源导出页面")

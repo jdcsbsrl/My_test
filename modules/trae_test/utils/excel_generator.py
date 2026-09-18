@@ -31,6 +31,7 @@ except ImportError:
 
 from .template_builder import (
     ALL_FIELDS as TEMPLATE_FIELDS,
+    FIXED_CASE_CREATOR,
     RUNTIME_FIELDS as TEMPLATE_RUNTIME_FIELDS,
     _template_header_matches,
     ensure_template,
@@ -432,7 +433,8 @@ class ExcelGenerator:
             "用例类型": case_type,
             "用例状态": case_status,
             "用例等级": case_level,
-            "创建人": creator,
+            # 创建人属于固定字段，忽略旧接口传入值，保持所有生成入口一致。
+            "创建人": FIXED_CASE_CREATOR,
             "优先级": priority,
             "是否可自动化": is_automation,
             "回归测试标识": regression_flag,

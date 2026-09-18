@@ -14,7 +14,7 @@ _ENV_NAMES_PLAINTEXT_LOGIN: tuple[str, ...] = (
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return Path(__file__).resolve().parents[3]
 
 
 def load_dotenv_from_repo_root(*, override: bool = False, required: bool = True) -> Path | None:

@@ -148,8 +148,13 @@ class TestInventorySKUSearch:
     @allure.story("查询功能")
     def test_search_combination(self, facade: InventorySKUFacade):
         """组合条件查询：SKU编码+产品名称"""
-        result = facade.search_by_combination(sku_code="YX", product_name="")
-        assert result["count"] > 0, f"组合查询YX应有结果: {result}"
+        # ``YX`` is only a prefix and is not itself a persisted SKU in the
+        # test environment.  Keep the combination query tied to the known
+        # stable fixture used by the keyword tests instead of assuming prefix
+        # matching semantics from the backend.
+        sku_code = SEARCH_KEYWORDS[0]
+        result = facade.search_by_combination(sku_code=sku_code, product_name="")
+        assert result["count"] > 0, f"组合查询{sku_code}应有结果: {result}"
 
         allure.attach(
             json.dumps(result, ensure_ascii=False, indent=2, default=str),

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import time
+import warnings
 from typing import Any
 
 import allure
@@ -142,7 +143,11 @@ class SalesOrderFacade:
 
         self.export_page = SalesOrderExportPage(self.page)
         if not self.export_page.wait_for_export_page():
-            return {"success": False, "error": "导出页面加载失败"}
+            result = {"success": False, "error": "导出页面加载失败"}
+            diagnostics = getattr(self.export_page, "last_wait_diagnostics", None)
+            if isinstance(diagnostics, dict) and diagnostics:
+                result["diagnostics"] = diagnostics
+            return result
 
         if not self.select_export_template(template_name):
             logger.warning(f"未找到模板: {template_name}")
@@ -238,7 +243,13 @@ class SalesOrderFacade:
             try:
                 import openpyxl
 
-                wb = openpyxl.load_workbook(file_path, read_only=True)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message="Workbook contains no default style.*",
+                        category=UserWarning,
+                    )
+                    wb = openpyxl.load_workbook(file_path, read_only=True)
                 ws = wb.worksheets[0]
                 result["row_count"] = ws.max_row
                 result["col_count"] = ws.max_column
@@ -275,7 +286,13 @@ class SalesOrderFacade:
         try:
             import openpyxl
 
-            wb = openpyxl.load_workbook(file_path)
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Workbook contains no default style.*",
+                    category=UserWarning,
+                )
+                wb = openpyxl.load_workbook(file_path)
             ws = wb.worksheets[0]
 
             headers = [str(cell.value or "").strip() for cell in ws[1]]

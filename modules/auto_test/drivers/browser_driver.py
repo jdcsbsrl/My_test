@@ -56,14 +56,14 @@ class BrowserDriver:
         )
         if repo_browsers.is_dir() and (configured_browsers is None or not configured_browsers.is_dir()):
             os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(repo_browsers)
-            logger.info("BrowserDriver: using repository browsers at %s", repo_browsers)
+            logger.info("BrowserDriver: using repository browsers at {}", repo_browsers)
 
         self._playwright = sync_playwright().start()
         try:
             cdp_url = (os.getenv("PLAYWRIGHT_CDP_ENDPOINT") or "").strip()
             if cdp_url:
                 if browser != "chromium":
-                    logger.warning("BrowserDriver: CDP connect forces chromium semantics; requested=%s", browser)
+                    logger.warning("BrowserDriver: CDP connect forces chromium semantics; requested={}", browser)
                 self.browser = self._playwright.chromium.connect_over_cdp(cdp_url)
                 logger.info("BrowserDriver: connected over CDP")
                 return self.browser

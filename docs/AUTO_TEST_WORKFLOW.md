@@ -179,64 +179,48 @@ authority: 专项规范
 
 ## 关键操作步骤
 
-### 启动自动化测试（含数据生命周期管理）
+### 预览回归范围
+
+正式回归入口是 `tools/run_regression.py`。默认只计算范围和生成计划，不执行测试：
+
+```powershell
+python tools/run_regression.py --env test --scope module
+python tools/run_regression.py --env test --case-id CASE-ID
+python tools/run_regression.py --env test --requirement-id REQ-DEMO --impact-query "销售订单查询完整业务规则"
+```
+
+### 执行已登记用例
+
+确认环境、范围和授权后，显式增加 `--execute` 才会执行登记表中关联的 pytest 节点：
+
+```powershell
+python tools/run_regression.py --env test --case-id CASE-ID --execute
+```
+
+执行过程会复用 `ConfigManager`、环境安全校验、`regression_session`、数据生命周期和已登记用例的脚本关联，不会把自然语言用例自动编译为测试脚本。
+
+### Python 调用
+
+需要在 Python 中集成回归报告时，使用当前报告工具的实际 API：
 
 ```python
-from modules.auto_test.core.environment import Environment
-from modules.auto_test.api.api_client import ApiClient
-from modules.auto_test.core.test_data_factory import (
-    DataLoader, DynamicDataGenerator, DataVersionManager, TestDataFactory
-)
-from modules.auto_test.core.test_data_lifecycle import TestDataLifecycleManager
+from tools.report_generator import run_regression_tests
 
-# 1. 初始化环境
-env = Environment('test')
-env.validate()
-
-# 2. 初始化数据工厂
-factory = TestDataFactory()
-loader = DataLoader()
-data_gen = DynamicDataGenerator()
-version_mgr = DataVersionManager(data_dir="test_data/versions")
-
-# 3. 注册数据生命周期
-lifecycle = TestDataLifecycleManager(env="test")
-
-def create_order_setup():
-    order_data = loader.load("test_data/orders.json")
-    return data_gen.generate("related_order_no", cache_key="order_no")
-
-lifecycle.register_setup_task(create_order_setup, task_name="create_order")
-lifecycle.register_cleanup_task(
-    lambda: print("Cleanup order"),
-    fallback=lambda: print("DB fallback cleanup"),
-)
-
-# 4. 执行 setUp（拓扑排序自动处理依赖）
-lifecycle.execute_setup()
-
-# 5. 创建API客户端并执行测试
-client = ApiClient(env)
-results = client.run_tests(test_cases)
-
-# 6. 执行 tearDown（自动级联清理 + DB兜底）
-lifecycle.execute_cleanup()
-
-# 7. 生成报告
-from tools.report_generator import ReportGenerator
-report = ReportGenerator()
-report.generate(results, output_path)
+report = run_regression_tests(env_name="test", scope="module")
+print(report.summary())
 ```
+
+HTML 和 JSON 报告由 `run_regression_tests()` 统一写入 `.runtime/reports/`，不需要手动拼接输出路径。
 
 ### 执行流程
 
-1. **初始化环境**: 创建 `Environment` 实例，指定环境类型
-2. **验证环境**: 调用 `validate()` 验证环境配置 + 初始化数据工厂/生命周期
-3. **准备测试数据**: 加载文件、生成动态数据、执行 setUp 任务（拓扑排序）
-4. **创建客户端**: 使用环境配置创建 `ApiClient`
-5. **执行测试**: 调用 `run_tests()` 执行测试用例
-6. **清理测试数据**: 调用 `execute_cleanup()` 级联删除 + DB 兜底
-7. **生成报告**: 使用 `ReportGenerator` 生成可视化报告
+1. **校验环境**：只允许 `test` 或 `uat`，并检查端点是否在允许列表内；
+2. **选择用例**：按 smoke、module、release、用例 ID 或知识库影响范围计算执行计划；
+3. **准备会话和数据**：由当前回归会话与数据生命周期组件负责；
+4. **执行脚本**：运行登记表中明确关联的 pytest 节点；
+5. **收集结果**：记录通过、失败、跳过、阻断和执行证据；
+6. **生成报告**：通过 `TestReportGenerator` 写入 `.runtime/reports/`；
+7. **发布门禁**：由 `ReleaseQualityGate` 根据完整性和回归结果给出交付决定。
 
 ## 异常处理
 
@@ -269,7 +253,7 @@ report.generate(results, output_path)
 `python tools/run_regression.py --env test --scope smoke` 验证基础查询、精确筛选和状态筛选；`--scope module` 增加模糊筛选、组合筛选、空结果和分页检查；`--scope release` 执行模块全部查询契约，供发布门禁使用。
 执行需已有明确授权。数据不足返回BLOCKED，不用空列表证明筛选正确；HTTP成功码不能代替业务断言。
 返回码0表示所选范围全部通过，1表示失败，2表示验证不完整。报告展示计划数、实际执行数、跳过和阻断。
-pytest核心/P0用例跳过或全部跳过时不得返回成功，setup/teardown错误进入运行摘要。
+ pytest核心/P0用例跳过时不得返回成功；仅包含非核心可选用例的全跳过 shard 记录为验证不完整但不以退出码2阻断，setup/teardown错误进入运行摘要。
 
 登记用例通过 `--case-id` 选择，默认预览，增加 `--execute` 执行；同一需求下的活动 P0 用例会自动补入选择范围，不能通过缩小参数绕过核心场景；结果保留执行时的版本及证据。
 规则变更可使用 `--requirement-id <需求ID> --impact-query <完整规则检索词>` 计算受影响用例；影响用例及同需求 P0 会进入预览，确认后再加 `--execute`。

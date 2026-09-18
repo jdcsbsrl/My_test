@@ -14,6 +14,7 @@ from modules.auto_test.core import (
     agent_feedback,
     agent_gc,
     agent_loader,
+    agent_progress,
     agent_phases,
     agent_specialization,
     context_budget,
@@ -30,6 +31,11 @@ pytestmark = pytest.mark.unit
 
 
 class TestAgentLoader:
+    def test_repo_root_is_project_root(self):
+        expected = __import__("pathlib").Path(agent_loader.__file__).resolve().parents[3]
+
+        assert agent_loader.repo_root() == expected
+
     def test_tier_phase_and_domain_defaults_are_normalized(self):
         entry = {"tier": "1", "phases": ["coding", 3], "domains": ["core", 7]}
 
@@ -183,6 +189,14 @@ class TestAgentGc:
 
 
 class TestEnvBootstrapAndMetrics:
+    def test_repo_roots_are_project_root(self):
+        pathlib = __import__("pathlib")
+        expected = pathlib.Path(__file__).resolve().parents[2]
+
+        assert env_bootstrap.repo_root() == expected
+        assert agent_loader.repo_root() == expected
+        assert agent_progress._repo_root() == expected
+
     def test_load_dotenv_missing_can_be_optional_or_required(self, tmp_path, monkeypatch):
         monkeypatch.setattr(env_bootstrap, "repo_root", lambda: tmp_path)
 

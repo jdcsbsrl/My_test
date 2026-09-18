@@ -315,58 +315,16 @@ class AgentOrchestrator:
         self.monitor.log(f"报告已生成: {report_path}")
 
     def execute_test_case_generation(self, requirement_id: str, requirement_name: str, test_cases: list[dict]) -> str:
-        """执行测试用例生成工作流
+        """拒绝执行已下线的旧测试用例生成工作流。
 
-        Args:
-            requirement_id: 需求ID
-            requirement_name: 需求名称
-            test_cases: 测试用例列表
-
-        Returns:
-            str: 生成的Excel文件路径
+        测试用例生成现在由 ``tools/case_generator_cli.py`` 统一处理，使用
+        ``CaseGenerationService``、``AuditGateway`` 和固定模板。保留这个方法
+        仅用于给旧调用方提供明确的迁移错误，不再尝试拼装旧的三步工作流。
         """
-        workflow_def = {
-            "name": f"测试用例生成 - {requirement_name}",
-            "description": f"为需求{requirement_id}生成测试用例",
-            "steps": [
-                {
-                    "step_id": "step_prepare",
-                    "name": "准备数据",
-                    "type": "AGENT",
-                    "agent_type": "test_case_generator",
-                    "audit_type": "TEST_CASE",
-                    "params": {"operation": "validate"},
-                },
-                {
-                    "step_id": "step_generate",
-                    "name": "生成测试用例",
-                    "type": "AGENT",
-                    "agent_type": "test_case_generator",
-                    "audit_type": "TEST_CASE",
-                    "depends_on": ["step_prepare"],
-                    "params": {"operation": "create"},
-                },
-                {
-                    "step_id": "step_export",
-                    "name": "导出Excel",
-                    "type": "EXPORT",
-                    "agent_type": "excel_generator",
-                    "audit_type": "ALL",
-                    "depends_on": ["step_generate"],
-                    "params": {"requirement_name": requirement_name, "requirement_id": requirement_id},
-                },
-            ],
-        }
-
-        # 执行工作流
-        workflow = self.execute_workflow(workflow_def, test_cases)
-
-        # 获取输出
-        export_step = workflow.get_step("step_export")
-        if export_step and export_step.result:
-            return export_step.result
-
-        return ""
+        del requirement_id, requirement_name, test_cases
+        raise RuntimeError(
+            "execute_test_case_generation 已下线；请使用 " "python tools/case_generator_cli.py generate --help"
+        )
 
     def execute_code_review(self, code: str, language: str = "python") -> AuditResult:
         """执行代码审核工作流

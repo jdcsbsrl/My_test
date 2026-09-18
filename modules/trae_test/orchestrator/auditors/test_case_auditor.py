@@ -5,7 +5,7 @@ import re
 from ..audit_models import AuditResult
 from ..config import AuditType
 from ..audit_rules import FINAL_SCORE_THRESHOLD, RuleManager
-from ...utils.template_builder import ALL_FIELDS
+from ...utils.template_builder import ALL_FIELDS, FIXED_CASE_CREATOR
 
 
 class TestCaseAuditor:
@@ -67,10 +67,10 @@ class TestCaseAuditor:
             "error_message": "回归测试标识必须为'是'或'否'",
         },
         "创建人": {
-            "valid_values": ["余小龙", "闫海燕"],
-            "default_value": "余小龙",
+            "valid_values": [FIXED_CASE_CREATOR],
+            "default_value": FIXED_CASE_CREATOR,
             "required": True,
-            "error_message": "创建人必须为有效测试人员姓名，当前仅允许：余小龙、闫海燕",
+            "error_message": f"创建人必须固定为：{FIXED_CASE_CREATOR}",
         },
     }
 

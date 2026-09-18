@@ -77,6 +77,9 @@ class TestCaseStrategy:
     根据业务规则分类生成测试场景，包含场景分类、优先级判定、用例等级判定等功能。
     """
 
+    # This is a production class imported by tests; prevent pytest collection.
+    __test__ = False
+
     P0_KEYWORDS = P0_KEYWORDS
     P1_KEYWORDS = P1_KEYWORDS
     P2_KEYWORDS = P2_KEYWORDS

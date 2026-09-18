@@ -1,4 +1,9 @@
-"""Agent知识挂载管理器 - 实现智能体对特定知识域的按需加载与管理"""
+"""历史 Agent 知识域挂载管理器。
+
+本模块保留知识域挂载、上下文缓存和访问统计能力，供历史集成和测试使用。
+当前正式测试用例生成链路使用 ``CaseGenerationService`` 与
+``KnowledgeRetriever``，不从本模块进入。
+"""
 
 import json
 import os

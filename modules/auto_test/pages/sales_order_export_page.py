@@ -2,6 +2,7 @@ import os
 import re
 import time
 import uuid
+from typing import Any
 from urllib.parse import unquote, urljoin
 
 import allure
@@ -25,8 +26,11 @@ class SalesOrderExportPage(BasePage):
     EXPORT_READY_SELECTORS = (
         'input[placeholder*="选择导出模板"]:visible',
         'input[placeholder*="请选择导出模板"]:visible',
+        'input[placeholder*="模板"]:visible',
         ".el-select:visible",
+        ".el-select__wrapper:visible",
         ".ant-select:visible",
+        '[role="combobox"]:visible',
         'button:has-text("实时导出"):visible',
         'button:has-text("非实时导出"):visible',
     )
@@ -34,28 +38,140 @@ class SalesOrderExportPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.export_url_pattern = "sales/order/exportPage"
+        self.last_wait_diagnostics: dict[str, Any] = {}
+
+    def _attach_wait_diagnostics(
+        self,
+        page: Page,
+        diagnostics: dict[str, list[dict[str, Any]]],
+        listeners: list[tuple[Any, str, Any]],
+        observed_pages: set[int],
+    ) -> None:
+        """Capture browser failures that explain an export route timeout."""
+        page_id = id(page)
+        if page_id in observed_pages:
+            return
+        observed_pages.add(page_id)
+        on = getattr(page, "on", None)
+        if not callable(on):
+            return
+
+        def record(category: str, value: dict[str, Any]) -> None:
+            if len(diagnostics[category]) < 20:
+                diagnostics[category].append(value)
+
+        def on_response(response: Any) -> None:
+            status = getattr(response, "status", None)
+            if isinstance(status, int) and status >= 400:
+                record(
+                    "http_errors",
+                    {"status": status, "url": self._redact_url(getattr(response, "url", ""))},
+                )
+
+        def on_request_failed(request: Any) -> None:
+            failure = getattr(request, "failure", None)
+            if callable(failure):
+                failure = failure()
+            record(
+                "request_failures",
+                {
+                    "url": self._redact_url(getattr(request, "url", "")),
+                    "failure": self._redact_text(failure),
+                },
+            )
+
+        def on_console(message: Any) -> None:
+            message_type = str(getattr(message, "type", ""))
+            if message_type in {"error", "warning"}:
+                record(
+                    "console_messages",
+                    {"type": message_type, "text": self._redact_text(getattr(message, "text", ""))},
+                )
+
+        def on_page_error(error: Any) -> None:
+            record("page_errors", {"text": self._redact_text(error)})
+
+        handlers = {
+            "response": on_response,
+            "requestfailed": on_request_failed,
+            "console": on_console,
+            "pageerror": on_page_error,
+        }
+        for event, handler in handlers.items():
+            try:
+                on(event, handler)
+                listeners.append((page, event, handler))
+            except Exception:
+                continue
+
+    def _detach_wait_diagnostics(self, listeners: list[tuple[Any, str, Any]]) -> None:
+        for page, event, handler in listeners:
+            remove_listener = getattr(page, "remove_listener", None)
+            if not callable(remove_listener):
+                continue
+            try:
+                remove_listener(event, handler)
+            except Exception:
+                continue
 
     @allure.step("等待导出页面加载")
     def wait_for_export_page(self, timeout: int = 30000) -> bool:
+        diagnostics: dict[str, list[dict[str, Any]]] = {
+            "http_errors": [],
+            "request_failures": [],
+            "console_messages": [],
+            "page_errors": [],
+        }
+        listeners: list[tuple[Any, str, Any]] = []
+        observed_pages: set[int] = set()
         try:
-            start_time = time.time()
-            while time.time() - start_time < timeout / 1000:
-                if self.export_url_pattern in self.page.url:
-                    self.wait_for_page_settle(timeout=5000)
-                    if self._export_controls_ready():
-                        logger.info("导出页面已跳转且业务控件已挂载")
-                        return True
-
-                pages = self.page.context.pages
+            start_time = time.monotonic()
+            deadline = start_time + max(timeout, 1) / 1000
+            route_reload_attempted = False
+            original_page = self.page
+            while time.monotonic() < deadline:
+                try:
+                    pages = list(self.page.context.pages)
+                except Exception:
+                    pages = [self.page]
+                if self.page not in pages:
+                    pages.insert(0, self.page)
                 for pg in pages:
-                    if self.export_url_pattern in pg.url:
-                        self.page = pg
-                        self.wait_for_page_settle(timeout=5000)
-                        if self._export_controls_ready():
-                            logger.info("已切换到导出页面且业务控件已挂载")
-                            return True
+                    self._attach_wait_diagnostics(pg, diagnostics, listeners, observed_pages)
 
-                if int(time.time() - start_time) % 5 == 0:
+                for pg in pages:
+                    if self.export_url_pattern not in pg.url:
+                        continue
+                    self.page = pg
+                    candidate_ready = False
+                    try:
+                        self.wait_for_page_settle(timeout=min(5000, max(1, int((deadline - time.monotonic()) * 1000))))
+                        if self._export_controls_ready():
+                            candidate_ready = True
+                            logger.info("导出页面已跳转且业务控件已挂载")
+                            return True
+                    except Exception as exc:
+                        logger.debug("导出页面候选控件尚未就绪: {}", type(exc).__name__)
+                    finally:
+                        if not candidate_ready:
+                            self.page = original_page
+
+                elapsed = time.monotonic() - start_time
+                if not route_reload_attempted and elapsed >= max(timeout / 1000 / 2, 1):
+                    route_reload_attempted = True
+                    route_page = next((pg for pg in pages if self.export_url_pattern in pg.url), None)
+                    if route_page is not None:
+                        try:
+                            reload_timeout = max(1, int((deadline - time.monotonic()) * 1000))
+                            route_page.reload(
+                                wait_until="domcontentloaded",
+                                timeout=min(60000, reload_timeout),
+                            )
+                            logger.info("导出页控件未及时挂载，已执行一次同路由刷新重试")
+                        except Exception as exc:
+                            logger.debug("导出页刷新重试失败: {}", type(exc).__name__)
+
+                if int(time.monotonic() - start_time) % 5 == 0:
                     pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
                     logger.info(
                         "当前所有页面: {}",
@@ -63,18 +179,30 @@ class SalesOrderExportPage(BasePage):
                     )
                     logger.info("当前页面URL: {}, 标题: {}", self._redact_url(self.page.url), self.page.title())
 
-                self.wait_for_poll_interval(1000)
+                self.wait_for_poll_interval(min(500, max(1, int((deadline - time.monotonic()) * 1000))))
 
+            self.page = original_page
+            try:
+                pages = list(self.page.context.pages)
+            except Exception:
+                pages = [self.page]
             pages_info = [{"url": pg.url, "title": pg.title()} for pg in pages]
+            diagnostics["pages"] = [
+                {"url": self._redact_url(item["url"]), "title": self._redact_text(item["title"])} for item in pages_info
+            ]
+            self.last_wait_diagnostics = diagnostics
             logger.warning(
-                "超时，所有页面: {}",
-                [{**item, "url": self._redact_url(item["url"])} for item in pages_info],
+                "导出页面未就绪，诊断信息: {}",
+                diagnostics,
             )
             logger.warning("未找到导出页面，当前页面URL: {}", self._redact_url(self.page.url))
             return False
         except Exception as e:
+            self.last_wait_diagnostics = diagnostics
             logger.warning(f"等待导出页面超时: {e}")
             return False
+        finally:
+            self._detach_wait_diagnostics(listeners)
 
     def _export_controls_ready(self) -> bool:
         """Return true only after the export SPA has mounted its real controls.

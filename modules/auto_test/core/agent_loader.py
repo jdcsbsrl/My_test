@@ -11,7 +11,8 @@ _MANIFEST_NAME = "manifest.json"
 
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    # agent_loader.py lives at <repo>/modules/auto_test/core/agent_loader.py.
+    return Path(__file__).resolve().parents[3]
 
 
 def _tier_of(entry: dict[str, Any]) -> int:

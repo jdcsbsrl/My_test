@@ -1,4 +1,9 @@
-"""AutoAgent智能体 - 自动化方案生成与影响分析"""
+"""历史 AutoAgent 方案分析器。
+
+本模块负责历史用例的自动化候选分析、框架建议、资源估算和方案报告。
+它不属于当前 ``case_generator_cli.py`` 或 ``run_regression.py`` 正式入口，
+仍保留给历史评估、集成测试和兼容调用方。
+"""
 
 import time
 from datetime import datetime

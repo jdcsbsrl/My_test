@@ -1,7 +1,7 @@
 ---
 title: 项目文件与产物管理行为规范
 purpose: 项目目录、运行时产物、workspace、Git 和清理边界
-version: 2.1.0
+version: 2.2.0
 updated: 2026-08-18
 authority: 项目强制规范
 ---
@@ -10,7 +10,7 @@ authority: 项目强制规范
 
 ## 1. 适用范围
 
-本规范约束开发人员、AI Agent、测试脚本、构建脚本和 CI/CD 产生的文件。核心原则是：长期维护内容进入正式目录，运行时产物进入 `.runtime/`，最终交付文件进入 `workspace/YYYYMMDD/`，真实敏感数据只保留本地。
+本规范约束开发人员、AI Agent、测试脚本、构建脚本和 CI/CD 产生的文件。核心原则是：长期维护内容进入正式目录，运行时产物进入 `.runtime/`，最终交付文件进入 `workspace/YYYYMMDD/`。
 
 ## 2. 顶层目录总表
 
@@ -69,9 +69,7 @@ cache downloads logs reports scripts sheet_build uploads
 固定、不可变、被代码直接引用的样本和模板放 `fixtures/`；可变、按环境或场景切换的输入放 `data/`。`data/test_accounts/` 只允许脱敏样例。真实数据统一放 `data/private/`，该目录被 Git 忽略，不提交。
 
 ## 9. 敏感数据
-
-账号、Token、Cookie、订单号、SKU、客户信息、内网地址、真实业务规则和真实测试结果均为敏感数据。真实内容只保留本地，提交内容必须脱敏。`.env`、`data/private/`、`assets/knowledge_base/`、`.runtime/`、`workspace/`、`.venv/`、`browsers/` 默认不提交。
-
+`.env`、`data/private/`、`assets/knowledge_base/`、`.runtime/`、`workspace/`、`.venv/`、`browsers/` 默认不提交。
 ## 10. 根目录例外登记
 
 工具强制要求的根文件可以例外保留，但必须登记在本文件的“根目录例外登记表”中，并填写文件名、所属工具、保留原因、是否被 CI 使用、是否可迁移。本表由 `project_structure_auditor.py` 解析；修改列结构必须同步更新审核器和单元测试。
@@ -129,7 +127,7 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 14. 清理规则
 
-`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除文件。对历史遗留在 `.runtime` 根目录下的 pytest/tmp/cache 临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式仅识别固定命名模式、检查目录最新修改时间并阻止符号链接越界。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以格式整理流程写入的“最终评分”为结构参考分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
+`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除路径。对历史遗留在 `.runtime` 根目录下的临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式识别 `pytest-*`、`browser-temp-*`、`validate-report-*`、`real-response-validation-*` 等固定命名模式，并检查目录最新修改时间。若需在确认后清理近期遗留目录，使用 `--purge-legacy-roots`，建议先配合 `--dry-run` 预览；该选项只针对已识别的 `.runtime` 直属遗留根目录，不会扩大到未知目录。清理器始终阻止符号链接/Junction 越界，不跟随指向 `.runtime` 外部的依赖目录；单个目录无权限时跳过并继续其他清理。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以格式整理流程写入的“最终评分”为结构参考分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
 
 ## 15. 变更记录
 
@@ -138,3 +136,4 @@ cache downloads logs reports scripts sheet_build uploads
 | v1.0 | 初始目录和产物规范 |
 | v2.0 | 增加 workspace、`.runtime`、运行时 API、审核退出码 |
 | v2.1 | 补齐实际目录、模块测试、私有数据、`.keep`、CI、例外登记和清理规则 |
+| v2.2 | 补齐遗留临时目录模式，增加显式近期遗留清理和权限/链接安全处理 |

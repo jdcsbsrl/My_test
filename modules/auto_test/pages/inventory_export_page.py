@@ -28,6 +28,7 @@ class InventoryExportPage(BasePage):
 
     def __init__(self, page: Page) -> None:
         super().__init__(page)
+        self.last_wait_diagnostics: dict[str, str] = {}
 
     @allure.step("等待导出页面加载")
     def wait_for_export_page(self, timeout: int = 30000) -> bool:
@@ -50,10 +51,22 @@ class InventoryExportPage(BasePage):
                 self.wait_for_poll_interval(1000)
 
             logger.warning("未找到导出页面，当前页面URL: {}", self._redact_url(self.page.url))
+            self.last_wait_diagnostics = self._wait_failure_diagnostics()
             return False
         except Exception as e:
+            self.last_wait_diagnostics = self._wait_failure_diagnostics(error=e)
             logger.warning(f"等待导出页面超时: {e}")
             return False
+
+    def _wait_failure_diagnostics(self, error: Exception | None = None) -> dict[str, str]:
+        """Return safe route diagnostics for facade-level failure reports."""
+        diagnostics = {
+            "url": self._redact_url(self.page.url),
+            "title": self._redact_text(self.page.title()),
+        }
+        if error is not None:
+            diagnostics["error"] = self._redact_text(error)
+        return diagnostics
 
     @allure.step("检查是否在导出页面")
     def _wait_for_export_content(self, timeout: int = 15000) -> None:
@@ -851,11 +864,17 @@ class InventoryExportPage(BasePage):
                     "file_size": 0,
                     "url": None,
                 }
-            data = columns_payload.get("data") if isinstance(columns_payload, dict) else {}
+            data = self._extract_inventory_column_data(columns_payload)
             if not isinstance(data, dict):
+                payload_shape = self._inventory_column_response_shape(columns_payload)
+                logger.warning(
+                    "库存导出字段接口响应结构无法解析: status={}, shape={}",
+                    columns_response.status,
+                    payload_shape,
+                )
                 return {
                     "success": False,
-                    "error": "导出字段接口未返回字段数据",
+                    "error": ("导出字段接口未返回字段数据" f" (status={columns_response.status}, {payload_shape})"),
                     "filename": None,
                     "file_path": None,
                     "file_size": 0,
@@ -863,8 +882,12 @@ class InventoryExportPage(BasePage):
                 }
             check_columns = []
             for group_name in ("OmsInventory", "OmsLocation"):
-                for column in data.get(group_name, []) or []:
-                    check_columns.append(column)
+                group_columns = next(
+                    (value for key, value in data.items() if str(key).lower() == group_name.lower()),
+                    [],
+                )
+                if isinstance(group_columns, list):
+                    check_columns.extend(column for column in group_columns if isinstance(column, dict))
             selected_labels = self.page.evaluate("""
                 () => Array.from(document.querySelectorAll('.tag_item'))
                     .map(tag => (tag.textContent || '').replace(/^\\s*\\d+\\s*/, '').trim())
@@ -878,9 +901,11 @@ class InventoryExportPage(BasePage):
                 if filtered_columns:
                     check_columns = filtered_columns
             if not check_columns:
+                payload_shape = self._inventory_column_response_shape(columns_payload)
+                logger.warning("库存导出字段接口未提供可用列: shape={}", payload_shape)
                 return {
                     "success": False,
-                    "error": "导出字段接口未返回字段",
+                    "error": f"导出字段接口未返回字段 ({payload_shape})",
                     "filename": None,
                     "file_path": None,
                     "file_size": 0,
@@ -968,6 +993,51 @@ class InventoryExportPage(BasePage):
                 "file_size": 0,
                 "url": None,
             }
+
+    @staticmethod
+    def _extract_inventory_column_data(payload: object) -> dict | None:
+        """Extract inventory column groups from supported API response envelopes.
+
+        The frontend has returned the groups under ``data`` historically, while
+        some deployments wrap the same payload under ``result`` or return the
+        groups at the top level. Only a mapping containing a known group is
+        accepted so an unrelated success response cannot become an export body.
+        """
+        if not isinstance(payload, dict):
+            return None
+
+        candidates: list[dict] = []
+        for wrapper_key in ("data", "result"):
+            wrapped = payload.get(wrapper_key)
+            if isinstance(wrapped, dict):
+                candidates.append(wrapped)
+        candidates.append(payload)
+
+        for candidate in candidates:
+            keys = {str(key).lower() for key in candidate}
+            if {"omsinventory", "omslocation"} & keys:
+                return candidate
+        return None
+
+    @staticmethod
+    def _inventory_column_response_shape(payload: object) -> str:
+        """Describe the response schema without logging any response values."""
+        if not isinstance(payload, dict):
+            return f"payload_type={type(payload).__name__}"
+
+        top_keys = ",".join(sorted(str(key) for key in payload.keys())[:12]) or "<none>"
+        data = payload.get("data")
+        if isinstance(data, dict):
+            data_keys = ",".join(sorted(str(key) for key in data.keys())[:12]) or "<none>"
+            detail = f"data_type=dict,data_keys={data_keys}"
+        elif isinstance(data, list):
+            item_keys = "<none>"
+            if data and isinstance(data[0], dict):
+                item_keys = ",".join(sorted(str(key) for key in data[0].keys())[:12]) or "<none>"
+            detail = f"data_type=list,data_length={len(data)},first_item_keys={item_keys}"
+        else:
+            detail = f"data_type={type(data).__name__}"
+        return f"payload_keys={top_keys},{detail}"
 
     def _get_inventory_api_base(self, origin: str) -> str:
         api_urls = self.page.evaluate("""

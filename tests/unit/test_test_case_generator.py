@@ -5,7 +5,7 @@ from modules.trae_test.utils.test_case_generator import (
     TestCaseGenerator as GeneratorUnderTest,
     generate_cases,
 )
-from modules.trae_test.utils.template_builder import ALL_FIELDS
+from modules.trae_test.utils.template_builder import ALL_FIELDS, FIXED_CASE_CREATOR
 from modules.trae_test.utils.runtime_quality import read_runtime_quality
 
 
@@ -110,6 +110,7 @@ class TestTestCaseGenerator:
             assert case["用例类型"] == "功能测试"
             assert case["用例等级"] == "高"
             assert case["优先级"] == "P1"
+            assert case["创建人"] == FIXED_CASE_CREATOR
             assert case["是否可自动化"] == "是"
             assert case["知识库关联"].startswith("销售")
             assert "内容" in case["知识库关联"]

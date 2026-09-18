@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import os
+import shutil
 import time
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -14,6 +15,9 @@ from modules.trae_test.utils.runtime_paths import RUNTIME_KINDS, project_root
 LEGACY_RUNTIME_ROOT_PATTERNS = (
     "cache-*",
     "pytest-*",
+    "browser-temp-*",
+    "validate-report-*",
+    "real-response-validation-*",
     "test_tmp*",
     "tmp*",
     "node_modules",
@@ -62,18 +66,38 @@ def _is_within(path: Path, root: Path) -> bool:
     return path == root or root in path.parents
 
 
-def _latest_mtime(path: Path) -> float:
-    """Return the newest modification time below a legacy root."""
-    latest = path.stat().st_mtime
+def _record_error(errors: list[str] | None, path: Path, error: OSError) -> None:
+    if errors is not None:
+        errors.append(f"{path}: {error}")
+
+
+def _latest_mtime(path: Path, *, errors: list[str] | None = None) -> float | None:
+    """Return the newest readable modification time below a legacy root."""
+    try:
+        latest = path.stat().st_mtime
+    except OSError as error:
+        _record_error(errors, path, error)
+        return None
     if path.is_dir() and not path.is_symlink():
-        for directory, dirnames, filenames in os.walk(path, topdown=True, followlinks=False):
+
+        def on_walk_error(error: OSError) -> None:
+            filename = getattr(error, "filename", None)
+            _record_error(errors, Path(filename) if filename else path, error)
+
+        for directory, dirnames, filenames in os.walk(
+            path,
+            topdown=True,
+            onerror=on_walk_error,
+            followlinks=False,
+        ):
             current = Path(directory)
             dirnames[:] = [name for name in dirnames if not (current / name).is_symlink()]
             for name in (*dirnames, *filenames):
                 candidate = current / name
                 try:
                     latest = max(latest, candidate.stat().st_mtime)
-                except FileNotFoundError:
+                except OSError as error:
+                    _record_error(errors, candidate, error)
                     continue
     return latest
 
@@ -82,24 +106,53 @@ def _legacy_root_matches(path: Path) -> bool:
     return any(fnmatch.fnmatch(path.name, pattern) for pattern in LEGACY_RUNTIME_ROOT_PATTERNS)
 
 
-def clean_legacy_roots(runtime_root: Path, cutoff: float, *, dry_run: bool = False) -> list[Path]:
-    """Clean recognized legacy roots directly under ``.runtime``."""
+def clean_legacy_roots(
+    runtime_root: Path,
+    cutoff: float,
+    *,
+    dry_run: bool = False,
+    purge: bool = False,
+    errors: list[str] | None = None,
+) -> list[Path]:
+    """Clean recognized legacy roots directly under ``.runtime``.
+
+    By default, the retention cutoff still applies. ``purge=True`` is an
+    explicit operator action for removing recent legacy roots as well. Reparse
+    points and roots resolving outside ``.runtime`` are always skipped.
+    A single inaccessible root must not prevent other roots from being
+    inspected and cleaned.
+    """
     removed: list[Path] = []
-    for path in runtime_root.iterdir():
-        if not _legacy_root_matches(path) or path.name == ".keep":
+    try:
+        candidates = sorted(runtime_root.iterdir(), key=lambda path: path.name.casefold())
+    except OSError as error:
+        _record_error(errors, runtime_root, error)
+        return removed
+
+    for path in candidates:
+        if path.name == ".keep" or not _legacy_root_matches(path):
             continue
-        resolved = path.resolve()
-        if not _is_within(resolved, runtime_root) or _latest_mtime(path) >= cutoff:
+        try:
+            if path.is_symlink():
+                continue
+            resolved = path.resolve()
+            if not _is_within(resolved, runtime_root):
+                continue
+            if not purge:
+                latest_mtime = _latest_mtime(path, errors=errors)
+                if latest_mtime is None or latest_mtime >= cutoff:
+                    continue
+            if dry_run:
+                removed.append(path)
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        except OSError as error:
+            _record_error(errors, path, error)
             continue
         removed.append(path)
-        if dry_run:
-            continue
-        if path.is_dir() and not path.is_symlink():
-            import shutil
-
-            shutil.rmtree(path)
-        else:
-            path.unlink()
     return removed
 
 
@@ -109,6 +162,8 @@ def clean_runtime(
     *,
     dry_run: bool = False,
     clean_legacy: bool = False,
+    purge_legacy: bool = False,
+    errors: list[str] | None = None,
 ) -> list[Path]:
     if keep_days < 0:
         raise ValueError("keep_days 不能为负数")
@@ -119,13 +174,31 @@ def clean_runtime(
     cutoff = time.time() - keep_days * 86400
     removed: list[Path] = []
     patterns = protected_patterns(runtime_root)
-    if clean_legacy:
-        removed.extend(clean_legacy_roots(runtime_root, cutoff, dry_run=dry_run))
+    if clean_legacy or purge_legacy:
+        removed.extend(
+            clean_legacy_roots(
+                runtime_root,
+                cutoff,
+                dry_run=dry_run,
+                purge=purge_legacy,
+                errors=errors,
+            )
+        )
     for kind in sorted(RUNTIME_KINDS):
         directory = runtime_root / kind
         if not directory.is_dir():
             continue
-        for directory_name, dirnames, filenames in os.walk(directory, topdown=True, followlinks=False):
+
+        def on_walk_error(error: OSError) -> None:
+            filename = getattr(error, "filename", None)
+            _record_error(errors, Path(filename) if filename else directory, error)
+
+        for directory_name, dirnames, filenames in os.walk(
+            directory,
+            topdown=True,
+            onerror=on_walk_error,
+            followlinks=False,
+        ):
             current_dir = Path(directory_name)
             # Do not recurse through symlinked directories. A runtime cleaner
             # must never turn a link into an escape hatch outside .runtime.
@@ -144,32 +217,58 @@ def clean_runtime(
                     continue
                 try:
                     is_expired = path.stat().st_mtime < cutoff
-                except FileNotFoundError:
+                except OSError as error:
+                    _record_error(errors, path, error)
                     continue
                 if is_expired:
+                    if dry_run:
+                        removed.append(path)
+                        continue
+                    try:
+                        path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError as error:
+                        _record_error(errors, path, error)
+                        continue
                     removed.append(path)
-                    if not dry_run:
-                        try:
-                            path.unlink()
-                        except FileNotFoundError:
-                            pass
     return removed
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="清理超过保留期限的 .runtime 产物")
     parser.add_argument("--keep-days", type=int, default=14)
-    parser.add_argument("--dry-run", action="store_true", help="只列出待清理文件，不删除")
-    parser.add_argument(
+    parser.add_argument("--dry-run", action="store_true", help="只列出待清理路径，不删除")
+    legacy_group = parser.add_mutually_exclusive_group()
+    legacy_group.add_argument(
         "--clean-legacy-roots",
         action="store_true",
-        help="清理 .runtime 根目录下已识别的历史 pytest/tmp/cache 临时目录和脚本",
+        help="清理 .runtime 根目录下超过保留期的历史临时目录和脚本",
+    )
+    legacy_group.add_argument(
+        "--purge-legacy-roots",
+        action="store_true",
+        help="显式清理 .runtime 根目录下所有已识别的历史临时目录，不受保留期限制",
     )
     args = parser.parse_args()
-    removed = clean_runtime(args.keep_days, dry_run=args.dry_run, clean_legacy=args.clean_legacy_roots)
+    errors: list[str] = []
+    removed = clean_runtime(
+        args.keep_days,
+        dry_run=args.dry_run,
+        clean_legacy=args.clean_legacy_roots or args.purge_legacy_roots,
+        purge_legacy=args.purge_legacy_roots,
+        errors=errors,
+    )
     action = "待清理" if args.dry_run else "已清理"
-    print(f"{action} {len(removed)} 个运行时文件（保留 {args.keep_days} 天）")
-    return 0
+    print(f"{action} {len(removed)} 个运行时路径（保留 {args.keep_days} 天）")
+    if args.dry_run:
+        for path in removed:
+            print(f"  {path}")
+    if errors:
+        print(f"跳过 {len(errors)} 个无法访问或删除的路径：")
+        for error in errors:
+            print(f"  {error}")
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

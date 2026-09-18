@@ -1,6 +1,7 @@
 """Sales Order Export Sort Regression Tests."""
 
 import os
+import warnings
 
 import pytest
 from playwright.sync_api import Page
@@ -12,6 +13,15 @@ from modules.auto_test.pages.sales_order_page import SalesOrderPage
 def _skip_ci_environment_issue(reason: str) -> None:
     if os.getenv("CI", "").lower() in {"1", "true", "yes"}:
         pytest.skip(f"CI测试环境页面/接口未就绪，跳过本次UI用例: {reason}")
+
+
+def _require_order_data(sales_order_page: SalesOrderPage, phase: str) -> None:
+    """Skip optional export checks when the test account has no orders."""
+    data_state = sales_order_page.wait_for_order_data_state(timeout=60000)
+    if data_state == "empty":
+        pytest.skip(f"{phase}前当前销售订单查询结果为空，跳过依赖业务数据的导出用例")
+    if data_state == "timeout":
+        pytest.fail(f"{phase}前销售订单页面未进入有数据或明确无数据状态")
 
 
 SORT_FIELDS = [
@@ -36,7 +46,13 @@ def read_excel_order_numbers(file_path: str, limit: int = 50) -> list[str]:
     try:
         import openpyxl
 
-        wb = openpyxl.load_workbook(file_path)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message="Workbook contains no default style.*",
+                category=UserWarning,
+            )
+            wb = openpyxl.load_workbook(file_path)
         ws = wb.active
         header_row = [cell.value for cell in next(ws.iter_rows(max_row=1))]
         order_col_index = None
@@ -94,11 +110,13 @@ class TestSalesOrderExportSort:
         sales_order_page.navigate_to("sales/order/saleOrder")
         sales_order_page.wait_for_table_data()
 
-        sales_order_page.click_tab("待处理")
-        sales_order_page.wait_for_table_data()
+        sales_order_page.click_tab("全部订单")
+        _require_order_data(sales_order_page, "排序")
 
         sales_order_page.select_sort_order("付款时间", is_ascending=True)
-        sales_order_page.wait_for_sort_complete()
+        sort_state = sales_order_page.wait_for_sort_complete(timeout=60000)
+        if sort_state == "empty":
+            pytest.skip("排序后当前销售订单查询结果为空，跳过依赖业务数据的导出用例")
 
         page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
         print(f"\n✅ 页面排序后订单号（付款时间升序）: {len(page_order_numbers)} found")
@@ -142,11 +160,13 @@ class TestSalesOrderExportSort:
         sales_order_page.navigate_to("sales/order/saleOrder")
         sales_order_page.wait_for_table_data()
 
-        sales_order_page.click_tab("待处理")
-        sales_order_page.wait_for_table_data()
+        sales_order_page.click_tab("全部订单")
+        _require_order_data(sales_order_page, "排序")
 
         sales_order_page.select_sort_order("付款时间", is_ascending=False)
-        sales_order_page.wait_for_sort_complete()
+        sort_state = sales_order_page.wait_for_sort_complete(timeout=60000)
+        if sort_state == "empty":
+            pytest.skip("排序后当前销售订单查询结果为空，跳过依赖业务数据的导出用例")
 
         page_order_numbers = sales_order_page.get_sorted_order_numbers(limit=30)
         print(f"\n✅ 页面排序后订单号（付款时间降序）: {len(page_order_numbers)} found")

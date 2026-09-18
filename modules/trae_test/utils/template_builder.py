@@ -27,6 +27,8 @@ EXTENSION_FIELDS: list[str] = ["是否可自动化", "回归测试标识", "知�
 
 # 正式表头的唯一 Python 定义源；ExcelGenerator 只引用它，不再维护副本。
 ALL_FIELDS: list[str] = IMPORT_FIELDS + EXTENSION_FIELDS
+# 测试用例生成链路的固定创建人。该值不允许被模型、环境变量或调用参数覆盖。
+FIXED_CASE_CREATOR = "余小龙"
 WORKSHEET_NAME = "测试用例"
 TEMPLATE_FILENAME = "测试用例模板.xlsx"
 SCHEMA_VERSION = "1.0"

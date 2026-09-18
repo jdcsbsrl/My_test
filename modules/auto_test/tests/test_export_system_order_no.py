@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import warnings
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")
@@ -148,7 +149,13 @@ def test_export_with_system_order_no(logged_in_page: Page) -> None:
 
     import openpyxl
 
-    wb = openpyxl.load_workbook(save_path)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="Workbook contains no default style.*",
+            category=UserWarning,
+        )
+        wb = openpyxl.load_workbook(save_path)
     ws = wb.active
 
     print(f"Rows: {ws.max_row}, Cols: {ws.max_column}")

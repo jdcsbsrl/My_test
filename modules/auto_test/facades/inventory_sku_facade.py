@@ -118,7 +118,11 @@ class InventorySKUFacade:
         self.sku_page.select_export_current_search()
         self.export_page = InventoryExportPage(self.page)
         if not self.export_page.wait_for_export_page():
-            return {"success": False, "error": "导出页面加载失败"}
+            result = {"success": False, "error": "导出页面加载失败"}
+            diagnostics = getattr(self.export_page, "last_wait_diagnostics", None)
+            if isinstance(diagnostics, dict) and diagnostics:
+                result["diagnostics"] = diagnostics
+            return result
 
         self.export_page.select_first_template_if_available()
 
@@ -162,7 +166,11 @@ class InventorySKUFacade:
         self.sku_page.select_export_selected()
         self.export_page = InventoryExportPage(self.page)
         if not self.export_page.wait_for_export_page():
-            return {"success": False, "error": "导出页面加载失败"}
+            result = {"success": False, "error": "导出页面加载失败"}
+            diagnostics = getattr(self.export_page, "last_wait_diagnostics", None)
+            if isinstance(diagnostics, dict) and diagnostics:
+                result["diagnostics"] = diagnostics
+            return result
 
         self.export_page.select_first_template_if_available()
 
@@ -200,7 +208,8 @@ class InventorySKUFacade:
             导出结果信息（含分页设置耗时、选中数量等）
         """
         page_set_time = self.sku_page.set_page_size(page_size)
-        self.page.wait_for_load_state("networkidle")
+        # set_page_size() already waits for the table data to settle.  Do not
+        # wait for global network idle on this long-lived SPA page.
 
         result_count = self.sku_page.get_result_count()
         selected_count = min(result_count, page_size) if result_count > 0 else 0

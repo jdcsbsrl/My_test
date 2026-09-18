@@ -76,15 +76,32 @@ class TestEnvironment:
 
         assert resolved == {"origin": "https://example.test", "missing": "fallback", "items": ["x", 3]}
 
-    def test_load_endpoints_builds_urls_from_config(self):
+    def test_load_endpoints_reuses_canonical_endpoints(self):
         env = object.__new__(environment.Environment)
-        env._config = {"origin": "https://erp.test", "ui_path": "/oms-ui", "api_path": "/api"}
+        env._canonical_config = SimpleNamespace(
+            env="test",
+            endpoints=SimpleNamespace(
+                base_url="https://erp.test/oms-ui",
+                api_base_url="https://erp.test/api",
+                auth_url="https://erp.test/api/oms-admin/auth/login",
+                admin_path="/oms-admin",
+            ),
+        )
 
         env._load_endpoints("test")
 
         assert env.endpoints.base_url == "https://erp.test/oms-ui"
         assert env.endpoints.api_base_url == "https://erp.test/api"
         assert env.endpoints.auth_url == "https://erp.test/api/oms-admin/auth/login"
+
+    def test_environment_uses_normalized_config_manager_endpoints(self, monkeypatch):
+        monkeypatch.setenv("TEST_WEB_BASE_URL", "https://erptest.dayoneerp.com/oms-ui")
+        monkeypatch.setenv("TEST_WEB_API_BASE_URL", "https://erptest.dayoneerp.com/oms-api")
+        env = environment.Environment("test")
+
+        assert env.endpoints.base_url == "https://erptest.dayoneerp.com/oms-ui"
+        assert env.endpoints.api_base_url == "https://erptest.dayoneerp.com/oms-api"
+        assert env.endpoints.auth_url == "https://erptest.dayoneerp.com/oms-api/oms-admin/auth/login"
 
     def test_get_set_and_config_property_returns_deep_copy(self):
         env = object.__new__(environment.Environment)

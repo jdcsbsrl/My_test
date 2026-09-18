@@ -11,6 +11,7 @@ from modules.auto_test.pages.export_page import ExportPage
 from modules.auto_test.pages.inventory_export_page import InventoryExportPage
 from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.pages.sales_order_export_page import SalesOrderExportPage
+from modules.auto_test.pages.sales_order_page import SalesOrderPage
 from modules.trae_test.orchestrator.agent_manager import AgentContext, AgentManager, DomainMetadata
 
 pytestmark = pytest.mark.unit
@@ -291,6 +292,19 @@ class TestBaseAndExportPage:
         assert calls["count"] == 3
         assert page.calls.count(("reload", "domcontentloaded", 60000)) == 2
 
+    def test_wait_for_business_ready_can_require_route_specific_controls(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+        page = FakePage()
+        base = BasePage(page)
+
+        base.wait_for_business_ready(
+            ['button:visible:has-text("搜索")'],
+            page_name="库存SKU页面",
+            required_selectors=['input[placeholder*="库存SKU编码"]:visible'],
+        )
+
+        assert any("库存SKU编码" in call[1] for call in page.calls if call[0] == "locator")
+
     def test_sales_export_payload_business_error_includes_trace_id(self):
         result = SalesOrderExportPage._business_error_from_export_payload(
             {"code": 500, "message": "未知异常，请联系IT。tlogtraceid = abc-123", "data": None},
@@ -308,6 +322,24 @@ class TestBaseAndExportPage:
             "error": "导出接口 HTTP 503",
             "trace_id": None,
         }
+
+    def test_sales_order_data_state_distinguishes_rows_from_explicit_empty(self, monkeypatch):
+        monkeypatch.setattr(base_page_module, "get_config", lambda: SimpleNamespace(base_url="https://example.test"))
+
+        rows_page = FakePage()
+        rows_page.locators[".order-block:visible"] = FakeLocator(count=1)
+        assert SalesOrderPage(rows_page).wait_for_order_data_state(timeout=10) == "rows"
+
+        empty_page = FakePage()
+        for selector in (
+            ".order-block:visible",
+            "tbody tr.el-table__row:visible",
+            ".el-table__body-wrapper tbody tr:visible",
+            "table tbody tr:visible",
+        ):
+            empty_page.locators[selector] = FakeLocator(count=0)
+        empty_page.locators[".el-table__empty-block:visible"] = FakeLocator(count=1)
+        assert SalesOrderPage(empty_page).wait_for_order_data_state(timeout=10) == "empty"
 
     def test_sales_export_ready_accepts_template_input_control(self):
         page = FakePage()
@@ -485,3 +517,11 @@ class TestBaseAndExportPage:
         assert result["success"]
         assert ("get", 180000) in timeouts
         assert ("post", 180000) in timeouts
+
+    def test_inventory_export_accepts_supported_column_response_envelopes(self):
+        columns = {"OmsInventory": [{"label": "SKU", "prop": "sku"}], "OmsLocation": []}
+
+        assert InventoryExportPage._extract_inventory_column_data({"data": columns}) == columns
+        assert InventoryExportPage._extract_inventory_column_data({"result": columns}) == columns
+        assert InventoryExportPage._extract_inventory_column_data(columns) == columns
+        assert InventoryExportPage._extract_inventory_column_data({"data": []}) is None

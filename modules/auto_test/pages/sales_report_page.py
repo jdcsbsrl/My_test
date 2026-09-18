@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import allure
-from playwright.sync_api import Page
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -31,7 +31,19 @@ class SalesReportPage(BasePage):
     def navigate_to_report(self) -> None:
         self.navigate_to(self.report_url)
         self.page.wait_for_load_state("domcontentloaded")
-        self.wait_for_table_ready()
+        try:
+            self.wait_for_table_ready()
+        except PlaywrightTimeoutError as initial_error:
+            logger.warning(
+                "销售报表表格未在首次路由加载后出现，执行一次同路由刷新重试: {}",
+                self._table_wait_diagnostics(initial_error),
+            )
+            try:
+                self.take_screenshot("sales_report_table_bootstrap_timeout")
+            except Exception as screenshot_error:
+                logger.debug("Unable to capture sales report bootstrap screenshot: {}", screenshot_error)
+            self.page.reload(wait_until="domcontentloaded", timeout=60000)
+            self.wait_for_table_ready()
 
     def wait_for_table_ready(self, timeout: int = 45000) -> None:
         self._wait_for_loading_finished(timeout)
@@ -58,6 +70,36 @@ class SalesReportPage(BasePage):
             )
         except Exception:
             logger.warning("Sales report table container is visible but rows did not stabilize within timeout")
+
+    def _table_wait_diagnostics(self, error: Exception | None = None) -> dict[str, object]:
+        """Return safe diagnostics for a report route whose table did not mount."""
+        try:
+            diagnostics: dict[str, object] = {
+                "url": self._redact_url(self.page.url),
+                "title": self._redact_text(self.page.title()),
+                "table_count": self.page.locator(".el-table:visible, table:visible").count(),
+                "loading_count": self.page.locator(".el-loading-mask:visible, .ant-spin-spinning:visible").count(),
+            }
+        except Exception as diagnostic_error:
+            diagnostics = {"error": f"diagnostic_error:{type(diagnostic_error).__name__}"}
+        if error is not None:
+            diagnostics["wait_error"] = self._redact_text(error)
+        try:
+            diagnostics["document"] = self.page.evaluate("""() => ({
+                    ready_state: document.readyState,
+                    script_count: document.scripts.length,
+                    visible_alerts: Array.from(document.querySelectorAll(
+                        '.el-message, .el-notification, [role="alert"]'
+                    )).filter((element) => {
+                        const style = window.getComputedStyle(element);
+                        const rect = element.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0
+                            && style.display !== 'none' && style.visibility !== 'hidden';
+                    }).length
+                })""")
+        except Exception as evaluate_error:
+            diagnostics["document"] = f"error:{type(evaluate_error).__name__}"
+        return diagnostics
 
     def _wait_for_loading_finished(self, timeout: int = 30000) -> None:
         try:
@@ -136,40 +178,15 @@ class SalesReportPage(BasePage):
         end_date = end_date or start_date
         start_value = start_date if len(start_date) > 10 else f"{start_date} 00:00:00"
         end_value = end_date if len(end_date) > 10 else f"{end_date} 23:59:59"
-        filled = self.page.evaluate(
-            """([startValue, endValue]) => {
-                const visible = (el) => {
-                    const rect = el.getBoundingClientRect();
-                    const style = window.getComputedStyle(el);
-                    return rect.width > 0 && rect.height > 0
-                        && style.display !== 'none'
-                        && style.visibility !== 'hidden';
-                };
-                const items = Array.from(document.querySelectorAll('.el-form-item')).filter(visible);
-                const item = items.find((el) => {
-                    const label = el.querySelector('.el-form-item__label');
-                    return label && (label.innerText || label.textContent || '').includes('SKU创建日期');
-                });
-                if (!item) return false;
-                const inputs = Array.from(item.querySelectorAll('input'));
-                if (inputs.length < 2) return false;
-                const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-                [startValue, endValue].forEach((value, index) => {
-                    const input = inputs[index];
-                    input.removeAttribute('readonly');
-                    setter.call(input, value);
-                    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', code: 'Enter' }));
-                    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter' }));
-                    input.blur();
-                });
-                return true;
-            }""",
-            [start_value, end_value],
-        )
-        if not filled:
+        item = self.page.locator(".el-form-item:visible").filter(has_text="SKU创建日期").first
+        inputs = item.locator("input")
+        if inputs.count() < 2:
             raise ValueError("SKU create date range inputs were not found")
+        for index, value in enumerate((start_value, end_value)):
+            input_locator = inputs.nth(index)
+            input_locator.evaluate("element => element.removeAttribute('readonly')")
+            input_locator.fill(value)
+            input_locator.press("Tab")
         self.page.keyboard.press("Escape")
 
     def sku_create_date_values(self) -> list[str]:
