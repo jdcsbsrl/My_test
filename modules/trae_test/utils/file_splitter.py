@@ -10,14 +10,46 @@ from typing import Any
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(errors="replace")
 
-from .hash_utils import compute_file_hash
+from .hash_utils import compute_file_hash, compute_string_hash
 from .path_utils import PathManager, is_chunk_filename
+
+
+SPLITTER_METADATA_KEYS = frozenset(
+    {
+        "chunk_index",
+        "chunk_type",
+        "file_name",
+        "created_at",
+        "original_hash",
+        "total_chunks",
+        "sub_chunks",
+        "summary",
+        "data_keys",
+    }
+)
+
+
+def normalize_for_integrity(content: Any) -> Any:
+    """Remove splitter metadata before comparing JSON document content."""
+
+    if isinstance(content, dict):
+        return {key: value for key, value in content.items() if key not in SPLITTER_METADATA_KEYS}
+    return content
+
+
+def compute_content_hash(content: Any) -> str:
+    """Compute a format-independent hash for normalized JSON content."""
+
+    normalized = normalize_for_integrity(content)
+    canonical = json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return compute_string_hash(canonical)
 
 
 class JSONFileSplitter:
     """JSON文件分割器，确保每个分割块保持独立的JSON结构完整性"""
 
     DEFAULT_SIZE_THRESHOLD = 80 * 1024
+    _SPLITTER_METADATA_KEYS = SPLITTER_METADATA_KEYS
 
     def __init__(self, size_threshold: int = DEFAULT_SIZE_THRESHOLD):
         """初始化文件分割器
@@ -624,17 +656,7 @@ class JSONFileSplitter:
                 # 返回整个chunk排除元数据键后的内容
                 result = {}
                 for k, v in chunk_data.items():
-                    if k not in (
-                        "chunk_index",
-                        "chunk_type",
-                        "file_name",
-                        "created_at",
-                        "original_hash",
-                        "total_chunks",
-                        "sub_chunks",
-                        "summary",
-                        "data_keys",
-                    ):
+                    if k not in self._SPLITTER_METADATA_KEYS:
                         result[k] = v
                 return result if result else None
 
@@ -711,17 +733,7 @@ class JSONFileSplitter:
                 with open(root_chunks[0], encoding="utf-8") as f:
                     chunk_data = json.load(f)
                 for k, v in chunk_data.items():
-                    if k not in (
-                        "chunk_index",
-                        "chunk_type",
-                        "file_name",
-                        "created_at",
-                        "original_hash",
-                        "total_chunks",
-                        "sub_chunks",
-                        "summary",
-                        "data_keys",
-                    ):
+                    if k not in self._SPLITTER_METADATA_KEYS:
                         all_data[k] = v
 
             with open(output_path, "w", encoding="utf-8") as f:
@@ -736,8 +748,23 @@ class JSONFileSplitter:
             traceback.print_exc()
             return False
 
+    @classmethod
+    def _load_comparable_json(cls, file_path: str) -> Any:
+        """读取用于完整性比较的 JSON 内容并移除分割器元数据。"""
+
+        with open(file_path, encoding="utf-8") as source:
+            data = json.load(source)
+        return normalize_for_integrity(data)
+
+    @classmethod
+    def _compute_content_hash(cls, file_path: str) -> str:
+        """计算与 JSON 格式无关的内容哈希。"""
+
+        with open(file_path, encoding="utf-8") as source:
+            return compute_content_hash(json.load(source))
+
     def verify_integrity(self, original_path: str, chunk_files: list[str]) -> dict[str, Any]:
-        """验证分割的完整性（比较原始文件和重建文件）
+        """验证分割完整性，比较规范化 JSON 内容而不是原始字节格式。
 
         Args:
             original_path: 原始文件路径
@@ -748,9 +775,22 @@ class JSONFileSplitter:
         """
         import tempfile
 
-        result = {"success": False, "original_size": 0, "reconstructed_size": 0, "hash_match": False, "error": ""}
+        result = {
+            "success": False,
+            "original_size": 0,
+            "reconstructed_size": 0,
+            "hash_match": False,
+            "content_match": False,
+            "byte_match": False,
+            "error": "",
+        }
+        temp_path = None
 
         try:
+            if not os.path.isfile(original_path):
+                result["error"] = "原始文件不存在"
+                return result
+
             # 获取原始文件大小
             result["original_size"] = self._get_file_size(original_path)
 
@@ -765,20 +805,25 @@ class JSONFileSplitter:
             # 获取重建文件大小
             result["reconstructed_size"] = self._get_file_size(temp_path)
 
-            # 比较内容哈希
-            original_hash = self._compute_hash(original_path)
-            reconstructed_hash = self._compute_hash(temp_path)
-            result["hash_match"] = original_hash == reconstructed_hash
-
-            # 清理临时文件
-            os.unlink(temp_path)
-
-            result["success"] = result["hash_match"]
+            # 字节哈希仅作为诊断信息；完整性门禁使用规范化后的 JSON 内容哈希。
+            result["byte_match"] = self._compute_hash(original_path) == self._compute_hash(temp_path)
+            result["content_match"] = self._compute_content_hash(original_path) == self._compute_content_hash(temp_path)
+            # 保留 hash_match 字段兼容现有调用方，但其语义是内容哈希匹配。
+            result["hash_match"] = result["content_match"]
+            result["success"] = result["content_match"]
             return result
 
         except Exception as e:
             result["error"] = str(e)
             return result
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
 
     def _compute_hash(self, file_path: str) -> str:
         """计算文件的SHA256哈希
@@ -858,7 +903,9 @@ if __name__ == "__main__":
         if check["success"]:
             print(f"  原始文件大小: {check['original_size']} 字节")
             print(f"  重建文件大小: {check['reconstructed_size']} 字节")
-            print(f"  哈希匹配: {'✓' if check['hash_match'] else '✗'}")
+            print(f"  内容哈希匹配: {'✓' if check['hash_match'] else '✗'}")
+            if "byte_match" in check:
+                print(f"  字节哈希匹配: {'✓' if check['byte_match'] else '✗'}")
 
     if result["error"]:
         print(f"\n错误: {result['error']}")

@@ -23,6 +23,10 @@ authority: 专项规范
 3. **索引同步**: 更新后必须执行 `scan` 检查状态；需要全量重建时必须显式调用索引构建流程，不能把状态扫描当作重建。
 4. **检索验证**: 交付前必须执行 `validate`，确认知识能被检索命中。
 
+`lint` 会将普通上下文中的敏感词记录为 warning；只有高置信度的私钥、带凭据连接串、Bearer 凭据和真实密码赋值等结果才会进入 `blocked_findings` 并阻断导入。密码检测支持带业务前缀的键名，例如 `db_password`、`api_secret`；以 `_hash` 结尾的字段默认只告警，因为其值通常是哈希而非明文凭据。审核默认记录结果但不阻断流程；设置 `KB_AUDIT_ENABLED=1` 启用审核，设置 `KB_AUDIT_BLOCK_ON_FAIL=1` 时审核失败会使验证/迁移失败，迁移会执行回滚。
+
+审核配置必须保持一致：当 `KB_AUDIT_BLOCK_ON_FAIL=1` 而 `KB_AUDIT_ENABLED` 未设置为 `1` 时，验证和迁移按失败处理，避免严格门禁被配置关闭绕过。迁移标题只能是知识库原始目录内的单层、合法文件名，不能使用路径分隔符、Windows 保留设备名或以空格/句点结尾。
+
 ## 新增知识流程
 
 ```bash
@@ -86,9 +90,13 @@ assets/knowledge_base/
 | `validate --title <title> --keyword <keyword>` | 验证标题、索引和检索命中 |
 | `list` | 列出知识库文件 |
 | `verify --title <title>` | 验证文件完整性 |
-| `process-all` | 批量处理知识库文件 |
+| `process-all [--sync-vector] [--strict-rules]` | 批量处理待处理文件；批量结束后统一重建二级索引并刷新检索器，可选执行向量同步和严格规则校验 |
 
 `dedupe` 的标题和正文重复判定仅忽略 Unicode 形式、大小写和空白差异；相似候选使用字符二元组 Jaccard 分数，只供人工复核，不能证明两条业务规则等价。所有清理、合并、停用或改写仍必须取得明确授权并保留审计记录。
+
+`process-all` 只处理 `scan` 判定为待处理的文件；已处理文件会跳过，因此 `--sync-vector` 不会为已处理文件单独补建向量。需要仅补建向量时，应使用单文件 `process --sync-vector` 或另行设计专用命令。
+
+`verify` 和 `file_splitter.py` 的完整性校验比较移除分割器元数据后的规范化 JSON 内容；JSON 缩进、字段顺序和末尾换行差异不会导致失败。结果中的 `hash_match` 表示内容哈希匹配，`byte_match` 仅用于诊断原始字节是否一致。
 
 ## 检查清单
 

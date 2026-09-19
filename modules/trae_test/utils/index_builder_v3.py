@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from collections import Counter
 from typing import Any
 
+from .metadata_manager import normalize_file_id
 from .path_utils import PathManager
 
 
@@ -513,7 +514,7 @@ class IndexBuilderV3:
             file_path = os.path.join(self.original_dir, filename)
 
             # 构建文件ID
-            file_id = os.path.splitext(filename)[0].replace(" ", "_").lower()
+            file_id = normalize_file_id(os.path.splitext(filename)[0])
             result["file_id"] = file_id
 
             # 获取文件信息（从注册表）
@@ -1142,7 +1143,7 @@ class IndexBuilderV3:
                 return result
 
             filename = os.path.basename(original_file_path)
-            file_id = os.path.splitext(filename)[0].replace(" ", "_").lower()
+            file_id = normalize_file_id(os.path.splitext(filename)[0])
 
             self._load_registry()
             process_result = self._process_file(filename)
