@@ -412,7 +412,7 @@ class InventorySKUPage(BasePage):
                         total: bodyCheckboxes.length,
                         selected: bodyCheckboxes.filter(isSelected).length
                     };
-                }""") or {};
+                }""") or {}
         return {
             "total": int(counts.get("total", 0)),
             "selected": int(counts.get("selected", 0)),
