@@ -356,50 +356,70 @@ class InventorySKUPage(BasePage):
             )
         )
 
-    def _selected_row_count(self) -> int:
-        return int(self.page.evaluate("""() => {
-                    const clickableOf = (el) =>
-                        el.closest('label.el-checkbox')
-                        || el.closest('.el-checkbox')
-                        || el.closest('.el-checkbox__input')
-                        || el;
-                    const visibleCheckboxes = Array.from(document.querySelectorAll(
-                        '.el-checkbox__inner, .el-checkbox__original, .el-checkbox'
-                    )).filter(el => {
+    def _visible_inventory_row_counts(self) -> dict[str, int]:
+        """Return row and selected-row counts from the same visible checkbox set."""
+        counts = self.page.evaluate("""() => {
+                    const isVisible = (el) => {
+                        if (!el) return false;
                         const rect = el.getBoundingClientRect();
                         const style = window.getComputedStyle(el);
                         return rect.width > 0 && rect.height > 0
                             && style.display !== 'none'
                             && style.visibility !== 'hidden';
-                    }).sort((a, b) => {
+                    };
+                    const clickableOf = (el) =>
+                        el.closest('label.el-checkbox')
+                        || el.closest('.el-checkbox')
+                        || el.closest('.el-checkbox__input')
+                        || el;
+                    const checkboxNodes = Array.from(document.querySelectorAll([
+                        '.el-checkbox__inner',
+                        '.el-checkbox__original',
+                        '.el-checkbox__input',
+                        '.el-checkbox',
+                        'input[type="checkbox"]',
+                        '.vxe-checkbox--icon'
+                    ].join(','))).filter(isVisible).sort((a, b) => {
                         const ar = a.getBoundingClientRect();
                         const br = b.getBoundingClientRect();
                         return (ar.y - br.y) || (ar.x - br.x);
                     });
-                    const headerCheckbox = visibleCheckboxes.length ? clickableOf(visibleCheckboxes[0]) : null;
-                    const selectors = [
-                        '.el-table__body-wrapper .el-checkbox__input.is-checked',
-                        '.el-table__body-wrapper .el-checkbox.is-checked',
-                        '.el-table__body-wrapper .el-checkbox__original:checked',
-                        'tbody .el-checkbox__input.is-checked',
-                        'tbody .el-checkbox.is-checked',
-                        'tbody .el-checkbox__original:checked',
-                        '.el-checkbox__original:checked',
+                    const unique = [];
+                    const seen = new Set();
+                    for (const node of checkboxNodes) {
+                        const clickable = clickableOf(node);
+                        if (seen.has(clickable)) continue;
+                        seen.add(clickable);
+                        unique.push(clickable);
+                    }
+                    const bodyCheckboxes = unique.slice(1);
+                    const isSelected = (checkbox) => checkbox.matches([
+                        'input[type="checkbox"]:checked',
                         '.el-checkbox__input.is-checked',
                         '.el-checkbox.is-checked',
-                        '.ant-table-tbody input[type="checkbox"]:checked',
-                        '.vxe-body--row.is--checked',
-                        '.vxe-body--row.row--checked'
-                    ];
-                    const rows = new Set();
-                    for (const selector of selectors) {
-                        for (const node of document.querySelectorAll(selector)) {
-                            if (headerCheckbox && clickableOf(node) === headerCheckbox) continue;
-                            rows.add(node.closest('tr, .el-table__row, .vxe-body--row') || clickableOf(node));
-                        }
-                    }
-                    return rows.size;
-                }""") or 0)
+                        '.vxe-checkbox--icon.is--checked',
+                        '.vxe-checkbox--icon.checked'
+                    ].join(',')) || !!checkbox.querySelector([
+                        'input[type="checkbox"]:checked',
+                        '.el-checkbox__input.is-checked',
+                        '.el-checkbox.is-checked',
+                        '.vxe-checkbox--icon.is--checked',
+                        '.vxe-checkbox--icon.checked'
+                    ].join(',')) || !!checkbox.closest(
+                        '.vxe-body--row.is--checked, .vxe-body--row.row--checked'
+                    );
+                    return {
+                        total: bodyCheckboxes.length,
+                        selected: bodyCheckboxes.filter(isSelected).length
+                    };
+                }""") or {};
+        return {
+            "total": int(counts.get("total", 0)),
+            "selected": int(counts.get("selected", 0)),
+        }
+
+    def _selected_row_count(self) -> int:
+        return self._visible_inventory_row_counts()["selected"]
 
     def _header_checkbox_checked(self) -> bool:
         return bool(self.page.evaluate("""() => {
@@ -446,30 +466,18 @@ class InventorySKUPage(BasePage):
         """Select all rows on the current page through the real header checkbox."""
         if not self._click_inventory_checkbox("header"):
             raise ValueError("Header select-all checkbox was not found")
-        try:
-            self.page.wait_for_function(
-                """() => {
-                    const selectors = [
-                        '.el-table__body-wrapper .el-checkbox__input.is-checked',
-                        '.el-table__body-wrapper .el-checkbox.is-checked',
-                        '.el-table__body-wrapper .el-checkbox__original:checked',
-                        'tbody .el-checkbox__input.is-checked',
-                        'tbody .el-checkbox.is-checked',
-                        'tbody .el-checkbox__original:checked',
-                        '.el-checkbox__original:checked',
-                        '.el-checkbox__input.is-checked',
-                        '.el-checkbox.is-checked',
-                        '.ant-table-tbody input[type="checkbox"]:checked',
-                        '.vxe-body--row.is--checked',
-                        '.vxe-body--row.row--checked'
-                    ];
-                    return selectors.some(selector => document.querySelectorAll(selector).length > 0);
-                }""",
-                timeout=10000,
-            )
-        except Exception as exc:
-            raise TimeoutError("No selected rows detected after clicking select-all") from exc
-        logger.info("Selected all rows on current page")
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            counts = self._visible_inventory_row_counts()
+            if counts["total"] > 0 and counts["selected"] == counts["total"]:
+                logger.info("Selected all rows on current page: {}", counts["total"])
+                return
+            self.wait_for_poll_interval(200)
+        counts = self._visible_inventory_row_counts()
+        raise TimeoutError(
+            "Not all visible inventory SKU rows were selected: "
+            f"selected={counts['selected']}, rows={counts['total']}"
+        )
 
     @allure.step("Deselect all inventory SKU rows")
     def deselect_all(self) -> None:
@@ -731,37 +739,9 @@ class InventorySKUPage(BasePage):
     @allure.step("Get visible inventory SKU row count")
     def get_current_page_row_count(self) -> int:
         try:
-            checkbox_rows = int(self.page.evaluate("""() => {
-                    const clickableOf = (el) =>
-                        el.closest('label.el-checkbox')
-                        || el.closest('.el-checkbox')
-                        || el.closest('.el-checkbox__input')
-                        || el;
-                    const nodes = Array.from(document.querySelectorAll(
-                        '.el-checkbox__inner, .el-checkbox__original, .el-checkbox'
-                    )).filter(el => {
-                        const rect = el.getBoundingClientRect();
-                        const style = window.getComputedStyle(el);
-                        return rect.width > 0 && rect.height > 0
-                            && style.display !== 'none'
-                            && style.visibility !== 'hidden';
-                    }).sort((a, b) => {
-                        const ar = a.getBoundingClientRect();
-                        const br = b.getBoundingClientRect();
-                        return (ar.y - br.y) || (ar.x - br.x);
-                    });
-                    const unique = [];
-                    const seen = new Set();
-                    for (const node of nodes) {
-                        const clickable = clickableOf(node);
-                        if (seen.has(clickable)) continue;
-                        seen.add(clickable);
-                        unique.push(clickable);
-                    }
-                    return Math.max(unique.length - 1, 0);
-                }""") or 0)
-            if checkbox_rows > 0:
-                return checkbox_rows
+            row_count = self._visible_inventory_row_counts()["total"]
+            if row_count > 0:
+                return row_count
         except Exception:
             pass
         return int(
