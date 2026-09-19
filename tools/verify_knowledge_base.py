@@ -13,8 +13,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from modules.trae_test.utils.file_splitter import JSONFileSplitter, compute_content_hash, normalize_for_integrity
 from modules.trae_test.utils.path_utils import is_chunk_filename
-from modules.trae_test.utils.file_splitter import JSONFileSplitter
 
 
 class KnowledgeBaseVerifier:
@@ -39,10 +39,7 @@ class KnowledgeBaseVerifier:
         Returns:
             哈希字符串
         """
-        normalized_json = json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True)
-        hash_obj = hashlib.sha256()
-        hash_obj.update(normalized_json.encode("utf-8"))
-        return hash_obj.hexdigest()
+        return compute_content_hash(content)
 
     def _compute_file_hash(self, file_path: str) -> str:
         """计算文件的SHA256哈希值（规范化）
@@ -100,8 +97,7 @@ class KnowledgeBaseVerifier:
         """
         with open(file_path, encoding="utf-8") as f:
             content = json.load(f)
-        normalized_json = json.dumps(content, ensure_ascii=False, indent=2, sort_keys=True)
-        return json.loads(normalized_json)
+        return normalize_for_integrity(content)
 
     def verify_file(self, original_file_path: str, content_dir: str = None) -> dict[str, Any]:
         """验证单个文件的内容完整性

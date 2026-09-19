@@ -1,8 +1,8 @@
 """用例目录合法性校验
 
 强制用例目录字段格式为 '一级 - 二级 - 三级'（空格-连字符-空格），
-且一/二/三级必须严格出现在 `assets/knowledge_base/导航规范/ERP菜单导航与路由.json`
-的 `module_hierarchy` 中。
+且一/二/三级必须严格出现在 `KnowledgeRetriever.search_navigation()` 返回的
+`module_hierarchy` 中。
 
 这是对知识库铁律的守护：杜绝手动脑补目录名导致的用例数据偏差。
 
@@ -14,35 +14,11 @@ v2 新增：
 
 from __future__ import annotations
 
-import json
-import os
 import re
 from functools import lru_cache
 
 _SEPARATOR = " - "
 _LOOSE_SEPARATORS = re.compile(r"\s*[-\u2013\u2014]\s*")
-
-
-def _nav_json_path() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(
-        os.path.join(
-            here,
-            "..",
-            "..",
-            "..",
-            "assets",
-            "knowledge_base",
-            "data",
-            "original",
-            "ERP菜单导航与路由.json",
-        )
-    )
-
-
-def _fallback_nav_json_path() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(here, "..", "..", "..", "fixtures", "navigation", "module_hierarchy.json"))
 
 
 @lru_cache(maxsize=1)
@@ -52,13 +28,7 @@ def _load_module_hierarchy() -> dict[str, dict[str, list[str]]]:
     data = KnowledgeRetriever().search_navigation()
     if isinstance(data, dict) and data.get("module_hierarchy"):
         return data["module_hierarchy"]
-    # Only the immutable, non-sensitive fixture may be read by path.
-    path = _fallback_nav_json_path()
-    if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("module_hierarchy", {}) or {}
+    return {}
 
 
 def list_allowed_top_levels() -> list[str]:

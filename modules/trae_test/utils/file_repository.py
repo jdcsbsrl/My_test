@@ -5,6 +5,7 @@ import json
 import os
 from typing import Any
 
+from .metadata_manager import normalize_file_id
 from .path_utils import PathManager, is_chunk_filename
 
 
@@ -75,7 +76,7 @@ class FileRepository:
         """
         chunks = []
 
-        normalized_title = file_title.replace(" ", "_").lower()
+        normalized_title = normalize_file_id(file_title)
         valid_prefixes = (file_title + "_", normalized_title + "_")
 
         if os.path.exists(self.chunks_dir):
@@ -119,7 +120,7 @@ class FileRepository:
         Returns:
             块数据字典，不存在返回None
         """
-        normalized_title = file_title.replace(" ", "_").lower()
+        normalized_title = normalize_file_id(file_title)
         candidate_filenames = [
             f"{file_title}_chunk_{chunk_index:03d}.json",
             f"{normalized_title}_chunk_{chunk_index:03d}.json",
@@ -196,7 +197,7 @@ class FileRepository:
             分块文件路径列表
         """
         existing = []
-        normalized_title = file_title.replace(" ", "_").lower()
+        normalized_title = normalize_file_id(file_title)
         valid_prefixes = (file_title + "_", normalized_title + "_")
 
         if os.path.exists(self.chunks_dir):
