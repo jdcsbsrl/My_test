@@ -56,8 +56,7 @@ def require_module_hierarchy() -> dict[str, dict[str, list[str]]]:
     hierarchy = _load_module_hierarchy()
     if not hierarchy:
         raise NavigationContractUnavailable(
-            "导航知识库未加载，无法生成或审核带目录的测试用例；"
-            "请先通过 KnowledgeRetriever 准备导航规范。"
+            "导航知识库未加载，无法生成或审核带目录的测试用例；" "请先通过 KnowledgeRetriever 准备导航规范。"
         )
     return hierarchy
 
