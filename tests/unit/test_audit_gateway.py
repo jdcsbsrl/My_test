@@ -1,10 +1,24 @@
 """测试审核网关"""
 
+import pytest
+
 from modules.trae_test.orchestrator.audit_gateway import AuditGateway
 from modules.trae_test.orchestrator.audit_models import AuditResult
 
 
 class TestAuditGateway:
+    @pytest.fixture(autouse=True)
+    def navigation_contract(self, monkeypatch):
+        """Keep audit unit tests independent from the local knowledge base."""
+
+        from modules.trae_test.utils import dir_validator
+
+        monkeypatch.setattr(
+            dir_validator,
+            "_load_module_hierarchy",
+            lambda: {"产品": {"产品中心": ["库存SKU"]}},
+        )
+
     def test_create_gateway(self):
         gw = AuditGateway()
         assert gw is not None

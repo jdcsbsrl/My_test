@@ -15,20 +15,51 @@ v2 新增：
 from __future__ import annotations
 
 import re
-from functools import lru_cache
 
 _SEPARATOR = " - "
 _LOOSE_SEPARATORS = re.compile(r"\s*[-\u2013\u2014]\s*")
+_module_hierarchy_cache: dict[str, dict[str, list[str]]] | None = None
 
 
-@lru_cache(maxsize=1)
+class NavigationContractUnavailable(RuntimeError):
+    """Raised when the navigation knowledge contract cannot be loaded."""
+
+
+def clear_module_hierarchy_cache() -> None:
+    """Clear the successful navigation lookup cache.
+
+    Empty lookups are intentionally not cached.  This lets a process retry
+    after the knowledge base has been provisioned or its registry refreshed.
+    """
+
+    global _module_hierarchy_cache
+    _module_hierarchy_cache = None
+
+
 def _load_module_hierarchy() -> dict[str, dict[str, list[str]]]:
+    global _module_hierarchy_cache
+    if _module_hierarchy_cache:
+        return _module_hierarchy_cache
+
     from .knowledge_retriever import KnowledgeRetriever
 
     data = KnowledgeRetriever().search_navigation()
     if isinstance(data, dict) and data.get("module_hierarchy"):
-        return data["module_hierarchy"]
+        _module_hierarchy_cache = data["module_hierarchy"]
+        return _module_hierarchy_cache
     return {}
+
+
+def require_module_hierarchy() -> dict[str, dict[str, list[str]]]:
+    """Return the navigation contract or fail with an actionable message."""
+
+    hierarchy = _load_module_hierarchy()
+    if not hierarchy:
+        raise NavigationContractUnavailable(
+            "导航知识库未加载，无法生成或审核带目录的测试用例；"
+            "请先通过 KnowledgeRetriever 准备导航规范。"
+        )
+    return hierarchy
 
 
 def list_allowed_top_levels() -> list[str]:
@@ -166,6 +197,10 @@ def validate_directory(directory: str, strict: bool = True) -> tuple[bool, str]:
         return (False, msg) if strict else (True, f"[WARN] {msg}")
 
     hierarchy = _load_module_hierarchy()
+
+    if not hierarchy:
+        msg = "导航知识库未加载，无法校验用例目录；请先通过 KnowledgeRetriever 准备导航规范"
+        return (False, msg) if strict else (True, f"[WARN] {msg}")
 
     if top not in hierarchy:
         allowed = "/".join(list_allowed_top_levels())

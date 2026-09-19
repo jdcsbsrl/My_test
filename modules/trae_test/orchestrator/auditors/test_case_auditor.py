@@ -81,6 +81,7 @@ class TestCaseAuditor:
             rule_manager: 可选的 RuleManager 实例，未传入时使用默认实例
         """
         self.rule_manager = rule_manager or RuleManager()
+        self._last_directory_error = ""
 
     def audit(self, test_cases: list[dict], strict_level: int = 3, context: dict | None = None) -> AuditResult:
         """审核测试用例
@@ -500,10 +501,12 @@ class TestCaseAuditor:
 
         # 验证用例目录格式
         directory = case.get("用例目录", "")
+        self._last_directory_error = ""
         if not directory or not self._validate_directory_format(directory):
+            directory_message = self._last_directory_error or "用例目录不能为空且必须匹配知识库导航层级"
             result.add_error(
                 "TC_DIRECTORY_INVALID",
-                f"用例目录不能为空且必须匹配知识库导航层级：{directory or '<空>'}",
+                f"{directory_message}：{directory or '<空>'}",
                 case_location,
             )
 
@@ -632,6 +635,7 @@ class TestCaseAuditor:
 
             # 审核阶段必须使用严格模式；宽容模式只适合交互式提示，不能作为交付门禁。
             valid, msg = validate_directory(directory, strict=True)
+            self._last_directory_error = msg
             if not valid:
                 print(f"  [目录校验] {msg}")
             return valid

@@ -208,6 +208,17 @@ class TestDirValidator:
         monkeypatch.setattr(dir_validator, "_load_module_hierarchy", lambda: {"Top": {"Second": ["Third"]}})
         assert dir_validator.find_closest_directory("Top - Second") is None
 
+    def test_missing_navigation_contract_is_reported_explicitly(self, monkeypatch):
+        monkeypatch.setattr(dir_validator, "_load_module_hierarchy", lambda: {})
+
+        valid_shape = "Top - Second - Third"
+        passed, message = dir_validator.validate_directory(valid_shape)
+
+        assert passed is False
+        assert "导航知识库未加载" in message
+        with pytest.raises(dir_validator.NavigationContractUnavailable, match="导航知识库未加载"):
+            dir_validator.require_module_hierarchy()
+
 
 class TestWorkspaceManager:
     def test_generate_filename_sanitizes_and_truncates(self, tmp_path):

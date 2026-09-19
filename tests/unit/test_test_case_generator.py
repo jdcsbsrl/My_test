@@ -140,9 +140,15 @@ class TestTestCaseGenerator:
         mock_excel_generator.generate.assert_called_once()
         assert output_path == str(tmp_path / "output.xlsx")
 
-    def test_generate_and_export(self, tmp_path):
+    def test_generate_and_export(self, tmp_path, monkeypatch):
         mock_retriever = Mock()
         mock_retriever.retrieve.return_value = {"rule1": "内容"}
+
+        from modules.trae_test.utils import dir_validator, test_case_generator
+
+        hierarchy = {"销售": {"订单处理": ["销售订单"]}}
+        monkeypatch.setattr(dir_validator, "_load_module_hierarchy", lambda: hierarchy)
+        monkeypatch.setattr(test_case_generator, "_load_module_hierarchy", lambda: hierarchy)
 
         mock_excel_generator = Mock()
         mock_excel_generator.generate.return_value = str(tmp_path / "output.xlsx")
