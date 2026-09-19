@@ -13,7 +13,6 @@ if hasattr(sys.stdout, "reconfigure"):
 from .hash_utils import compute_file_hash, compute_string_hash
 from .path_utils import PathManager, is_chunk_filename
 
-
 SPLITTER_METADATA_KEYS = frozenset(
     {
         "chunk_index",
