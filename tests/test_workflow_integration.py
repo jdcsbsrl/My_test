@@ -3,6 +3,7 @@
 
 import sys
 import time
+from unittest.mock import patch
 
 from modules.trae_test.orchestrator.auto_agent import auto_agent, confirmation_service
 from modules.trae_test.orchestrator.workflow_state_machine import WorkflowState, lock_manager, state_machine
@@ -175,6 +176,8 @@ def test_audit_logs():
     from modules.trae_test.orchestrator.audit_agent_enhanced import AuditType, audit_agent
 
     from modules.trae_test.orchestrator.auditors.test_case_auditor import TestCaseAuditor
+    from modules.trae_test.utils import dir_validator
+    from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
 
     required_fields = TestCaseAuditor.REQUIRED_FIELDS
     valid_test_cases = [
@@ -203,7 +206,13 @@ def test_audit_logs():
     ]
     valid_test_cases[0]["execution_count"] = 20
 
-    result = audit_agent.audit(valid_test_cases, AuditType.TEST_CASE)
+    navigation = {"module_hierarchy": {"维护": {"日志": ["操作日志"]}}}
+    dir_validator.clear_module_hierarchy_cache()
+    try:
+        with patch.object(KnowledgeRetriever, "search_navigation", return_value=navigation):
+            result = audit_agent.audit(valid_test_cases, AuditType.TEST_CASE)
+    finally:
+        dir_validator.clear_module_hierarchy_cache()
     print(f"审核结果: {'通过' if result.passed else '未通过'}")
     print(f"审核日志数: {len(audit_agent.audit_logs)}")
 

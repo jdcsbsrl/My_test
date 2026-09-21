@@ -8,6 +8,7 @@ from typing import Any
 import modules.trae_test.utils.kb_monitor as kb_monitor_module
 import modules.trae_test.utils.metadata_manager as metadata_manager_module
 from .index_builder_v3 import IndexBuilderV3
+from .metadata_manager import normalize_file_id
 
 from .path_utils import PathManager, is_chunk_filename
 
@@ -216,7 +217,7 @@ class FileManagementService:
             分块文件路径列表
         """
         existing = []
-        normalized_title = file_title.replace(" ", "_").lower()
+        normalized_title = normalize_file_id(file_title)
         valid_prefixes = (file_title + "_", normalized_title + "_")
         if os.path.exists(self.chunks_dir):
             for fname in os.listdir(self.chunks_dir):

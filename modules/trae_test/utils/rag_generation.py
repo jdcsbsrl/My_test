@@ -114,10 +114,20 @@ class LocalRuleRAGCaseGenerator:
 
     provider_name = RAGGenerationProvider.LOCAL_RULE.value
 
-    def __init__(self, retriever: KnowledgeRetriever | None = None, creator: str | None = None) -> None:
+    def __init__(
+        self,
+        retriever: KnowledgeRetriever | None = None,
+        creator: str | None = None,
+        navigation_directory: str | None = None,
+    ) -> None:
         self.retriever = retriever or KnowledgeRetriever()
         # creator 参数和历史环境变量仅为兼容旧调用方，不能覆盖固定创建人。
         self.creator = FIXED_CASE_CREATOR
+        # The local-rule provider is an evaluation baseline, not a source of
+        # business navigation.  A caller may supply a real directory from
+        # KnowledgeRetriever; otherwise leave it empty so the audit gate
+        # reports the missing navigation contract instead of inventing one.
+        self.navigation_directory = str(navigation_directory or "").strip()
 
     def generate_case(self, query: str) -> dict[str, Any]:
         retrieved = self.retriever.retrieve(query, mode="hybrid")
@@ -132,7 +142,7 @@ class LocalRuleRAGCaseGenerator:
         if context:
             expected = f"{expected}\n3. 符合知识库规则：{context[:240]}"
         case = {
-            "用例目录": "销售模块 - RAG生成评估",
+            "用例目录": self.navigation_directory,
             "用例名称": f"测试_{query}"[:50],
             "需求ID": "",
             "前置条件": "系统已正常启动，用户已登录并具备销售模块权限",

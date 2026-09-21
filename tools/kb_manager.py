@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import unicodedata
 from typing import Any, Dict, Iterable
@@ -33,7 +34,7 @@ from modules.trae_test.utils.file_splitter import JSONFileSplitter
 from modules.trae_test.utils.index_builder_v3 import IndexBuilderV3
 from modules.trae_test.utils.kb_monitor import KnowledgeBaseMonitor
 from modules.trae_test.utils.knowledge_retriever import KnowledgeRetriever
-from modules.trae_test.utils.metadata_manager import MetadataManager
+from modules.trae_test.utils.metadata_manager import MetadataManager, normalize_file_id
 from modules.trae_test.utils.rag_semantic import SemanticIndexer
 
 
@@ -114,10 +115,11 @@ class KnowledgeBaseManager:
         """
         if force:
             original_threshold = self.splitter.size_threshold
-            self.splitter.size_threshold = 0
-            result = self.splitter.split_file(file_path)
-            self.splitter.size_threshold = original_threshold
-            return result
+            try:
+                self.splitter.size_threshold = 0
+                return self.splitter.split_file(file_path)
+            finally:
+                self.splitter.size_threshold = original_threshold
         else:
             return self.splitter.split_file(file_path)
 
@@ -310,11 +312,20 @@ class KnowledgeBaseManager:
         result["file_path"] = file_path
         return result
 
-    def process_file(self, file_path: str, sync_vector: bool = False, strict_rules: bool = False) -> Dict:
+    def process_file(
+        self,
+        file_path: str,
+        sync_vector: bool = False,
+        strict_rules: bool = False,
+        rebuild_derived: bool = True,
+    ) -> Dict:
         """完整处理文件（分割+索引）
 
         Args:
             file_path: 文件路径
+            sync_vector: 是否同步向量索引
+            strict_rules: 是否严格校验结构化规则契约
+            rebuild_derived: 是否在本次处理后重建二级索引并刷新检索器
 
         Returns:
             处理结果
@@ -332,18 +343,21 @@ class KnowledgeBaseManager:
         result = self.monitor.process_file_complete(file_path)
         if strict_rules:
             result["rule_contract"] = contract
-        if result.get("success"):
+        if result.get("success") and rebuild_derived:
             result["secondary_indexes"] = self._sync_secondary_indexes()
             if not result["secondary_indexes"]["success"]:
                 result["success"] = False
                 result["error"] = result["secondary_indexes"].get("error", "二级索引同步失败")
-        if result.get("success"):
+        if result.get("success") and rebuild_derived:
             result["retriever_refresh"] = self._refresh_retriever_state()
             if not result["retriever_refresh"]["success"]:
                 result["success"] = False
                 result["error"] = result["retriever_refresh"].get("error", "检索缓存刷新失败")
         if result.get("success") and sync_vector:
             result["vector"] = self.sync_vector_file(file_path)
+            if not result["vector"].get("success", False):
+                result["success"] = False
+                result["error"] = result["vector"].get("error", "向量同步失败")
         return result
 
     def sync_vector_file(self, file_path: str) -> Dict:
@@ -388,7 +402,7 @@ class KnowledgeBaseManager:
         }
 
         try:
-            index_file = f"{file_title}_index.json"
+            index_file = f"{normalize_file_id(file_title)}_index.json"
             index_paths = [
                 os.path.join(self.monitor.INDEX_DIR, "files", index_file),
                 os.path.join(self.monitor.INDEX_DIR, index_file),
@@ -409,11 +423,41 @@ class KnowledgeBaseManager:
                     result["chunks_valid"].append({"chunk_index": chunk.get("chunk_index"), "valid": chunk_valid})
 
                 chunks_ok = result["chunks_exist"] and all(item["valid"] for item in result["chunks_valid"])
+                result["chunk_count"] = len(chunks)
+                result["valid_chunk_count"] = sum(item["valid"] for item in result["chunks_valid"])
+
+                integrity_result = None
+                chunk_paths = [
+                    os.path.join(self.monitor.CONTENT_DIR, chunk["source_filename"])
+                    for chunk in chunks
+                    if isinstance(chunk.get("source_filename"), str)
+                    and os.path.basename(chunk["source_filename"]) == chunk["source_filename"]
+                ]
+                if (
+                    result["original_exists"]
+                    and original_path.lower().endswith(".json")
+                    and len(chunk_paths) == len(chunks)
+                    and chunk_paths
+                ):
+                    integrity_result = self.splitter.verify_integrity(original_path, chunk_paths)
+                    result["integrity"] = integrity_result
+                integrity_ok = integrity_result is None or integrity_result.get("success", False)
+                if not integrity_ok:
+                    result["error"] = (integrity_result or {}).get("error") or "文件完整性校验失败"
                 # Small knowledge files are intentionally not split; in that case,
                 # index + original JSON/MD existence is enough for integrity.
-                result["success"] = result["index_exists"] and (chunks_ok or result["original_exists"])
+                result["success"] = result["index_exists"] and (chunks_ok or result["original_exists"]) and integrity_ok
 
             # 接入审核：将验证结果包装后执行审核
+            audit_details = {
+                "index_exists": result["index_exists"],
+                "chunks_exist": result["chunks_exist"],
+                "chunks_valid": result["chunks_valid"],
+                "chunk_count": result.get("chunk_count", 0),
+                "valid_chunk_count": result.get("valid_chunk_count", 0),
+            }
+            if "integrity" in result:
+                audit_details["hash_match"] = result["integrity"].get("hash_match")
             audit_input = {
                 "total_files": 1,
                 "verified": 1 if result["success"] else 0,
@@ -423,13 +467,24 @@ class KnowledgeBaseManager:
                         "file_name": f"{file_title}.json",
                         "passed": result["success"],
                         "error": result.get("error", ""),
-                        "index_exists": result["index_exists"],
-                        "chunks_exist": result["chunks_exist"],
+                        "details": audit_details,
                     }
                 ],
                 "errors": [result.get("error", "")] if not result["success"] and result.get("error") else [],
             }
-            self._audit_verification_result(audit_input)
+            audit_passed = self._audit_verification_result(audit_input)
+            audit_blocking = self._audit_blocking_enabled()
+            audit_reason = "config_conflict" if self._audit_config_conflict() else None
+            result["audit"] = {
+                "success": audit_passed,
+                "blocking": audit_blocking,
+                "reason": audit_reason,
+            }
+            if audit_blocking and not audit_passed:
+                result["success"] = False
+                result["error"] = result.get("error") or (
+                    "审核阻断已开启，但审核功能未启用" if audit_reason else "知识库审核未通过"
+                )
 
             return result
 
@@ -462,12 +517,13 @@ class KnowledgeBaseManager:
         }
 
         try:
-            registry = MetadataManager().load_registry()
+            metadata = MetadataManager()
+            registry = metadata.load_registry()
             if registry is None:
-                MetadataManager().scan_and_register_all()
-                registry = MetadataManager().load_registry()
+                metadata.scan_and_register_all()
+                registry = metadata.load_registry()
 
-            file_id = file_title.replace(" ", "_").lower()
+            file_id = normalize_file_id(file_title)
             file_info = (registry or {}).get("files", {}).get(file_id)
             result["registered"] = bool(file_info)
 
@@ -476,7 +532,7 @@ class KnowledgeBaseManager:
                 original_path = os.path.join(self.monitor.ORIGINAL_DIR, f"{file_title}.md")
             result["original_exists"] = os.path.exists(original_path)
 
-            index_file = f"{file_title}_index.json"
+            index_file = f"{normalize_file_id(file_title)}_index.json"
             index_paths = [
                 os.path.join(self.monitor.INDEX_DIR, "files", index_file),
                 os.path.join(self.monitor.INDEX_DIR, index_file),
@@ -545,7 +601,13 @@ class KnowledgeBaseManager:
 
     def lint_file(self, file_path: str) -> Dict:
         """Scan a knowledge source for common sensitive tokens before local KB import."""
-        result = {"success": False, "file_path": file_path, "warnings": [], "errors": []}
+        result = {
+            "success": False,
+            "file_path": file_path,
+            "warnings": [],
+            "errors": [],
+            "blocked_findings": [],
+        }
         if not os.path.exists(file_path):
             result["errors"].append(f"file not found: {file_path}")
             return result
@@ -557,14 +619,29 @@ class KnowledgeBaseManager:
             result["errors"].append(str(e))
             return result
 
-        sensitive_patterns = [
+        high_confidence_patterns = {
+            "private_key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+            "bearer_token": r"(?i)\b(?:authorization\s*:\s*)?bearer\s+[A-Za-z0-9._~+/=-]{16,}",
+            "database_credentials": r"(?i)\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^\s/@:]+:[^\s/@]+@",
+            "password_assignment": (
+                r"(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9_]*_)?"
+                r"(?:password|passwd|secret)(?!_hash\b)(?![A-Za-z0-9_])['\"]?\s*[:=]\s*['\"]?"
+                r"(?=[A-Za-z0-9!@#$%^&*._~+/=-]{8,})"
+                r"(?=[A-Za-z0-9!@#$%^&*._~+/=-]*[0-9!@#$%^&*._~+/=-])"
+                r"[A-Za-z0-9!@#$%^&*._~+/=-]{8,}"
+            ),
+        }
+        for finding, pattern in high_confidence_patterns.items():
+            if re.search(pattern, text):
+                result["blocked_findings"].append(finding)
+
+        contextual_patterns = [
             "password",
             "passwd",
             "token",
             "cookie",
             "authorization",
             "secret",
-            "BEGIN PRIVATE KEY",
             "DATABASE_URL",
             "手机号",
             "邮箱",
@@ -572,12 +649,21 @@ class KnowledgeBaseManager:
             "客户地址",
             "生产环境账号",
         ]
+        blocked_context_patterns = {
+            "password_assignment": {"password", "passwd", "secret"},
+            "bearer_token": {"token", "authorization"},
+            "database_credentials": {"DATABASE_URL"},
+            "private_key": set(),
+        }
+        blocked_context = set().union(
+            *(blocked_context_patterns.get(finding, set()) for finding in result["blocked_findings"])
+        )
 
         lowered = text.lower()
-        for pattern in sensitive_patterns:
+        for pattern in contextual_patterns:
             haystack = lowered if pattern.isascii() else text
             needle = pattern.lower() if pattern.isascii() else pattern
-            if needle in haystack:
+            if needle in haystack and pattern not in blocked_context:
                 result["warnings"].append(pattern)
 
         if file_path.lower().endswith(".json"):
@@ -586,8 +672,125 @@ class KnowledgeBaseManager:
             except Exception as e:
                 result["errors"].append(f"invalid json: {e}")
 
-        result["success"] = not result["errors"] and not result["warnings"]
+        result["success"] = not result["errors"] and not result["blocked_findings"]
         return result
+
+    def _resolve_migration_target(self, target_title: str, source_ext: str) -> str:
+        """Resolve a migration target while keeping it inside the originals directory."""
+        if not isinstance(target_title, str) or not target_title.strip():
+            raise ValueError("目标文件标题不能为空")
+
+        if target_title != target_title.strip():
+            raise ValueError("目标文件标题必须是知识库目录内的有效单层文件名")
+        invalid_characters = set('/\\:*?"<>|')
+        reserved_names = {
+            "con",
+            "prn",
+            "aux",
+            "nul",
+            *(f"com{index}" for index in range(1, 10)),
+            *(f"lpt{index}" for index in range(1, 10)),
+        }
+        title_stem = target_title.split(".", 1)[0].rstrip(" .").casefold()
+        if (
+            target_title in {".", ".."}
+            or os.path.isabs(target_title)
+            or os.path.splitdrive(target_title)[0]
+            or os.path.dirname(target_title)
+            or os.path.basename(target_title) != target_title
+            or target_title.endswith((" ", "."))
+            or title_stem in reserved_names
+            or any(character in invalid_characters or ord(character) < 32 for character in target_title)
+        ):
+            raise ValueError("目标文件标题必须是知识库目录内的有效单层文件名")
+
+        original_dir = os.path.realpath(self.monitor.ORIGINAL_DIR)
+        candidate_path = os.path.abspath(os.path.join(original_dir, f"{target_title}{source_ext}"))
+        if os.path.lexists(candidate_path) and os.path.islink(candidate_path):
+            raise ValueError("目标文件不能是符号链接")
+
+        target_path = os.path.realpath(candidate_path)
+        try:
+            common_path = os.path.commonpath([original_dir, target_path])
+        except ValueError as exc:
+            raise ValueError("目标文件路径无效") from exc
+        if os.path.normcase(common_path) != os.path.normcase(original_dir):
+            raise ValueError("目标文件路径必须位于知识库原始目录内")
+        return target_path
+
+    def _rollback_migration(
+        self,
+        target_path: str,
+        previous_target: str | None,
+        previous_backup: str | None,
+    ) -> Dict:
+        """Restore a migration and rebuild every derived state in a fixed order."""
+        import shutil
+
+        rollback = {
+            "success": False,
+            "file_restore": {"success": False},
+            "registry": {"success": False},
+            "secondary_indexes": {"success": False},
+            "retriever_refresh": {"success": False},
+            "errors": [],
+        }
+
+        try:
+            if previous_backup and previous_target:
+                shutil.copy2(previous_backup, previous_target)
+            elif target_path and os.path.lexists(target_path):
+                os.unlink(target_path)
+            rollback["file_restore"] = {"success": True}
+        except Exception as exc:
+            rollback["file_restore"] = {"success": False, "error": str(exc)}
+            rollback["errors"].append(f"文件恢复失败: {exc}")
+
+        try:
+            rollback["registry"] = MetadataManager().scan_and_register_all()
+        except Exception as exc:
+            rollback["registry"] = {"success": False, "error": str(exc)}
+            rollback["errors"].append(f"注册表回滚失败: {exc}")
+
+        if rollback["registry"].get("success"):
+            try:
+                rollback["secondary_indexes"] = self._sync_secondary_indexes()
+            except Exception as exc:
+                rollback["secondary_indexes"] = {"success": False, "error": str(exc)}
+                rollback["errors"].append(f"二级索引回滚失败: {exc}")
+        else:
+            rollback["secondary_indexes"] = {
+                "success": False,
+                "skipped": True,
+                "error": "注册表回滚失败，跳过二级索引重建",
+            }
+
+        # Refresh even when secondary-index rebuilding failed so the long-lived
+        # retriever does not keep stale registry/file/rule caches in memory.
+        try:
+            rollback["retriever_refresh"] = self._refresh_retriever_state()
+        except Exception as exc:
+            rollback["retriever_refresh"] = {"success": False, "error": str(exc)}
+            rollback["errors"].append(f"检索器缓存刷新失败: {exc}")
+
+        rollback["success"] = all(
+            item.get("success", False)
+            for item in (
+                rollback["file_restore"],
+                rollback["registry"],
+                rollback["secondary_indexes"],
+                rollback["retriever_refresh"],
+            )
+        )
+        return rollback
+
+    @classmethod
+    def _audit_blocking_enabled(cls) -> bool:
+        return os.getenv("KB_AUDIT_BLOCK_ON_FAIL") == "1"
+
+    @classmethod
+    def _audit_config_conflict(cls) -> bool:
+        return cls._audit_blocking_enabled() and os.getenv("KB_AUDIT_ENABLED") != "1"
 
     def migrate_file(self, source_path: str, target_title: str = None) -> Dict:
         """迁移单个文件到知识库
@@ -602,10 +805,21 @@ class KnowledgeBaseManager:
         import shutil
         import tempfile
 
-        result = {"success": False, "source_path": source_path, "target_path": "", "processed": None, "error": ""}
+        result = {
+            "success": False,
+            "source_path": source_path,
+            "target_path": "",
+            "processed": None,
+            "audit": None,
+            "rolled_back": False,
+            "error": "",
+        }
         previous_target = None
         previous_backup = None
         process_result: Dict = {}
+        target_path = ""
+        target_filename = ""
+        mutation_started = False
 
         try:
             if not os.path.exists(source_path):
@@ -619,6 +833,8 @@ class KnowledgeBaseManager:
             if source_ext not in {".json", ".md"}:
                 result["error"] = f"不支持的知识库文件类型: {source_ext or '(无扩展名)'}"
                 return result
+            target_path = self._resolve_migration_target(target_title, source_ext)
+            target_filename = os.path.basename(target_path)
             # New structured knowledge must be queryable by stable rule id and
             # declared business keywords before it enters the local KB.  Legacy
             # files are not revalidated merely because they already exist.
@@ -627,8 +843,6 @@ class KnowledgeBaseManager:
             if not contract["success"]:
                 result["error"] = "rule contract validation failed"
                 return result
-            target_filename = f"{target_title}{source_ext}"
-            target_path = os.path.join(self.monitor.ORIGINAL_DIR, target_filename)
 
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
             if os.path.exists(target_path):
@@ -636,6 +850,7 @@ class KnowledgeBaseManager:
                 fd, previous_backup = tempfile.mkstemp(prefix="kb-migrate-", suffix=source_ext)
                 os.close(fd)
                 shutil.copy2(target_path, previous_backup)
+            mutation_started = True
             shutil.copy2(source_path, target_path)
             result["target_path"] = target_path
 
@@ -646,19 +861,14 @@ class KnowledgeBaseManager:
             if registry_result.get("success"):
                 process_result = self.process_file(target_path)
                 result["processed"] = process_result
-                result["success"] = process_result["success"]
+                result["success"] = process_result.get("success", False)
+                if not result["success"]:
+                    result["error"] = process_result.get("error") or "知识文件处理失败"
             else:
                 result["error"] = registry_result.get("error", "注册表更新失败")
             if not result["success"]:
-                if previous_backup:
-                    shutil.copy2(previous_backup, previous_target)
-                elif os.path.exists(target_path):
-                    os.unlink(target_path)
-                # The source rollback changes the set of registered originals;
-                # regenerate metadata and derived indexes to match that state.
-                result["rollback_registry"] = MetadataManager().scan_and_register_all()
-                if result["rollback_registry"].get("success"):
-                    result["rollback_secondary_indexes"] = self._sync_secondary_indexes()
+                result["rollback"] = self._rollback_migration(target_path, previous_target, previous_backup)
+                result["rolled_back"] = True
 
             # 接入审核：迁移完成后执行审核
             audit_input = {
@@ -670,22 +880,35 @@ class KnowledgeBaseManager:
                         "file_name": target_filename,
                         "passed": result["success"],
                         "error": result.get("error", ""),
-                        "split_success": process_result.get("split", {}).get("success", False),
-                        "index_success": process_result.get("index", {}).get("success", False),
+                        "details": {
+                            "split_success": (process_result.get("split") or {}).get("success", False),
+                            "index_success": (process_result.get("index") or {}).get("success", False),
+                        },
                     }
                 ],
                 "errors": [result.get("error", "")] if not result["success"] and result.get("error") else [],
             }
-            self._audit_verification_result(audit_input)
+            audit_passed = self._audit_verification_result(audit_input)
+            audit_blocking = self._audit_blocking_enabled()
+            audit_reason = "config_conflict" if self._audit_config_conflict() else None
+            result["audit"] = {
+                "success": audit_passed,
+                "blocking": audit_blocking,
+                "reason": audit_reason,
+            }
+            if result["success"] and audit_blocking and not audit_passed:
+                result["success"] = False
+                result["error"] = "审核阻断已开启，但审核功能未启用" if audit_reason else "知识库审核未通过"
+                result["rollback"] = self._rollback_migration(target_path, previous_target, previous_backup)
+                result["rolled_back"] = True
 
             return result
 
         except Exception as e:
-            if previous_backup and previous_target:
-                shutil.copy2(previous_backup, previous_target)
-            elif result.get("target_path") and os.path.exists(result["target_path"]):
-                os.unlink(result["target_path"])
             result["error"] = str(e)
+            if mutation_started:
+                result["rollback"] = self._rollback_migration(target_path, previous_target, previous_backup)
+                result["rolled_back"] = True
             return result
         finally:
             if previous_backup and os.path.exists(previous_backup):
@@ -700,31 +923,49 @@ class KnowledgeBaseManager:
         Returns:
             bool: 审核是否通过
         """
+        audit_blocking = self._audit_blocking_enabled()
         if os.getenv("KB_AUDIT_ENABLED") != "1":
+            if audit_blocking:
+                logger.error("审核阻断已开启，但 KB_AUDIT_ENABLED 未启用")
+                return False
             return True
 
         try:
             from modules.trae_test.orchestrator.audit_gateway import AuditGateway
         except Exception as e:
-            logger.warning("Skip KB audit: audit gateway unavailable: %s", e)
-            return True
+            logger.error("知识库审核网关不可用: %s", e)
+            return not audit_blocking
 
         # 构造审核目标数据
+        def audit_file_result(file_result: dict) -> dict:
+            details = file_result.get("details") or {}
+            normalized = {
+                "file_name": file_result.get("file_name", "unknown"),
+                "passed": file_result.get("passed", False),
+                "error": file_result.get("error", ""),
+            }
+            for field in (
+                "chunk_count",
+                "valid_chunk_count",
+                "hash_match",
+                "index_exists",
+                "chunks_exist",
+                "chunks_valid",
+                "split_success",
+                "index_success",
+            ):
+                if field in details:
+                    normalized[field] = details[field]
+                elif field in file_result:
+                    normalized[field] = file_result[field]
+            return normalized
+
         audit_target = {
             "verification_type": "knowledge_base",
             "total_files": verification_result.get("total_files", 0),
             "verified_files": verification_result.get("verified", 0),
             "failed_files": verification_result.get("failed", 0),
-            "file_results": [
-                {
-                    "file_name": fr.get("file_name", "unknown"),
-                    "passed": fr.get("passed", False),
-                    "error": fr.get("error", ""),
-                    "chunk_count": fr.get("details", {}).get("chunk_count", 0),
-                    "hash_match": fr.get("details", {}).get("hash_match", False),
-                }
-                for fr in verification_result.get("file_results", [])
-            ],
+            "file_results": [audit_file_result(fr) for fr in verification_result.get("file_results", [])],
             "errors": [
                 fr.get("error", "") for fr in verification_result.get("file_results", []) if not fr.get("passed", True)
             ],
@@ -732,11 +973,13 @@ class KnowledgeBaseManager:
 
         try:
             gateway = AuditGateway()
+            # The manager owns the blocking decision. Keep the gateway in
+            # result-returning mode so failed audits do not become exceptions.
             context = {"block_on_fail": False, "source": "kb_update"}
             result = gateway.audit(audit_target, "environment", context)
         except Exception as e:
-            logger.warning("Skip KB audit: audit execution failed: %s", e)
-            return True
+            logger.error("知识库审核执行失败: %s", e)
+            return not audit_blocking
 
         if not result.passed:
             logger.error(f"知识库完整性验证审核未通过: {result.errors}")
@@ -752,13 +995,67 @@ class KnowledgeBaseManager:
         """
         return self.monitor.scan_all_files()
 
-    def process_all(self) -> Dict:
-        """处理所有需要处理的文件
+    def process_all(self, sync_vector: bool = False, strict_rules: bool = False) -> Dict:
+        """处理监控器标记为待处理的文件。
 
-        Returns:
-            处理结果
+        保留监控器的发现策略，并复用 ``process_file`` 的处理契约；二级索引和
+        检索器缓存会在批量处理结束后统一刷新。
         """
-        return self.monitor.process_all_files()
+        scan_result = self.monitor.scan_all_files()
+        result = {
+            "success": not scan_result.get("errors"),
+            "processed": [],
+            "failed": [],
+            "skipped": [item["file"] for item in scan_result.get("already_processed", [])],
+            "errors": list(scan_result.get("errors", [])),
+        }
+
+        attempted_count = 0
+        for item in scan_result.get("needs_processing", []):
+            filename = item["file"]
+            file_path = os.path.join(self.monitor.ORIGINAL_DIR, filename)
+            attempted_count += 1
+            try:
+                process_result = self.process_file(
+                    file_path,
+                    sync_vector=sync_vector,
+                    strict_rules=strict_rules,
+                    rebuild_derived=False,
+                )
+            except Exception as exc:
+                process_result = {"success": False, "error": str(exc)}
+
+            if process_result.get("success", False):
+                result["processed"].append(filename)
+            else:
+                result["failed"].append(
+                    {
+                        "file": filename,
+                        "error": process_result.get("error") or "知识文件处理失败",
+                        "result": process_result,
+                    }
+                )
+
+        if attempted_count:
+            result["secondary_indexes"] = self._sync_secondary_indexes()
+            if not result["secondary_indexes"].get("success", False):
+                result["errors"].append(
+                    {
+                        "component": "secondary_indexes",
+                        "error": result["secondary_indexes"].get("error", "二级索引同步失败"),
+                    }
+                )
+            result["retriever_refresh"] = self._refresh_retriever_state()
+            if not result["retriever_refresh"].get("success", False):
+                result["errors"].append(
+                    {
+                        "component": "retriever_refresh",
+                        "error": result["retriever_refresh"].get("error", "检索缓存刷新失败"),
+                    }
+                )
+
+        result["success"] = not result["errors"] and not result["failed"]
+        return result
 
     @staticmethod
     def _normalize_duplicate_text(value: Any) -> str:
@@ -823,7 +1120,7 @@ class KnowledgeBaseManager:
         title_groups: dict[str, list[dict[str, str]]] = {}
         rule_id_groups: dict[str, list[dict[str, str]]] = {}
         content_groups: dict[str, list[dict[str, str]]] = {}
-        rules: list[dict[str, str]] = []
+        rules: list[dict[str, Any]] = []
         unreadable: list[dict[str, str]] = []
 
         for record in records:
@@ -844,20 +1141,27 @@ class KnowledgeBaseManager:
                 content = rule.get("content")
                 if not isinstance(rule_id, str) or not rule_id.strip():
                     continue
-                entry = {
+                public_entry = {
                     "file_id": record["file_id"],
                     "file_title": record["title"],
                     "rule_id": rule_id.strip(),
                     "content": content if isinstance(content, str) else "",
                 }
-                rules.append(entry)
-                rule_id_groups.setdefault(entry["rule_id"], []).append(entry)
-                normalized_content = self._normalize_duplicate_text(entry["content"])
+                normalized_content = self._normalize_duplicate_text(public_entry["content"])
+                analysis_entry = {
+                    "entry": public_entry,
+                    "_normalized_content": normalized_content,
+                    "_bigram_terms": {
+                        normalized_content[index : index + 2] for index in range(max(1, len(normalized_content) - 1))
+                    },
+                }
+                rules.append(analysis_entry)
+                rule_id_groups.setdefault(public_entry["rule_id"], []).append(public_entry)
                 if normalized_content:
                     fingerprint = hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()
-                    content_groups.setdefault(fingerprint, []).append(entry)
+                    content_groups.setdefault(fingerprint, []).append(public_entry)
 
-        def duplicates(groups: dict[str, list[dict[str, str]]], kind: str) -> list[dict[str, Any]]:
+        def duplicates(groups: dict[str, list[dict[str, Any]]], kind: str) -> list[dict[str, Any]]:
             findings = []
             for key, entries in sorted(groups.items()):
                 file_ids = sorted({entry["file_id"] for entry in entries})
@@ -879,25 +1183,33 @@ class KnowledgeBaseManager:
             return findings
 
         similarity_candidates = []
-        content_rules = [rule for rule in rules if self._normalize_duplicate_text(rule["content"])]
+        content_rules = [rule for rule in rules if rule["_normalized_content"]]
         for left_index, left in enumerate(content_rules):
-            left_text = self._normalize_duplicate_text(left["content"])
-            left_terms = {left_text[index : index + 2] for index in range(max(1, len(left_text) - 1))}
+            left_entry = left["entry"]
+            left_text = left["_normalized_content"]
+            left_terms = left["_bigram_terms"]
             for right in content_rules[left_index + 1 :]:
-                if left["file_id"] == right["file_id"]:
+                right_entry = right["entry"]
+                if left_entry["file_id"] == right_entry["file_id"]:
                     continue
-                right_text = self._normalize_duplicate_text(right["content"])
+                right_text = right["_normalized_content"]
                 if left_text == right_text:
                     continue
-                right_terms = {right_text[index : index + 2] for index in range(max(1, len(right_text) - 1))}
+                right_terms = right["_bigram_terms"]
+                # Jaccard >= threshold requires this cardinality ratio.  It
+                # is a conservative pre-filter: it can only skip pairs that
+                # cannot reach the requested score, never valid candidates.
+                largest = max(len(left_terms), len(right_terms))
+                if largest and min(len(left_terms), len(right_terms)) / largest < similarity_threshold:
+                    continue
                 score = len(left_terms & right_terms) / len(left_terms | right_terms)
                 if score >= similarity_threshold:
                     similarity_candidates.append(
                         {
                             "method": "character_bigram_jaccard",
                             "score": round(score, 4),
-                            "left": {key: left[key] for key in ("file_id", "file_title", "rule_id")},
-                            "right": {key: right[key] for key in ("file_id", "file_title", "rule_id")},
+                            "left": {key: left_entry[key] for key in ("file_id", "file_title", "rule_id")},
+                            "right": {key: right_entry[key] for key in ("file_id", "file_title", "rule_id")},
                         }
                     )
 
@@ -1037,6 +1349,21 @@ def print_verify_result(result: Dict):
         for item in result["chunks_valid"]:
             print(f"  块 {item['chunk_index']}: {OK_SIGN if item['valid'] else FAIL_SIGN}")
 
+    if "integrity" in result:
+        integrity = result["integrity"]
+        print(f"完整性: {OK_SIGN if integrity.get('success', False) else FAIL_SIGN}")
+        print(f"  内容哈希匹配: {OK_SIGN if integrity.get('hash_match', False) else FAIL_SIGN}")
+        if "byte_match" in integrity:
+            print(f"  字节哈希匹配: {OK_SIGN if integrity['byte_match'] else FAIL_SIGN}")
+        print(f"  块数量: {result.get('chunk_count', 0)}，" f"有效块数量: {result.get('valid_chunk_count', 0)}")
+
+    audit = result.get("audit")
+    if audit is not None:
+        print(f"审核: {OK_SIGN if audit.get('success', False) else FAIL_SIGN}")
+        print(f"审核阻断: {'是' if audit.get('blocking', False) else '否'}")
+        if audit.get("reason"):
+            print(f"审核原因: {audit['reason']}")
+
     if result["error"]:
         print(f"\n错误: {result['error']}")
 
@@ -1050,12 +1377,31 @@ def print_migrate_result(result: Dict):
     print(f"源文件: {result['source_path']}")
     print(f"目标文件: {result['target_path']}")
 
-    if result["processed"]:
-        print("\n处理结果:")
-        print(f"  分割: {OK_SIGN if result['processed']['split']['success'] else FAIL_SIGN}")
     processed = result.get("processed") or {}
-    index_result = processed.get("index") or {}
-    print(f"  索引: {OK_SIGN if index_result.get('success', False) else FAIL_SIGN}")
+    if processed:
+        print("\n处理结果:")
+        if "split" in processed:
+            split_result = processed.get("split") or {}
+            print(f"  分割: {OK_SIGN if split_result.get('success', False) else FAIL_SIGN}")
+        if "index" in processed:
+            index_result = processed.get("index") or {}
+            print(f"  索引: {OK_SIGN if index_result.get('success', False) else FAIL_SIGN}")
+
+    rollback = result.get("rollback")
+    if rollback is not None:
+        print("\n回滚:")
+        print(f"  总体: {OK_SIGN if rollback.get('success', False) else FAIL_SIGN}")
+        for error in rollback.get("errors", []):
+            print(f"  {CROSS_SIGN} {error}")
+    if result.get("rolled_back"):
+        print(f"  状态: {OK_SIGN} 已回滚")
+
+    audit = result.get("audit")
+    if audit is not None:
+        print(f"审核: {OK_SIGN if audit.get('success', False) else FAIL_SIGN}")
+        print(f"审核阻断: {'是' if audit.get('blocking', False) else '否'}")
+        if audit.get("reason"):
+            print(f"审核原因: {audit['reason']}")
 
     if result["error"]:
         print(f"\n错误: {result['error']}")
@@ -1089,6 +1435,7 @@ def print_process_all_result(result: Dict):
     print("=" * 80)
     print("批量处理结果")
     print("=" * 80)
+    print(f"成功: {OK_SIGN if result.get('success', False) else FAIL_SIGN}")
 
     if result["processed"]:
         print(f"\n成功处理 ({len(result['processed'])}):")
@@ -1104,6 +1451,15 @@ def print_process_all_result(result: Dict):
         print(f"\n跳过 ({len(result['skipped'])}):")
         for filename in result["skipped"]:
             print(f"  - {filename}")
+
+    if result.get("errors"):
+        print(f"\n扫描错误 ({len(result['errors'])}):")
+        for item in result["errors"]:
+            if isinstance(item, dict):
+                source = item.get("file") or item.get("component") or "unknown"
+                print(f"  {CROSS_SIGN} {source}: {item.get('error', '')}")
+            else:
+                print(f"  {CROSS_SIGN} {item}")
 
 
 def print_vector_result(result: Dict):
@@ -1165,6 +1521,10 @@ def print_lint_result(result: Dict):
     if result["warnings"]:
         print("sensitive warnings:")
         for item in result["warnings"]:
+            print(f"  - {item}")
+    if result.get("blocked_findings"):
+        print("blocked findings:")
+        for item in result["blocked_findings"]:
             print(f"  - {item}")
     if result["errors"]:
         print("errors:")
@@ -1263,6 +1623,12 @@ def main():
 
     # process-all 命令
     process_all_parser = subparsers.add_parser("process-all", help="批量处理所有需要处理的文件")
+    process_all_parser.add_argument("--sync-vector", action="store_true", help="同步写入 RAG 本地语义向量索引")
+    process_all_parser.add_argument(
+        "--strict-rules",
+        action="store_true",
+        help="Require structured rule ids, keywords, and content",
+    )
 
     args = parser.parse_args()
 
@@ -1286,14 +1652,12 @@ def main():
             print_index_result(result["index"])
         if result.get("vector"):
             print_vector_result(result["vector"])
-        exit_code = (
-            0
-            if all(
-                not item or item.get("success", True)
-                for item in (result.get("split"), result.get("index"), result.get("vector"))
-            )
-            else 1
-        )
+        # Some monitor implementations omit optional nested results; the
+        # authoritative status is the top-level result, while any returned
+        # nested result must also be successful.
+        nested_results = (result.get("split"), result.get("index"), result.get("vector"))
+        nested_success = all(item is None or item.get("success", False) for item in nested_results)
+        exit_code = 0 if result.get("success", False) and nested_success else 1
     elif args.command == "verify":
         result = manager.verify_file(args.title)
         print_verify_result(result)
@@ -1326,7 +1690,7 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         exit_code = 0 if result.get("success", False) else 1
     elif args.command == "process-all":
-        result = manager.process_all()
+        result = manager.process_all(sync_vector=args.sync_vector, strict_rules=args.strict_rules)
         print_process_all_result(result)
         exit_code = 0 if result.get("success", False) else 1
     else:

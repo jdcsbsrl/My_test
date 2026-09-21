@@ -1,8 +1,8 @@
 """用例目录合法性校验
 
 强制用例目录字段格式为 '一级 - 二级 - 三级'（空格-连字符-空格），
-且一/二/三级必须严格出现在 `assets/knowledge_base/导航规范/ERP菜单导航与路由.json`
-的 `module_hierarchy` 中。
+且一/二/三级必须严格出现在 `KnowledgeRetriever.search_navigation()` 返回的
+`module_hierarchy` 中。
 
 这是对知识库铁律的守护：杜绝手动脑补目录名导致的用例数据偏差。
 
@@ -14,51 +14,51 @@ v2 新增：
 
 from __future__ import annotations
 
-import json
-import os
 import re
-from functools import lru_cache
 
 _SEPARATOR = " - "
 _LOOSE_SEPARATORS = re.compile(r"\s*[-\u2013\u2014]\s*")
+_module_hierarchy_cache: dict[str, dict[str, list[str]]] | None = None
 
 
-def _nav_json_path() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(
-        os.path.join(
-            here,
-            "..",
-            "..",
-            "..",
-            "assets",
-            "knowledge_base",
-            "data",
-            "original",
-            "ERP菜单导航与路由.json",
-        )
-    )
+class NavigationContractUnavailable(RuntimeError):
+    """Raised when the navigation knowledge contract cannot be loaded."""
 
 
-def _fallback_nav_json_path() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.normpath(os.path.join(here, "..", "..", "..", "fixtures", "navigation", "module_hierarchy.json"))
+def clear_module_hierarchy_cache() -> None:
+    """Clear the successful navigation lookup cache.
+
+    Empty lookups are intentionally not cached.  This lets a process retry
+    after the knowledge base has been provisioned or its registry refreshed.
+    """
+
+    global _module_hierarchy_cache
+    _module_hierarchy_cache = None
 
 
-@lru_cache(maxsize=1)
 def _load_module_hierarchy() -> dict[str, dict[str, list[str]]]:
+    global _module_hierarchy_cache
+    if _module_hierarchy_cache:
+        return _module_hierarchy_cache
+
     from .knowledge_retriever import KnowledgeRetriever
 
     data = KnowledgeRetriever().search_navigation()
     if isinstance(data, dict) and data.get("module_hierarchy"):
-        return data["module_hierarchy"]
-    # Only the immutable, non-sensitive fixture may be read by path.
-    path = _fallback_nav_json_path()
-    if not os.path.exists(path):
-        return {}
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    return data.get("module_hierarchy", {}) or {}
+        _module_hierarchy_cache = data["module_hierarchy"]
+        return _module_hierarchy_cache
+    return {}
+
+
+def require_module_hierarchy() -> dict[str, dict[str, list[str]]]:
+    """Return the navigation contract or fail with an actionable message."""
+
+    hierarchy = _load_module_hierarchy()
+    if not hierarchy:
+        raise NavigationContractUnavailable(
+            "导航知识库未加载，无法生成或审核带目录的测试用例；" "请先通过 KnowledgeRetriever 准备导航规范。"
+        )
+    return hierarchy
 
 
 def list_allowed_top_levels() -> list[str]:
@@ -196,6 +196,10 @@ def validate_directory(directory: str, strict: bool = True) -> tuple[bool, str]:
         return (False, msg) if strict else (True, f"[WARN] {msg}")
 
     hierarchy = _load_module_hierarchy()
+
+    if not hierarchy:
+        msg = "导航知识库未加载，无法校验用例目录；请先通过 KnowledgeRetriever 准备导航规范"
+        return (False, msg) if strict else (True, f"[WARN] {msg}")
 
     if top not in hierarchy:
         allowed = "/".join(list_allowed_top_levels())

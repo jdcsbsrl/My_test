@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .dir_validator import _load_module_hierarchy
+from .dir_validator import _load_module_hierarchy, require_module_hierarchy
 from .excel_generator import ExcelGenerator
 from .knowledge_retriever import KnowledgeRetriever
 from .runtime_quality import attach_runtime_quality, read_runtime_quality
@@ -294,6 +294,10 @@ class TestCaseGenerator:
         from modules.trae_test.orchestrator.audit_gateway import AuditGateway
 
         cases = self.generate_cases(keyword, limit)
+        if cases:
+            # Do not let a missing knowledge base turn into empty directories
+            # that fail later with a misleading field-validation error.
+            require_module_hierarchy()
         score_engine = TestCaseScoreEngine()
         optimizer = TestCaseOptimizer(score_engine)
         for case in cases:

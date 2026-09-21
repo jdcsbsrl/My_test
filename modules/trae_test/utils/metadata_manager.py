@@ -13,6 +13,16 @@ from .hash_utils import compute_file_hash
 from .path_utils import PathManager
 
 
+def normalize_file_id(title: str) -> str:
+    """Return the canonical registry/index identifier for a file title.
+
+    Keep this policy deliberately small and backwards-compatible.  Callers
+    should use this helper instead of reimplementing the normalization rule so
+    registry, index, chunk, and validation lookups cannot drift apart.
+    """
+    return title.replace(" ", "_").lower()
+
+
 class MetadataManager:
     """知识库元数据管理器"""
 
@@ -59,6 +69,11 @@ class MetadataManager:
         """确保必要的目录存在"""
         if not os.path.exists(self.metadata_dir):
             os.makedirs(self.metadata_dir, exist_ok=True)
+
+    @staticmethod
+    def normalize_file_id(title: str) -> str:
+        """Expose the shared file-id policy through the metadata API."""
+        return normalize_file_id(title)
 
     @staticmethod
     def _compute_file_hash(file_path: str) -> str:
@@ -160,7 +175,7 @@ class MetadataManager:
                 file_path = os.path.join(original_dir, filename)
 
                 title = os.path.splitext(filename)[0]
-                file_id = title.replace(" ", "_").lower()
+                file_id = self.normalize_file_id(title)
 
                 stat = os.stat(file_path)
 

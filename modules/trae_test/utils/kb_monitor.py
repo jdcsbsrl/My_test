@@ -8,6 +8,7 @@ from typing import Any
 
 from .file_splitter import JSONFileSplitter
 from .index_builder_v3 import IndexBuilderV3
+from .metadata_manager import normalize_file_id
 from .path_utils import find_project_root
 
 
@@ -148,7 +149,7 @@ class KnowledgeBaseMonitor:
                     continue
 
                 file_title = os.path.splitext(filename)[0]
-                index_file = f"{file_title}_index.json"
+                index_file = f"{normalize_file_id(file_title)}_index.json"
                 index_exists = os.path.exists(os.path.join(self.INDEX_DIR, "files", index_file)) or os.path.exists(
                     os.path.join(self.INDEX_DIR, index_file)
                 )
@@ -183,7 +184,7 @@ class KnowledgeBaseMonitor:
                 target = os.path.join(rollback_dir, os.path.basename(path))
                 shutil.copy2(path, target)
                 old_chunks.append(target)
-            index_path = os.path.join(self.INDEX_DIR, "files", f"{title.replace(' ', '_').lower()}_index.json")
+            index_path = os.path.join(self.INDEX_DIR, "files", f"{normalize_file_id(title)}_index.json")
             if os.path.exists(index_path):
                 old_index = os.path.join(rollback_dir, "old_index.json")
                 shutil.copy2(index_path, old_index)
@@ -224,7 +225,12 @@ class KnowledgeBaseMonitor:
             shutil.rmtree(rollback_dir, ignore_errors=True)
 
     def process_all_files(self) -> dict[str, Any]:
-        """完整处理所有需要处理的文件
+        """Legacy batch processor kept for compatibility.
+
+        New callers should use ``KnowledgeBaseManager.process_all()`` so the
+        manager can rebuild derived indexes and refresh the retriever once per
+        batch.  This method remains available for lower-level monitor tests and
+        integrations that intentionally only need split/index operations.
 
         Returns:
             处理结果字典

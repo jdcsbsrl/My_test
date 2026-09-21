@@ -67,8 +67,11 @@ def test_generation_evaluator_blocks_low_quality_local_case(monkeypatch):
 
     assert result.audit_passed is False
     assert result.point_hit_rate == 1.0
-    assert result.quality_score == 100  # Complete fields cannot overrule the failed business audit.
-    assert result.original_score == 100
+    # The evaluation baseline no longer invents a fake navigation directory.
+    # Missing navigation is therefore reflected in the structural score and
+    # still cannot be overridden by the other complete fields.
+    assert result.quality_score < 100
+    assert result.original_score < 100
     assert result.optimized_score == result.final_score
     assert result.cold_start is True
     assert result.optimization_attempts == 0

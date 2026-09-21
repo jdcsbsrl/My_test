@@ -57,6 +57,18 @@ class TestAuditAgentInit:
 
 
 class TestAuditAgentTestCases:
+    @pytest.fixture(autouse=True)
+    def navigation_contract(self, monkeypatch):
+        """Keep audit unit tests independent from the local knowledge base."""
+
+        from modules.trae_test.utils import dir_validator
+
+        monkeypatch.setattr(
+            dir_validator,
+            "_load_module_hierarchy",
+            lambda: {"产品": {"产品中心": ["库存SKU"]}},
+        )
+
     @staticmethod
     def _valid_case(**runtime):
         case = {
