@@ -11,13 +11,13 @@ authority: 专项规范
 ## 日常入口
 
 使用 `tools/case_generator_cli.py generate`，提供模块、功能及 `--requirement` 或 `--requirement-file`。
-本地AI助手通过 `--candidate-file` 提交依据检索结果起草的15字段JSON；候选仍完整经过固定字段处理和审核，传入的审核通过标记不会被信任。
+本地AI助手通过 `--candidate-file` 提交依据检索结果起草的15字段JSON对象，或由多个对象组成的数组；数组中的每条都是独立场景，仍逐条经过固定字段处理，并作为整组交给AuditAgent审核，全部通过后统一导出。传入的审核通过标记不会被信任。
 知识库没有覆盖新需求时，可用 `--user-evidence` 或 `--user-evidence-file` 附上用户明确的业务依据。该来源以内容摘要单独标识，不伪装为知识库命中、不自动形成有限规则契约；未定义的业务语义仍须标记并核对。
-`--provider self-hosted-llm` 使用已配置的内网模型。`local-rule`仅保留为评估基线；正式生成入口在没有候选时明确返回生成能力缺口，不再输出通用步骤。
+`--provider self-hosted-llm` 使用已配置的内网模型，并按需求和知识中有依据、可独立验证的场景返回用例数组；若依据确实只支持一个场景，才返回一条，不为凑数量拆分或编造场景。旧模型返回单个对象时仍兼容为一条。`local-rule`仅保留为评估基线；正式生成入口在没有候选时明确返回生成能力缺口，不再输出通用步骤。
 模型端点必须符合现有环境和隐私约束。生成器不会把知识发送到公共服务。
 
 ```text
-需求正文 → KnowledgeRetriever（可补充用户依据）→ 候选内容 → 程序填入固定字段 → 格式整理 → AuditAgent → Excel交付
+需求正文 → KnowledgeRetriever（可补充用户依据）→ 一个或多个场景候选 → 程序逐条填入固定字段并评分 → 整组AuditAgent审核与发布门禁 → 统一Excel交付
 ```
 
 固定字段来自 `RuleManager.get_field_value_rules()`。单一合法值或配置 `fixed: true` 的字段由程序锁定；

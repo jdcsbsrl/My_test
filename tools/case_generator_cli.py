@@ -88,6 +88,7 @@ def generate_case(
         output_path=str(output_path),
     )
     service.gateway.audit(output, "all", {"block_on_fail": True})
+    print(f"用例条数: {len(result['cases'])}")
     print(f"测试用例: {output}")
     if registry:
         for case in result["cases"]:
@@ -110,7 +111,11 @@ def main():
     content.add_argument("--requirement-file", type=Path)
     gen.add_argument("--provider", choices=("local-rule", "self-hosted-llm"), default="local-rule")
     gen.add_argument("--register", action="store_true")
-    gen.add_argument("--candidate-file", type=Path, help="本地Agent依据知识生成的候选JSON，仍经过固定字段及完整审核")
+    gen.add_argument(
+        "--candidate-file",
+        type=Path,
+        help="本地Agent依据知识生成的候选JSON（单个对象或对象数组），仍逐条经过固定字段及完整审核",
+    )
     evidence = gen.add_mutually_exclusive_group()
     evidence.add_argument("--user-evidence", help="用户明确提供的业务依据；会与知识库来源分开记录")
     evidence.add_argument("--user-evidence-file", type=Path, help="包含用户明确业务依据的本地文本文件")
