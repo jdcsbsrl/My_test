@@ -273,3 +273,19 @@ UI自愈事件进入运行报告并标记需复核定位器，高风险动作同
 登记用例执行前校验脚本路径、函数节点和已有指纹。每项最多执行600秒，超时、缺失/损坏XML或跳过均不能算通过。
 执行证据和汇总HTML/JSON进入`.runtime/reports/registered/<run_id>/`，登记表保存执行时的用例ID、版本及证据路径。
 浏览器定位变更契约通过本地HTML故障注入验证：旧定位失效后可通过唯一语义定位继续；多个候选时阻断；替代成功仍记录待复核事件并保留业务断言。
+
+## 销售订单排序审计（auto_test 模块）
+
+排序审计的业务逻辑、测试、命令入口和报告生成全部位于 `modules/auto_test/`，不依赖 `tools/` 下的草稿脚本。预览执行范围：
+
+```powershell
+python -m modules.auto_test sort-audit --env test
+```
+
+确认环境和授权后执行 13 个启用字段的升序、降序审计（利润因业务状态暂缓，单独核查使用 --field 利润）：
+
+```powershell
+python -m modules.auto_test sort-audit --env test --execute --page-size 250 --max-pages 3
+```
+
+审计只读订单列表、订单明细及字段映射接口，不创建或修改订单。报告写入 `.runtime/reports/sales_order_sort/`，包含 JSON 和 Markdown。PASS 表示排序依据可验证且样本符合规则；WARNING 表示样本或排序依据不足，不能据此判为缺陷，WARNING 不阻断（审计器退出码 0）；确认失败返回退出码 1；FAIL 仅表示依据明确且存在可复现逆序或空值未置后的情况。数据库 `en_US.utf8` 文本 collation 尚未在审计器中复刻时，店铺名、物流渠道名和物流单号的字符串单调性记为 WARNING，不按 Python Unicode 码点序判缺陷，但空值位置仍可独立验证。模块命令和离线单元测试已具备；真实 TEST ERP 排序审计的 CI 任务尚未接入，需确认报告流转目标后再添加独立的非阻断任务。

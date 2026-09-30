@@ -137,7 +137,7 @@ jobs:
           # Unit coverage is measured on unit-testable layers. Browser page
           # objects are covered by the UI matrix below and are intentionally
           # not mixed into this gate.
-          pytest tests/unit/ -v --tb=short -n auto \
+          pytest tests/unit/ modules/auto_test/tests/test_sales_order_sort_audit.py -v --tb=short -n auto \
             --alluredir .runtime/reports/allure-results \
             --cov=modules/auto_test/core \
             --cov=modules/auto_test/api \
