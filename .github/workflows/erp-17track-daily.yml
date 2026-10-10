@@ -1,18 +1,7 @@
 name: ERP 17TRACK Daily
 
 on:
-  # 07:31 UTC = 15:31 Asia/Shanghai. GitHub may start scheduled jobs late.
-  schedule:
-    - cron: '31 7 * * *'
   workflow_dispatch:
-  # Allow a trial run from fix before this workflow reaches the default branch.
-  push:
-    branches:
-      - fix
-    paths:
-      - .github/workflows/erp-17track-daily.yml
-      - modules/auto_test/core/logistics_tracking_*.py
-      - tools/*logistics_tracking*.py
 
 permissions:
   actions: read
