@@ -52,7 +52,7 @@ class CaseGenerationService:
         *,
         provider: str = "local-rule",
         priority: str = "P1",
-        candidate: dict | None = None,
+        candidate: dict | list[dict] | None = None,
         user_evidence: str | None = None,
     ) -> dict:
         if not requirement.strip():
@@ -94,16 +94,7 @@ class CaseGenerationService:
         factories = {"local-rule": LocalRuleRAGCaseGenerator, "self-hosted-llm": SelfHostedLLMRAGCaseGenerator}
         factory = self.provider_factory or factories[provider]
         if candidate is not None:
-            if not isinstance(candidate, dict):
-                raise ValueError("Candidate must be a case object")
-            # A local Agent can submit a draft through the same policy/audit pipeline.
-            # Never trust runtime approval flags supplied by a draft.
-            case = {field: deepcopy(candidate.get(field, "")) for field in ALL_FIELDS}
-            for key in ("_runtime_coverage_matrix", "_runtime_rule_binding"):
-                if key in candidate:
-                    if not isinstance(candidate[key], dict):
-                        raise ValueError(f"{key} must be an object")
-                    case[key] = deepcopy(candidate[key])
+            candidate_cases = self._normalize_cases(candidate, "Candidate")
         else:
             if provider == "local-rule" and self.provider_factory is None:
                 return {
@@ -117,41 +108,78 @@ class CaseGenerationService:
                     ],
                 }
             generator = factory(retriever=RetrievedContext(items))
-            case = generator.generate_case(requirement)
-        case["需求ID"] = requirement_id
-        case["优先级"] = priority
-        apply_field_policy(case, self.rules)
-        scorer = TestCaseScoreEngine()
-        scorer.record_score(case, "original")
-        TestCaseOptimizer(scorer).optimize(case)
-        scorer.record_score(case, "optimized")
-        scorer.record_score(case, "final")
-        case["质量评分"] = read_runtime_quality(case).final_score
-        result = self.gateway.audit([case], "test_case", {"block_on_fail": False, "knowledge_sources": items})
-        quality = read_runtime_quality(case)
-        quality.final_audit_passed = result.passed
-        quality.needs_human_review = not result.passed
-        attach_runtime_quality(case, quality)
-        for field in LEGACY_RUNTIME_FIELDS:
-            case.pop(field, None)
+            batch_generator = getattr(type(generator), "generate_cases", None)
+            generated = (
+                batch_generator(generator, requirement)
+                if callable(batch_generator)
+                else generator.generate_case(requirement)
+            )
+            candidate_cases = self._normalize_cases(generated, "Generated output")
+
+        cases = []
+        for draft in candidate_cases:
+            # Never trust runtime approval flags supplied by a draft. Only carry
+            # the two reviewed runtime contracts into the audited case.
+            case = {field: deepcopy(draft.get(field, "")) for field in ALL_FIELDS}
+            for key in ("_runtime_coverage_matrix", "_runtime_rule_binding"):
+                if key in draft:
+                    if not isinstance(draft[key], dict):
+                        raise ValueError(f"{key} must be an object")
+                    case[key] = deepcopy(draft[key])
+            case["需求ID"] = requirement_id
+            case["优先级"] = priority
+            apply_field_policy(case, self.rules)
+            scorer = TestCaseScoreEngine()
+            scorer.record_score(case, "original")
+            TestCaseOptimizer(scorer).optimize(case)
+            scorer.record_score(case, "optimized")
+            scorer.record_score(case, "final")
+            case["质量评分"] = read_runtime_quality(case).final_score
+            cases.append(case)
+
+        result = self.gateway.audit(cases, "test_case", {"block_on_fail": False, "knowledge_sources": items})
+        for case in cases:
+            quality = read_runtime_quality(case)
+            quality.final_audit_passed = result.passed
+            quality.needs_human_review = not result.passed
+            attach_runtime_quality(case, quality)
+            for field in LEGACY_RUNTIME_FIELDS:
+                case.pop(field, None)
         errors = [issue for issue in result.issues if issue.severity == "error"]
         release_decision = ReleaseQualityGate().evaluate(
-            cases=[case], audit_result=result, release_scope="generation", require_regression=False
+            cases=cases, audit_result=result, release_scope="generation", require_regression=False
         )
         # A model formatting/field failure is a generation defect, not a question the user must approve.
         information_rules = {"TC_EVIDENCE_REQUIRED", "REQ_COVERAGE_INCOMPLETE", "REQ_SCOPE_BOUNDARY_VIOLATION"}
         questions = list(dict.fromkeys(issue.message for issue in errors if issue.rule_id in information_rules))
         return {
             "status": "ready" if result.passed else "needs_information" if questions else "generation_failed",
-            "cases": [case],
+            "cases": cases,
+            "case_count": len(cases),
             "audit": result.to_dict(),
             "questions": questions,
             "generation_errors": [issue.message for issue in errors if issue.rule_id not in information_rules],
             "sources": items,
             "semantic_status": (
                 "contract_checked"
-                if result.passed and case.get("_runtime_rule_binding", {}).get("digest")
+                if result.passed and all(case.get("_runtime_rule_binding", {}).get("digest") for case in cases)
                 else "unverified"
             ),
             "release_decision": release_decision.to_dict(),
         }
+
+    @staticmethod
+    def _normalize_cases(value: dict | list[dict], label: str) -> list[dict]:
+        """Accept one legacy case object or a non-empty batch of case objects."""
+        if isinstance(value, dict):
+            cases = [value]
+        elif isinstance(value, list):
+            cases = value
+        else:
+            raise ValueError(f"{label} must be a case object or a list of case objects")
+        if not cases:
+            raise ValueError(f"{label} must contain at least one case")
+        for index, case in enumerate(cases, start=1):
+            if not isinstance(case, dict):
+                raise ValueError(f"{label} item {index} must be a case object")
+        return cases
