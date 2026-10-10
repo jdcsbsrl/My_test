@@ -20,8 +20,12 @@ if str(PROJECT_ROOT) not in sys.path:
 load_dotenv(PROJECT_ROOT / ".env")
 
 from modules.auto_test.core.logistics_tracking_compare import (
-    SAMPLE_SIZE, query_candidates, read_manual_sheet, render_report,
-    select_samples, write_manual_sheet,
+    SAMPLE_SIZE,
+    query_candidates,
+    read_manual_sheet,
+    render_report,
+    select_samples,
+    write_manual_sheet,
 )
 from modules.trae_test.utils.runtime_paths import project_root
 
@@ -43,11 +47,13 @@ def main() -> int:
         if not token or not clientid:
             parser.error("ERP_PROD_TOKEN and ERP_PROD_CLIENTID are required; no login interface is called")
         session = requests.Session()
-        session.headers.update({
-            "Authorization": f"Bearer {token}",
-            "clientid": clientid,
-            "Content-Type": "application/json",
-        })
+        session.headers.update(
+            {
+                "Authorization": f"Bearer {token}",
+                "clientid": clientid,
+                "Content-Type": "application/json",
+            }
+        )
         try:
             candidates, truncated = query_candidates(
                 session,
@@ -63,8 +69,7 @@ def main() -> int:
             print("No eligible records; no sheet created", file=sys.stderr)
             return 2
         destination = (
-            project_root() / "data" / "private"
-            / f"logistics_tracking_{day:%Y%m%d}_{uuid.uuid4().hex[:8]}.csv"
+            project_root() / "data" / "private" / f"logistics_tracking_{day:%Y%m%d}_{uuid.uuid4().hex[:8]}.csv"
         )
         write_manual_sheet(destination, selected)
         print(f"Manual 17TRACK sheet: {destination}")

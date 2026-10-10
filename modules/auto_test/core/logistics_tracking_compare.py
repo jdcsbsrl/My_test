@@ -11,11 +11,7 @@ from typing import Any
 
 import requests
 
-
-ERP_LIST_URL = (
-    "https://erp.dayoneerp.com/oms-prod-api/oms-admin/"
-    "system/salesOrderLogisticsTracking/listNew"
-)
+ERP_LIST_URL = "https://erp.dayoneerp.com/oms-prod-api/oms-admin/" "system/salesOrderLogisticsTracking/listNew"
 PAGE_SIZE = 20
 SAMPLE_SIZE = 10
 EXCLUDED_CODES = frozenset({"AF", "CC"})
@@ -200,7 +196,8 @@ def select_samples(candidates: list[dict[str, str]], day: date) -> list[dict[str
     for code in EXPECTED_STATUS:
         match = next(
             (
-                row for row in shuffled
+                row
+                for row in shuffled
                 if row["erp_status_code"] == code and row["tracking_number"] not in selected_numbers
             ),
             None,
@@ -269,13 +266,15 @@ def assess(rows: list[dict[str, str]]) -> list[dict[str, str]]:
                 verdict = "状态差异待复核"
         else:
             verdict = "状态差异待复核"
-        results.append({
-            **row,
-            "expected_status": expected or "",
-            "observed_status": observed or "",
-            "observed_status_name": STATUS_NAMES.get(observed or "", ""),
-            "verdict": verdict,
-        })
+        results.append(
+            {
+                **row,
+                "expected_status": expected or "",
+                "observed_status": observed or "",
+                "observed_status_name": STATUS_NAMES.get(observed or "", ""),
+                "verdict": verdict,
+            }
+        )
     return results
 
 
@@ -327,11 +326,16 @@ def render_report(day: date, rows: list[dict[str, str]], *, scope: str = "") -> 
     priority = {"系统落后（重点）": 0, "状态差异待复核": 1, "提醒（系统超前）": 2, "一致": 3, "未完成": 4}
     for row in sorted(results, key=lambda item: priority[item["verdict"]]):
         cells = [
-            row["tracking_number"], row["provider_channel_name"],
+            row["tracking_number"],
+            row["provider_channel_name"],
             f"{row['erp_status_name'] or row['erp_status_code']}（{row['erp_status_code']}）",
             f"{row['observed_status_name']}（{row['observed_status']}）" if row["observed_status"] else "未取得",
-            row["erp_latest_tracking_time"], row["erp_last_crawl_time"], row["track17_latest_time"],
-            row["track17_checked_at"], row["verdict"], row["notes"],
+            row["erp_latest_tracking_time"],
+            row["erp_last_crawl_time"],
+            row["track17_latest_time"],
+            row["track17_checked_at"],
+            row["verdict"],
+            row["notes"],
         ]
         lines.append("| " + " | ".join(str(value).replace("|", "\\|").replace("\n", " ") for value in cells) + " |")
     lines += ["", "系统落后项应优先核对承运商、17TRACK事件时间与 ERP 抓取时间；首次差异需复核，不直接认定为缺陷。", ""]
