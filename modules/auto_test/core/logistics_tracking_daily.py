@@ -309,7 +309,8 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
                 wait_until="domcontentloaded",
                 timeout=60000,
             )
-            entry = page.locator("textarea[placeholder^='Enter up to 40 numbers']")
+            # The input has a stable element id; its placeholder may vary by locale.
+            entry = page.locator("textarea#auto-size-textarea, textarea[placeholder^='Enter up to 40 numbers']").first
             stage = "等待输入框"
             entry.wait_for(state="visible", timeout=45000)
             stage = "等待真实单号填入"
@@ -348,10 +349,12 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
                     raise TrackingBlockedError(f"17TRACK duplicate/missing card for {number}")
                 deadline = time.monotonic() + 45
                 while True:
-                    summary = card.evaluate("""x => {
+                    summary = card.evaluate(
+                        """x => {
                         for (let i = 0; i < 5; i++) x = x.parentElement;
                         return x.innerText;
-                    }""")
+                    }"""
+                    )
                     try:
                         status, latest_time, notes = parse_summary(number, summary)
                         break
