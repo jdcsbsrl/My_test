@@ -63,8 +63,8 @@ jobs:
 
       - name: Verify logistics entrypoint imports
         run: |
-          python -c 'import modules.auto_test.core.logistics_tracking_daily'
-          python -c 'import modules.auto_test.core.logistics_tracking_email'
+          python -c 'import tools.run_logistics_tracking_daily'
+          python -c 'import tools.send_logistics_tracking_email'
 
       - name: Restore the latest complete hash history
         shell: bash
