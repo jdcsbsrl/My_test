@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from modules.auto_test.core.logistics_tracking_daily import (
     SAMPLE_SIZE,
+    TrackingBlockedError,
     ZONE,
     choose_samples,
     load_used_hashes,
@@ -27,6 +28,12 @@ from modules.auto_test.core.logistics_tracking_daily import (
     verdict_counts,
 )
 from modules.trae_test.utils.runtime_paths import runtime_dir
+
+
+def _safe_failure(exc: Exception) -> str:
+    stage = exc.public_stage if isinstance(exc, TrackingBlockedError) else ""
+    detail = f"（{stage}）" if stage else ""
+    return f"{type(exc).__name__}{detail}；请检查工作流运行日志和网页访问状态"
 
 
 def main() -> int:
@@ -75,7 +82,7 @@ def main() -> int:
         error = ""
     except Exception as exc:
         # Secrets and authorization headers never enter the report or stdout.
-        error = f"{type(exc).__name__}；请检查工作流运行日志和网页访问状态"
+        error = _safe_failure(exc)
     report, sheet = save_results(ROOT, archive, day, rows, scope, used_hashes, error)
     print(f"Report: {report}")
     print(f"Private sheet: {sheet}")

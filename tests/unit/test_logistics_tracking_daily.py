@@ -16,6 +16,7 @@ from modules.auto_test.core.logistics_tracking_daily import (
     parse_summary,
     save_results,
 )
+from tools.run_logistics_tracking_daily import _safe_failure
 
 
 def test_query_strata_retries_transient_failure_and_limits_each_status_to_first_page(monkeypatch):
@@ -164,3 +165,10 @@ def test_public_ci_requires_key_and_archives_only_hmac_history(tmp_path, monkeyp
     assert history["hash_scheme"] == "hmac-sha256"
     assert "TEST0000" not in (archive / "history.json").read_text(encoding="utf-8")
     assert number_hash("TEST0000") in load_used_hashes(tmp_path, archive)
+
+
+def test_failure_summary_exposes_only_safe_page_stage():
+    error = TrackingBlockedError("private tracking number TEST0000", public_stage="等待真实运单结果超时")
+    summary = _safe_failure(error)
+    assert "等待真实运单结果超时" in summary
+    assert "TEST0000" not in summary
