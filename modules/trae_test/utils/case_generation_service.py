@@ -162,7 +162,8 @@ class CaseGenerationService:
             "sources": items,
             "semantic_status": (
                 "contract_checked"
-                if result.passed and all(case.get("_runtime_rule_binding", {}).get("digest") for case in cases)
+                if result.passed
+                and all(case.get("_runtime_rule_binding", {}).get("digest") for case in cases)
                 else "unverified"
             ),
             "release_decision": release_decision.to_dict(),

@@ -111,6 +111,27 @@ class BasePage:
     def _redact_text(value: object) -> str:
         return str(redact_sensitive_data(str(value or "")))
 
+    def _blocking_dialog_summary(self) -> str | None:
+        """Describe a visible application modal without exposing its full contents."""
+        dialog = self.page.locator('.el-overlay-message-box[role="dialog"]:visible').first
+        if dialog.count() == 0:
+            return None
+        try:
+            message = self._redact_text(dialog.inner_text(timeout=2000))
+        except Exception:
+            message = "[unavailable]"
+        return " ".join(message.split())[:300]
+
+    def _click_or_explain_blocking_dialog(self, locator: Locator, *, action: str) -> None:
+        """Keep a failed UI action visible while surfacing the modal that blocked it."""
+        try:
+            locator.click(timeout=10000)
+        except PlaywrightTimeoutError as error:
+            dialog = self._blocking_dialog_summary()
+            if dialog is not None:
+                raise RuntimeError(f"{action}被系统提示弹窗阻断: {dialog}") from error
+            raise
+
     @allure.step("Navigate to URL")
     def navigate_to(self, url: str) -> None:
         raw_url = str(url or "").strip()

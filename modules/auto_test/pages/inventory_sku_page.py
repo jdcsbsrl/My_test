@@ -1,6 +1,8 @@
 import os
 import re
 import time
+from typing import Any
+from urllib.parse import urlsplit
 
 import allure
 from playwright.sync_api import Page
@@ -75,8 +77,36 @@ class InventorySKUPage(BasePage):
         search_btn = self.page.locator('button:visible:has-text("搜索")')
         if search_btn.count() == 0:
             raise ValueError("未找到可见的搜索按钮")
-        search_btn.first.click(timeout=10000)
-        self.wait_for_search_results()
+        requests: dict[int, dict[str, str | int]] = {}
+
+        def on_request(request: Any) -> None:
+            path = urlsplit(request.url).path
+            if request.resource_type in {"xhr", "fetch"} and "/inventory/" in path.lower():
+                requests[id(request)] = {"path": self._redact_text(path), "status": "pending"}
+
+        def on_response(response: Any) -> None:
+            entry = requests.get(id(response.request))
+            if entry is not None:
+                entry["status"] = response.status
+
+        def on_request_failed(request: Any) -> None:
+            entry = requests.get(id(request))
+            if entry is not None:
+                entry["status"] = "failed"
+
+        self.page.on("request", on_request)
+        self.page.on("response", on_response)
+        self.page.on("requestfailed", on_request_failed)
+        try:
+            self._click_or_explain_blocking_dialog(search_btn.first, action="库存SKU搜索")
+            self.wait_for_search_results()
+        except Exception:
+            logger.error("库存SKU搜索网络状态: {}", list(requests.values())[-10:])
+            raise
+        finally:
+            self.page.remove_listener("request", on_request)
+            self.page.remove_listener("response", on_response)
+            self.page.remove_listener("requestfailed", on_request_failed)
         elapsed = time.time() - start_time
         logger.info(f"搜索响应时间: {elapsed:.2f}秒")
         return elapsed
@@ -95,16 +125,14 @@ class InventorySKUPage(BasePage):
             '.el-button:has-text("清空")',
         ]
         for selector in reset_selectors:
-            try:
-                reset_btn = self.page.locator(selector)
-                if reset_btn.count() > 0:
-                    reset_btn.click()
-                    self._wait_for_loading_finished()
-                    logger.info(f"已重置搜索条件: {selector}")
-                    return
-            except Exception:
+            reset_btn = self.page.locator(f"{selector}:visible").first
+            if reset_btn.count() == 0:
                 continue
-        logger.warning("未找到重置按钮")
+            self._click_or_explain_blocking_dialog(reset_btn, action="库存SKU重置")
+            self._wait_for_loading_finished(int(self.SEARCH_TIMEOUT_SECONDS * 1000))
+            logger.info(f"已重置搜索条件: {selector}")
+            return
+        raise ValueError("未找到可见的重置按钮")
 
     @allure.step("点击导出按钮")
     def click_export(self) -> None:
@@ -227,13 +255,26 @@ class InventorySKUPage(BasePage):
         return False
 
     def _wait_for_loading_finished(self, timeout: int = 30000) -> None:
-        """Wait for common table loading masks to disappear."""
-        try:
-            self.page.locator(".el-loading-mask:visible, .ant-spin-spinning:visible").first.wait_for(
-                state="hidden", timeout=timeout
-            )
-        except Exception:
-            pass
+        """Wait for both the table mask and the search action to become idle."""
+        self.page.wait_for_function(
+            """() => {
+                const visible = (node) => {
+                    const rect = node.getBoundingClientRect();
+                    const style = window.getComputedStyle(node);
+                    return rect.width > 0 && rect.height > 0
+                        && style.display !== 'none' && style.visibility !== 'hidden';
+                };
+                const maskBusy = Array.from(document.querySelectorAll(
+                    '.el-loading-mask, .ant-spin-spinning'
+                )).some(visible);
+                const searchBusy = Array.from(document.querySelectorAll('button'))
+                    .filter((node) => visible(node) && /搜索|查询/.test(node.textContent || ''))
+                    .some((node) => node.disabled || node.getAttribute('aria-disabled') === 'true'
+                        || node.classList.contains('is-loading'));
+                return !maskBusy && !searchBusy;
+            }""",
+            timeout=timeout,
+        )
 
     @allure.step("获取搜索结果列表")
     def get_search_results(self) -> list[dict]:
@@ -282,7 +323,10 @@ class InventorySKUPage(BasePage):
                 ".el-table__empty-block:visible, .ant-empty:visible, [class*='empty']:visible"
             ).first.wait_for(state="visible", timeout=timeout)
         except Exception as exc:
-            raise TimeoutError(f"库存SKU结果在 {timeout / 1000:.0f} 秒内未完成刷新") from exc
+            raise TimeoutError(
+                f"库存SKU结果在 {timeout / 1000:.0f} 秒内未完成刷新; "
+                f"blocking_dialog={self._blocking_dialog_summary()}"
+            ) from exc
 
     def _click_inventory_checkbox(self, kind: str, row_index: int | None = None) -> bool:
         """Click the real checkbox rendered by Element Plus/Ant/VXE tables."""
@@ -632,7 +676,7 @@ class InventorySKUPage(BasePage):
             .first
         )
         if page_button.count() > 0:
-            page_button.click(timeout=10000)
+            self._click_or_explain_blocking_dialog(page_button, action=f"库存SKU切换到第{page_num}页")
         else:
             page_input = self.page.locator(
                 ".el-pagination__jump input, .ant-pagination-options-quick-jumper input"
@@ -667,7 +711,7 @@ class InventorySKUPage(BasePage):
                 || node.classList.contains('disabled')""")
         if disabled:
             raise ValueError("Next page button is disabled")
-        next_btn.click(timeout=10000)
+        self._click_or_explain_blocking_dialog(next_btn, action="库存SKU下一页")
         self.page.wait_for_function(
             """previous => {
                 const active = document.querySelector(

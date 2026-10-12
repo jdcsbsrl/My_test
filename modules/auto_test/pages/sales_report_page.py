@@ -21,6 +21,7 @@ class SalesReportPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.last_search_payload: dict[str, Any] | None = None
+        self.last_search_http_status: int | None = None
         self.last_sort_payloads: list[dict[str, Any] | None] = []
 
     def _api_prefix(self) -> str:
@@ -112,6 +113,7 @@ class SalesReportPage(BasePage):
     @allure.step("Click sales report search")
     def search(self) -> None:
         captured_payload: dict[str, Any] | None = None
+        captured_status: int | None = None
 
         def on_request(request: Any) -> None:
             nonlocal captured_payload
@@ -123,12 +125,22 @@ class SalesReportPage(BasePage):
             except Exception:
                 captured_payload = {"raw": request.post_data or ""}
 
+        def on_response(response: Any) -> None:
+            nonlocal captured_status
+            if "salesproductreport/productsalesreport" in response.url.lower():
+                captured_status = response.status
+
         self.page.on("request", on_request)
-        self._click_visible_button("搜索")
-        self.wait_for_table_ready()
-        self.wait_for_loading_complete(timeout=30000)
-        self.page.remove_listener("request", on_request)
-        self.last_search_payload = captured_payload
+        self.page.on("response", on_response)
+        try:
+            self._click_visible_button("搜索")
+            self.wait_for_table_ready()
+            self.wait_for_loading_complete(timeout=30000)
+        finally:
+            self.page.remove_listener("request", on_request)
+            self.page.remove_listener("response", on_response)
+            self.last_search_payload = captured_payload
+            self.last_search_http_status = captured_status
 
     @allure.step("Click sales report reset")
     def reset(self) -> None:

@@ -123,7 +123,7 @@ class SKUSearchPage(BasePage):
             search_btn = self.page.get_by_role("button", name=button_name, exact=True)
             if search_btn.count() > 0 and search_btn.first.is_visible():
                 expect(search_btn.first).to_be_enabled(timeout=60000)
-                search_btn.first.click(timeout=10000)
+                self._click_or_explain_blocking_dialog(search_btn.first, action="SKU搜索")
                 self._wait_for_table_update()
                 elapsed = time.time() - start_time
                 logger.info(f"搜索响应时间: {elapsed:.2f}秒")
