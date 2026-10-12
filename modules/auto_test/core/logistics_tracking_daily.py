@@ -74,6 +74,10 @@ EVENT_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$")
 class TrackingBlockedError(RuntimeError):
     """The public page needs human attention or failed to return real data."""
 
+    def __init__(self, message: str, *, public_stage: str = "") -> None:
+        super().__init__(message)
+        self.public_stage = public_stage
+
 
 def carrier_family(channel: str) -> str:
     name = channel.strip()
@@ -297,46 +301,46 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
             launch_args["executable_path"] = browser_path
         browser = playwright.chromium.launch(**launch_args)
         try:
+            stage = "创建浏览器页面"
             page = browser.new_page(viewport={"width": 1920, "height": 1080})
+            stage = "加载17TRACK公开页面"
             page.goto(
                 TRACK_PAGE + "#nums=" + ",".join(numbers),
                 wait_until="domcontentloaded",
-                timeout=30000,
+                timeout=60000,
             )
-            entry = page.locator("textarea[placeholder^='Enter up to 40 numbers']")
-            entry.wait_for(state="visible", timeout=30000)
+            # The input has a stable element id; its placeholder may vary by locale.
+            entry = page.locator("textarea#auto-size-textarea, textarea[placeholder^='Enter up to 40 numbers']").first
+            stage = "等待输入框"
+            entry.wait_for(state="visible", timeout=45000)
+            stage = "等待真实单号填入"
             page.wait_for_function(
                 """number => [...document.querySelectorAll('textarea')].some(
                   x => x.value.includes(number))""",
                 arg=numbers[0],
-                timeout=30000,
+                timeout=45000,
             )
             # The page replaces its first rendered form while loading demo data.
             # Wait for the demo card so our input/click survives hydration.
-            page.get_by_text("TestNumber00017", exact=True).first.wait_for(timeout=30000)
+            stage = "等待页面初始化"
+            page.get_by_text("TestNumber00017", exact=True).first.wait_for(timeout=45000)
             page.wait_for_timeout(8000)
             tour = page.locator("#react-joyride-portal button:visible")
             if tour.count():
                 tour.first.click()
             entry.fill("\n".join(numbers))
-            page.locator("button[title*=TRACK]:visible").click(timeout=15000)
-            try:
-                page.wait_for_function(
-                    """nums => nums.every(n => [...document.querySelectorAll(
-                      'span.text-sm.font-medium.truncate')].some(x => x.textContent.trim() === n))""",
-                    arg=numbers,
-                    timeout=90000,
-                )
-            except PlaywrightTimeoutError as exc:
-                visible = page.locator("body").inner_text().casefold()
-                reason = (
-                    "验证码或访问限制"
-                    if any(term in visible for term in ("captcha", "verify you", "access denied", "unusual traffic"))
-                    else "未返回全部真实运单"
-                )
-                raise TrackingBlockedError(f"17TRACK {reason}; 已停止自动交互") from exc
+            stage = "提交公开查询"
+            page.locator("button[title*=TRACK]:visible").click(timeout=30000)
+            stage = "等待真实运单结果"
+            page.wait_for_function(
+                """nums => nums.every(n => [...document.querySelectorAll(
+                  'span.text-sm.font-medium.truncate')].some(x => x.textContent.trim() === n))""",
+                arg=numbers,
+                timeout=90000,
+            )
             checked_at = datetime.now(ZONE).strftime("%Y-%m-%d %H:%M:%S %z")
             for row in rows:
+                stage = "读取真实运单结果"
                 number = row["tracking_number"]
                 card = page.locator("span.text-sm.font-medium.truncate").filter(
                     has_text=re.compile(rf"^{re.escape(number)}$")
@@ -360,6 +364,15 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
                 row["track17_latest_time"] = latest_time
                 row["track17_checked_at"] = checked_at
                 row["notes"] = notes
+        except PlaywrightTimeoutError as exc:
+            visible = ""
+            try:
+                visible = page.locator("body").inner_text(timeout=3000).casefold()
+            except Exception:
+                pass
+            blocked = any(term in visible for term in ("captcha", "verify you", "access denied", "unusual traffic"))
+            public_stage = f"{stage}：验证码或访问限制" if blocked else f"{stage}超时"
+            raise TrackingBlockedError("17TRACK 未返回完整真实轨迹；已停止自动交互", public_stage=public_stage) from exc
         finally:
             browser.close()
 
