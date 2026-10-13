@@ -151,6 +151,8 @@ class SalesOrderFacade:
 
         if not self.select_export_template(template_name):
             logger.warning(f"未找到模板: {template_name}")
+            if not select_all_fields:
+                return {"success": False, "error": f"导出模板不可用: {template_name}"}
 
         if select_all_fields:
             self.export_page.select_all_fields()

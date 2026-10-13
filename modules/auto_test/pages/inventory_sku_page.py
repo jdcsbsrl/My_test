@@ -77,20 +77,20 @@ class InventorySKUPage(BasePage):
         search_btn = self.page.locator('button:visible:has-text("搜索")')
         if search_btn.count() == 0:
             raise ValueError("未找到可见的搜索按钮")
-        requests: dict[int, dict[str, str | int]] = {}
+        inventory_requests: dict[int, dict[str, str | int]] = {}
 
         def on_request(request: Any) -> None:
             path = urlsplit(request.url).path
             if request.resource_type in {"xhr", "fetch"} and "/inventory/" in path.lower():
-                requests[id(request)] = {"path": self._redact_text(path), "status": "pending"}
+                inventory_requests[id(request)] = {"path": self._redact_text(path), "status": "pending"}
 
         def on_response(response: Any) -> None:
-            entry = requests.get(id(response.request))
+            entry = inventory_requests.get(id(response.request))
             if entry is not None:
                 entry["status"] = response.status
 
         def on_request_failed(request: Any) -> None:
-            entry = requests.get(id(request))
+            entry = inventory_requests.get(id(request))
             if entry is not None:
                 entry["status"] = "failed"
 
@@ -101,7 +101,7 @@ class InventorySKUPage(BasePage):
             self._click_or_explain_blocking_dialog(search_btn.first, action="库存SKU搜索")
             self.wait_for_search_results()
         except Exception:
-            logger.error("库存SKU搜索网络状态: {}", list(requests.values())[-10:])
+            logger.error("库存SKU搜索网络状态: {}", list(inventory_requests.values())[-10:])
             raise
         finally:
             self.page.remove_listener("request", on_request)

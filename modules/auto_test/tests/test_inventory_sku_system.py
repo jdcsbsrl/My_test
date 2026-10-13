@@ -348,7 +348,6 @@ class TestInventorySKUExport:
         """测试不同分页数量的导出耗时"""
         for page_size in [20, 50]:
             with allure.step(f"分页{page_size}导出"):
-                facade.sku_page.click_reset()
                 facade.search_by_sku("YX-L")
                 result = facade.export_with_page_size(
                     page_size=page_size,

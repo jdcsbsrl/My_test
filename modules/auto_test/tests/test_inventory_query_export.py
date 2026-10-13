@@ -66,11 +66,10 @@ class TestInventoryQuery:
         """Test search with invalid SKU code (SQL injection, special chars)."""
         sku_page = InventorySKUPage(logged_in_page)
         sku_page.navigate_to_search_page()
-        sku_page.click_reset()
 
         invalid_inputs = ["'", '"', "OR 1=1", "<script>", "@#$%^&*"]
         for invalid_input in invalid_inputs:
-            sku_page.click_reset()
+            # Filling the SKU clears the prior value while preserving the page's default sales status.
             sku_page.fill_sku_code(invalid_input)
             response_time = sku_page.click_search()
             assert (

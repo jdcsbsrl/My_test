@@ -95,12 +95,15 @@ jobs:
       - name: Install dependencies
         run: pip install "bandit==1.7.8"
       - name: Bandit security scan
-        run: bandit -r modules/ -c .bandit -f json -o bandit-report.json --severity-level medium
+        run: |
+          mkdir -p .runtime/reports
+          bandit -r modules/ -c .bandit -f json -o .runtime/reports/bandit-report.json --severity-level medium
       - name: Upload security reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
-          path: bandit-report.json
+          path: .runtime/reports/bandit-report.json
 
   unit-tests:
     name: 单元测试
