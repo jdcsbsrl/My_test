@@ -82,7 +82,16 @@ class InventorySKUPage(BasePage):
         def on_request(request: Any) -> None:
             path = urlsplit(request.url).path
             if request.resource_type in {"xhr", "fetch"} and "/inventory/" in path.lower():
-                inventory_requests[id(request)] = {"path": self._redact_text(path), "status": "pending"}
+                entry: dict[str, str | int] = {
+                    "path": self._redact_text(path),
+                    "status": "pending",
+                }
+                headers = {name.lower(): value for name, value in request.headers.items()}
+                for name in ("tlogtraceid", "traceparent", "x-trace-id", "x-request-id"):
+                    if headers.get(name):
+                        entry["trace_id"] = self._redact_text(headers[name])[:100]
+                        break
+                inventory_requests[id(request)] = entry
 
         def on_response(response: Any) -> None:
             entry = inventory_requests.get(id(response.request))

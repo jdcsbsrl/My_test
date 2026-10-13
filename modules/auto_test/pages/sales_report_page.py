@@ -100,6 +100,14 @@ class SalesReportPage(BasePage):
                 })""")
         except Exception as evaluate_error:
             diagnostics["document"] = f"error:{type(evaluate_error).__name__}"
+        try:
+            alerts = self.page.locator('.el-message:visible, .el-notification:visible, [role="alert"]:visible')
+            diagnostics["alerts"] = [
+                self._redact_text(alerts.nth(index).inner_text(timeout=1000))[:160]
+                for index in range(min(alerts.count(), 3))
+            ]
+        except Exception as alert_error:
+            diagnostics["alerts"] = f"error:{type(alert_error).__name__}"
         return diagnostics
 
     def _wait_for_loading_finished(self, timeout: int = 30000) -> None:

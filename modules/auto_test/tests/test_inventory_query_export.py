@@ -170,6 +170,12 @@ class TestInventoryExport:
         sku_page.wait_for_search_results()
 
         count = sku_page.get_result_count()
+        if count == 0:
+            # A shared test environment can briefly show an empty table after
+            # a completed query. Retry once, then keep the data assertion.
+            logged_in_page.wait_for_timeout(1000)
+            response_time = sku_page.click_search()
+            count = sku_page.get_result_count()
         print(f"搜索结果数: {count}")
 
         body_text = logged_in_page.text_content("body")[:500]
@@ -204,6 +210,10 @@ class TestInventoryExport:
         sku_page.wait_for_search_results()
 
         count = sku_page.get_result_count()
+        if count == 0:
+            logged_in_page.wait_for_timeout(1000)
+            sku_page.click_search()
+            count = sku_page.get_result_count()
         assert count > 0, f"搜索结果数应为正数，实际为: {count}"
         print(f"\n✅ 搜索YX-L完成，结果数: {count}")
 
