@@ -370,7 +370,11 @@ jobs:
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Check sales order delivery status filters (group leader)
+        if: matrix.shard == 5 && success()
+        run: python -m modules.auto_test delivery-status-regression --env test --execute --page-size 500 --max-pages 100
       - name: Scan inventory UI test artifacts for secrets
+        id: scan_leader_artifacts
         if: always()
         run: |
           mkdir -p .runtime/reports
@@ -385,6 +389,13 @@ jobs:
         with:
           name: allure-results-leader-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+      - name: Upload delivery status regression report
+        if: always() && matrix.shard == 5 && steps.scan_leader_artifacts.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sales-order-delivery-status-leader
+          path: .runtime/reports/sales_order_delivery_status/*.json
           if-no-files-found: warn
   report:
     name: 生成测试报告

@@ -289,3 +289,19 @@ python -m modules.auto_test sort-audit --env test --execute --page-size 250 --ma
 ```
 
 审计只读订单列表、订单明细及字段映射接口，不创建或修改订单。报告写入 `.runtime/reports/sales_order_sort/`，包含 JSON 和 Markdown。PASS 表示排序依据可验证且样本符合规则；WARNING 表示样本或排序依据不足，不能据此判为缺陷，WARNING 不阻断（审计器退出码 0）；确认失败返回退出码 1；FAIL 仅表示依据明确且存在可复现逆序或空值未置后的情况。数据库 `en_US.utf8` 文本 collation 尚未在审计器中复刻时，店铺名、物流渠道名和物流单号的字符串单调性记为 WARNING，不按 Python Unicode 码点序判缺陷，但空值位置仍可独立验证。模块命令和离线单元测试已具备；真实 TEST ERP 排序审计的 CI 任务尚未接入，需确认报告流转目标后再添加独立的非阻断任务。
+
+## 销售订单交货状态筛选回归（auto_test 模块）
+
+需求 1003062 的只读筛选检查由 `modules/auto_test/core/sales_order_delivery_status_regression.py` 实现，离线单元测试保留在 `tests/unit/`。默认只预览 test 环境、四种状态和分页参数：
+
+```powershell
+python -m modules.auto_test delivery-status-regression --env test
+```
+
+获得测试执行授权并确认环境后，显式添加 `--execute` 才会向 test/uat 的销售订单列表接口发送查询请求。可用 `--flags`、`--page-size` 和 `--max-pages` 限定检查范围：
+
+```powershell
+python -m modules.auto_test delivery-status-regression --env test --execute --flags 0,10,30,20 --page-size 500 --max-pages 100
+```
+
+每种状态分别检查返回行的 `deliveryStatus`，重点验证搜索结果与请求状态精确匹配。分页结果按 `orderNo` 检查重复；多页结果缺少订单编号或出现重复时，不得判为完整通过。`交运中` 是中间状态，完整查询返回空结果记为 `EMPTY_OK`，整体可以通过；这不表示有订单行可供状态核对。未交运、交运成功、交运失败的空结果仍记为 `NO_SAMPLE`，需要样本才能确认筛选精度。分页上限不足记为 `PARTIAL`，接口或响应无法验证时记为 `BLOCKED`。报告写入 `.runtime/reports/sales_order_delivery_status/` 的 JSON 文件。正常状态的结果通过，且交运中为 `PASS` 或 `EMPTY_OK` 时返回码 0；确认失败返回码 1，验证不完整返回码 2。CI 在组长账号测试通道运行真实 TEST 环境回归，离线单元测试继续由 `tests/unit/` 执行。
