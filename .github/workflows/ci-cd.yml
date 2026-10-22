@@ -95,12 +95,15 @@ jobs:
       - name: Install dependencies
         run: pip install "bandit==1.7.8"
       - name: Bandit security scan
-        run: bandit -r modules/ -c .bandit -f json -o bandit-report.json --severity-level medium
+        run: |
+          mkdir -p .runtime/reports
+          bandit -r modules/ -c .bandit -f json -o .runtime/reports/bandit-report.json --severity-level medium
       - name: Upload security reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: security-reports
-          path: bandit-report.json
+          path: .runtime/reports/bandit-report.json
 
   unit-tests:
     name: 单元测试
@@ -137,7 +140,7 @@ jobs:
           # Unit coverage is measured on unit-testable layers. Browser page
           # objects are covered by the UI matrix below and are intentionally
           # not mixed into this gate.
-          pytest tests/unit/ -v --tb=short -n auto \
+          pytest tests/unit/ modules/auto_test/tests/test_sales_order_sort_audit.py -v --tb=short -n auto \
             --alluredir .runtime/reports/allure-results \
             --cov=modules/auto_test/core \
             --cov=modules/auto_test/api \
@@ -367,7 +370,11 @@ jobs:
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Check sales order delivery status filters (group leader)
+        if: matrix.shard == 5 && success()
+        run: python -m modules.auto_test delivery-status-regression --env test --execute --page-size 500 --max-pages 100
       - name: Scan inventory UI test artifacts for secrets
+        id: scan_leader_artifacts
         if: always()
         run: |
           mkdir -p .runtime/reports
@@ -382,6 +389,13 @@ jobs:
         with:
           name: allure-results-leader-shard-${{ matrix.shard }}
           path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+      - name: Upload delivery status regression report
+        if: always() && matrix.shard == 5 && steps.scan_leader_artifacts.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sales-order-delivery-status-leader
+          path: .runtime/reports/sales_order_delivery_status/*.json
           if-no-files-found: warn
   report:
     name: 生成测试报告

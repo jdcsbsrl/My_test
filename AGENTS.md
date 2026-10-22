@@ -81,6 +81,7 @@
 ### 自动化测试与报告
 
 - [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)：执行流程和数据生命周期。
+- [__main__.py](modules/auto_test/__main__.py)：auto_test 模块原生排序审计入口；排序逻辑、测试和报告由模块维护。
 - [run_regression.py](tools/run_regression.py)：回归测试入口。
 - [report_generator.py](tools/report_generator.py)：`TestReportGenerator`，使用 `--help` 查看参数。
 - [runtime_paths.py](modules/trae_test/utils/runtime_paths.py)：统一运行时路径 API。

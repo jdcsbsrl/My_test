@@ -90,6 +90,7 @@ def test_agents_md_keeps_required_harness_engineer_contract_entries():
         "modules/trae_test/utils/index_builder_v3.py",
         "docs/AUTO_TEST_WORKFLOW.md",
         "tools/run_regression.py",
+        "modules/auto_test/__main__.py",
         "TestReportGenerator",
         "知识库 API 版本",
         "必须通过 `KnowledgeRetriever` API",

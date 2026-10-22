@@ -16,6 +16,7 @@ from modules.auto_test.api.report_sync_query_api import (
 
 _TIME_FIELDS = ("sendDate", "platformShipTime", "storeDate")
 _TRANSSTOCKUP_ALIASES = ("transstockupTime", "transStockupTime")
+_TRANSFER_FIELDS = ("logisticsTransferNo", "logisticsTransferLink")
 _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
@@ -108,6 +109,15 @@ def _assert_new_time_field_contract(orders: list[dict]) -> None:
     print(f"[report_sync][new_time_fields] rows={len(orders)} non_empty={non_empty}")
 
 
+def _assert_transfer_field_contract(orders: list[dict]) -> None:
+    """Both transfer keys must exist; null and empty string values are allowed."""
+    for index, row in enumerate(orders, start=1):
+        for field in _TRANSFER_FIELDS:
+            assert field in row, f"row {index} missing required field {field}"
+            value = row[field]
+            assert value is None or isinstance(value, str), f"row {index} field {field} has invalid type"
+
+
 @pytest.mark.regression
 @pytest.mark.api
 @pytest.mark.p1
@@ -120,6 +130,7 @@ def test_report_sync_query_full_regression(authenticated_http_client, api_base_u
     assert ids == sorted(ids), "order ids are not ascending"
     assert all(row.get("orderNo") for row in orders)
     _assert_new_time_field_contract(orders)
+    _assert_transfer_field_contract(orders)
 
     sample = next((row for row in orders if row.get("customerNo")), orders[0])
     checks = {
@@ -145,6 +156,7 @@ def test_report_sync_query_full_regression(authenticated_http_client, api_base_u
 
     no_items, _ = api.query_page({"updateAfter": _update_after(15), "pageSize": 100, "includeItems": False})
     assert all(row.get("salesOrderItemVoList") in (None, []) or "salesOrderItemVoList" not in row for row in no_items)
+    _assert_transfer_field_contract(no_items)
 
     empty, envelope = api.query_page({"updateAfter": "2099-01-01 00:00:00", "pageSize": 100, "includeItems": True})
     assert empty == []

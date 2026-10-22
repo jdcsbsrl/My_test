@@ -349,7 +349,7 @@ def test_linked_stock_skus_match_inventory_master_fields(
         actual_state = str(online_row.get("stockState"))
         assert actual_state in STOCK_STATES, f"stockSku={stock_sku} 返回非法 stockState={actual_state!r}"
         stock_state_counts[actual_state] = stock_state_counts.get(actual_state, 0) + 1
-        if stock_sku in COMBINATION_ITEM_IDS:
+        if stock_sku.startswith("Merge"):
             if stock_sku not in combination_cache:
                 group_body = sku_group_api.list_page(stock_sku)
                 sku_group_api.assert_success(group_body)

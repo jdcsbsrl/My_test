@@ -7,6 +7,7 @@ from modules.auto_test.facades.api.auth_facade import AuthFacade as ApiAuthFacad
 from modules.auto_test.facades.api.sales_order_facade import SalesOrderFacade as ApiSalesOrderFacade
 from modules.auto_test.facades.inventory_sku_facade import InventorySKUFacade
 from modules.auto_test.facades.sales_order_facade import SalesOrderFacade as UiSalesOrderFacade
+from modules.auto_test.pages.sales_order_export_page import EXPORT_TEMPLATE
 
 pytestmark = pytest.mark.unit
 
@@ -468,6 +469,24 @@ def test_ui_sales_order_facade_export_selected_selects_all_fields(monkeypatch, t
     assert result["select_all_fields"] is True
     export_page.select_all_fields.assert_called_once_with()
     export_page.select_fields.assert_not_called()
+
+
+def test_ui_sales_order_facade_export_selected_stops_when_required_template_missing(monkeypatch, tmp_path):
+    export_page = MagicMock()
+    export_page.wait_for_export_page.return_value = True
+    export_page.select_export_template.return_value = False
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderPage", MagicMock(return_value=MagicMock())
+    )
+    monkeypatch.setattr(
+        "modules.auto_test.facades.sales_order_facade.SalesOrderExportPage", MagicMock(return_value=export_page)
+    )
+
+    result = UiSalesOrderFacade(MagicMock()).export_selected(select_all_fields=False, download_dir=str(tmp_path))
+
+    assert result == {"success": False, "error": f"导出模板不可用: {EXPORT_TEMPLATE}"}
+    export_page.select_all_fields.assert_not_called()
+    export_page.download_to.assert_not_called()
 
 
 def test_inventory_sku_facade_export_current_search_success_with_selected_fields(monkeypatch, tmp_path):

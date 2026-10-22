@@ -307,7 +307,17 @@ def sales_report(logged_in_page: Page) -> SalesReportPage:
     page.navigate_to_report()
     if page.row_count() == 0:
         page.search()
-    assert page.row_count() > 0, "Sales report should load default rows"
+    if page.row_count() == 0 and page.last_search_http_status == 200:
+        # A successful HTTP response can precede a transient empty report in
+        # the shared test environment. Retry once; persistent empty data fails.
+        logged_in_page.wait_for_timeout(1500)
+        page.search()
+    assert page.row_count() > 0, (
+        "Sales report should load default rows; "
+        f"search_http_status={page.last_search_http_status}; "
+        f"page_diagnostics={page._table_wait_diagnostics()}; "
+        f"blocking_dialog={page._blocking_dialog_summary()}"
+    )
     return page
 
 

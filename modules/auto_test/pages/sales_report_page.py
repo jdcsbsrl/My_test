@@ -21,6 +21,7 @@ class SalesReportPage(BasePage):
     def __init__(self, page: Page) -> None:
         super().__init__(page)
         self.last_search_payload: dict[str, Any] | None = None
+        self.last_search_http_status: int | None = None
         self.last_sort_payloads: list[dict[str, Any] | None] = []
 
     def _api_prefix(self) -> str:
@@ -99,6 +100,14 @@ class SalesReportPage(BasePage):
                 })""")
         except Exception as evaluate_error:
             diagnostics["document"] = f"error:{type(evaluate_error).__name__}"
+        try:
+            alerts = self.page.locator('.el-message:visible, .el-notification:visible, [role="alert"]:visible')
+            diagnostics["alerts"] = [
+                self._redact_text(alerts.nth(index).inner_text(timeout=1000))[:160]
+                for index in range(min(alerts.count(), 3))
+            ]
+        except Exception as alert_error:
+            diagnostics["alerts"] = f"error:{type(alert_error).__name__}"
         return diagnostics
 
     def _wait_for_loading_finished(self, timeout: int = 30000) -> None:
@@ -112,6 +121,7 @@ class SalesReportPage(BasePage):
     @allure.step("Click sales report search")
     def search(self) -> None:
         captured_payload: dict[str, Any] | None = None
+        captured_status: int | None = None
 
         def on_request(request: Any) -> None:
             nonlocal captured_payload
@@ -123,12 +133,22 @@ class SalesReportPage(BasePage):
             except Exception:
                 captured_payload = {"raw": request.post_data or ""}
 
+        def on_response(response: Any) -> None:
+            nonlocal captured_status
+            if "salesproductreport/productsalesreport" in response.url.lower():
+                captured_status = response.status
+
         self.page.on("request", on_request)
-        self._click_visible_button("搜索")
-        self.wait_for_table_ready()
-        self.wait_for_loading_complete(timeout=30000)
-        self.page.remove_listener("request", on_request)
-        self.last_search_payload = captured_payload
+        self.page.on("response", on_response)
+        try:
+            self._click_visible_button("搜索")
+            self.wait_for_table_ready()
+            self.wait_for_loading_complete(timeout=30000)
+        finally:
+            self.page.remove_listener("request", on_request)
+            self.page.remove_listener("response", on_response)
+            self.last_search_payload = captured_payload
+            self.last_search_http_status = captured_status
 
     @allure.step("Click sales report reset")
     def reset(self) -> None:

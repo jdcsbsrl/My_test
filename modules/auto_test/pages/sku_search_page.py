@@ -2,7 +2,7 @@ import time
 import unicodedata
 
 import allure
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, expect
 
 from modules.auto_test.core.logger import get_logger
 from modules.auto_test.pages.base_page import BasePage
@@ -123,7 +123,7 @@ class SKUSearchPage(BasePage):
             search_btn = self.page.get_by_role("button", name=button_name, exact=True)
             if search_btn.count() > 0 and search_btn.first.is_visible():
                 expect(search_btn.first).to_be_enabled(timeout=60000)
-                search_btn.first.click(timeout=10000)
+                self._click_or_explain_blocking_dialog(search_btn.first, action="SKU搜索")
                 self._wait_for_table_update()
                 elapsed = time.time() - start_time
                 logger.info(f"搜索响应时间: {elapsed:.2f}秒")
@@ -334,14 +334,19 @@ class SKUSearchPage(BasePage):
         excluded = {self._normalize_dropdown_option(option) for option in excluded_options}
         options = []
         for attempt in range(3):
+            options = []
             if not self._open_dropdown_by_placeholder(placeholder):
-                options = []
+                logger.warning("Dropdown {} did not open on attempt {}", placeholder, attempt + 1)
             else:
                 try:
                     self._wait_for_visible_dropdown_options()
                     options = self._get_visible_dropdown_options()
-                finally:
-                    pass
+                except PlaywrightTimeoutError:
+                    logger.warning(
+                        "Dropdown {} has no visible options after attempt {}",
+                        placeholder,
+                        attempt + 1,
+                    )
 
             for option in options:
                 normalized_option = self._normalize_dropdown_option(option)
@@ -357,7 +362,8 @@ class SKUSearchPage(BasePage):
                 options,
             )
             self.page.keyboard.press("Escape")
-            self.wait_for_poll_interval(1000)
+            if attempt < 2:
+                self.wait_for_poll_interval(1000)
 
         raise ValueError(
             f"Dropdown {placeholder} has no usable option outside {excluded_options}. Visible options: {options}"

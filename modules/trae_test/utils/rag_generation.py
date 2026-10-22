@@ -212,6 +212,16 @@ class SelfHostedLLMRAGCaseGenerator:
         retrieved = self.retriever.retrieve(query, mode="hybrid")
         context = context_to_text(retrieved if isinstance(retrieved, list) else [], limit=5)
         prompt = self._build_prompt(query, context)
+        return self._parse_case(self._request(prompt))
+
+    def generate_cases(self, query: str) -> list[dict[str, Any]]:
+        """Generate separate cases for the supported, independently testable scenarios."""
+        retrieved = self.retriever.retrieve(query, mode="hybrid")
+        context = context_to_text(retrieved if isinstance(retrieved, list) else [], limit=5)
+        prompt = self._build_batch_prompt(query, context)
+        return self._parse_cases(self._request(prompt))
+
+    def _request(self, prompt: str) -> str:
         payload = json.dumps(self._build_payload(prompt), ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             self.endpoint,
@@ -225,7 +235,7 @@ class SelfHostedLLMRAGCaseGenerator:
                 raw = response.read().decode("utf-8")
         except urllib.error.URLError as exc:
             raise RuntimeError(f"self-hosted LLM request failed: {exc}") from exc
-        return self._parse_case(raw)
+        return raw
 
     def _build_payload(self, prompt: str) -> dict[str, Any]:
         if self.api_style == LLMAPIStyle.OLLAMA:
@@ -255,6 +265,23 @@ class SelfHostedLLMRAGCaseGenerator:
             "知识库关联填写实际采用的规则依据，不要仅重复需求标题。\n"
         )
 
+    def _build_batch_prompt(self, query: str, context: str) -> str:
+        fields = "、".join(ALL_FIELDS)
+        return (
+            "你是ERP测试用例生成器。只返回JSON数组，不要Markdown。\n"
+            f"数组中的每项必须包含且仅包含以下15个字段：{fields}。\n"
+            f"创建人必须填写：{self.creator}；优先级必须是P0/P1/P2；用例等级必须是高/中/低。\n"
+            f"测试需求：{query}\n"
+            f"RAG知识上下文：{context}\n"
+            "按需求和知识上下文中明确支持的、可独立执行和验证的场景拆分用例；不同主要场景不得合并到同一条用例。\n"
+            "覆盖适用的正常、异常、边界和回滚场景，但只有在需求或知识明确支持时才生成；不要重复拆分同一场景。\n"
+            "不得补造规则、数值、测试数据或页面对象；遇到会影响预期结果的歧义时不要自行选择解释。\n"
+            "固定字段由程序填入，不要改变固定模板；用例目录必须使用依据中的真实三级导航。\n"
+            "每条用例前置条件至少两个分点，步骤至少三个分点，预期至少两个可观察分点。\n"
+            "只生成有依据的用例；如果依据只支持一个独立场景才返回一条，禁止为了数量凑数。\n"
+            "知识库关联填写每条用例实际采用的规则依据，不要仅重复需求标题。\n"
+        )
+
     def _parse_case(self, raw: str) -> dict[str, Any]:
         data = json.loads(raw)
         data = self._extract_case_payload(data)
@@ -268,6 +295,32 @@ class SelfHostedLLMRAGCaseGenerator:
         # 模型返回值也必须被固定字段处理覆盖，避免候选内容改变创建人。
         data["创建人"] = FIXED_CASE_CREATOR
         return {field: data.get(field, "") for field in ALL_FIELDS}
+
+    def _parse_cases(self, raw: str) -> list[dict[str, Any]]:
+        data = json.loads(raw)
+        data = self._extract_case_payload(data)
+        if isinstance(data, str):
+            data = json.loads(self._strip_json_fence(data))
+            data = self._extract_case_payload(data)
+        if isinstance(data, dict) and "cases" in data:
+            if not isinstance(data["cases"], list):
+                raise ValueError("LLM response 'cases' must be an array")
+            data = data["cases"]
+        elif isinstance(data, dict) and isinstance(data.get("case"), dict):
+            data = [data["case"]]
+        elif isinstance(data, dict):
+            # Backward compatibility with providers that still return one object.
+            data = [data]
+        if not isinstance(data, list) or not data:
+            raise ValueError("LLM response must contain a non-empty array of cases")
+        cases = []
+        for index, item in enumerate(data, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"LLM response item {index} must be a case object")
+            # Model output cannot choose the configured creator or add template fields.
+            item["创建人"] = FIXED_CASE_CREATOR
+            cases.append({field: item.get(field, "") for field in ALL_FIELDS})
+        return cases
 
     @staticmethod
     def _extract_case_payload(data: Any) -> Any:
