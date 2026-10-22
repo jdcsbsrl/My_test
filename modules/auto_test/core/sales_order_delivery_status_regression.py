@@ -13,7 +13,6 @@ from urllib.parse import quote
 from modules.auto_test.core.regression_session import regression_session
 from modules.trae_test.utils.runtime_paths import runtime_dir
 
-
 ORDER_LIST_PATH = "/oms-admin/sales/order/batchListNew"
 STATUS_FLAGS = (
     ("未交运", "0"),
