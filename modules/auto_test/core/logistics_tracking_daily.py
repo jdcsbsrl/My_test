@@ -69,6 +69,14 @@ FAMILIES = (
     "4PX",
 )
 EVENT_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$")
+TRACK_BUTTON = "button[title*='TRACK']:visible"
+BLOCK_MARKERS = (
+    "security verification",
+    "captcha",
+    "verify you",
+    "access denied",
+    "unusual traffic",
+)
 
 
 class TrackingBlockedError(RuntimeError):
@@ -77,6 +85,20 @@ class TrackingBlockedError(RuntimeError):
     def __init__(self, message: str, *, public_stage: str = "") -> None:
         super().__init__(message)
         self.public_stage = public_stage
+
+
+def _has_access_challenge(visible_text: str) -> bool:
+    """Identify public-page verification before interacting with a challenge."""
+    normalized = visible_text.casefold()
+    return any(marker in normalized for marker in BLOCK_MARKERS)
+
+
+def _stop_if_access_challenge(page: object, stage: str) -> None:
+    if _has_access_challenge(page.locator("body").inner_text(timeout=3000)):
+        raise TrackingBlockedError(
+            "17TRACK requires manual verification; automatic interaction stopped",
+            public_stage=f"{stage}：验证码或访问限制",
+        )
 
 
 def carrier_family(channel: str) -> str:
@@ -313,6 +335,7 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
             entry = page.locator("textarea#auto-size-textarea, textarea[placeholder^='Enter up to 40 numbers']").first
             stage = "等待输入框"
             entry.wait_for(state="visible", timeout=45000)
+            _stop_if_access_challenge(page, stage)
             stage = "等待真实单号填入"
             page.wait_for_function(
                 """number => [...document.querySelectorAll('textarea')].some(
@@ -320,24 +343,30 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
                 arg=numbers[0],
                 timeout=45000,
             )
-            # The page replaces its first rendered form while loading demo data.
-            # Wait for the demo card so our input/click survives hydration.
             stage = "等待页面初始化"
-            page.get_by_text("TestNumber00017", exact=True).first.wait_for(timeout=45000)
-            page.wait_for_timeout(8000)
+            button = page.locator(TRACK_BUTTON).first
+            button.wait_for(state="visible", timeout=45000)
+            _stop_if_access_challenge(page, stage)
             tour = page.locator("#react-joyride-portal button:visible")
             if tour.count():
                 tour.first.click()
             entry.fill("\n".join(numbers))
+            _stop_if_access_challenge(page, stage)
             stage = "提交公开查询"
-            page.locator("button[title*=TRACK]:visible").click(timeout=30000)
+            button.click(timeout=30000)
             stage = "等待真实运单结果"
             page.wait_for_function(
-                """nums => nums.every(n => [...document.querySelectorAll(
-                  'span.text-sm.font-medium.truncate')].some(x => x.textContent.trim() === n))""",
+                """nums => {
+                  const text = document.body?.innerText?.toLowerCase() || '';
+                  if (['security verification', 'captcha', 'verify you',
+                       'access denied', 'unusual traffic'].some(x => text.includes(x))) return true;
+                  return nums.every(n => [...document.querySelectorAll(
+                    'span.text-sm.font-medium.truncate')].some(x => x.textContent.trim() === n));
+                }""",
                 arg=numbers,
                 timeout=90000,
             )
+            _stop_if_access_challenge(page, stage)
             checked_at = datetime.now(ZONE).strftime("%Y-%m-%d %H:%M:%S %z")
             for row in rows:
                 stage = "读取真实运单结果"
@@ -370,7 +399,7 @@ def track_public(rows: list[dict[str, str]], *, browser_path: str | None = None)
                 visible = page.locator("body").inner_text(timeout=3000).casefold()
             except Exception:
                 pass
-            blocked = any(term in visible for term in ("captcha", "verify you", "access denied", "unusual traffic"))
+            blocked = _has_access_challenge(visible)
             public_stage = f"{stage}：验证码或访问限制" if blocked else f"{stage}超时"
             raise TrackingBlockedError("17TRACK 未返回完整真实轨迹；已停止自动交互", public_stage=public_stage) from exc
         finally:

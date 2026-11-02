@@ -202,6 +202,14 @@ class InventorySKUPage(BasePage):
         page_urls = [pg.url for pg in self.page.context.pages]
         raise TimeoutError(f"Inventory export page did not open. current={self.page.url}, pages={page_urls}")
 
+    def open_list_export_task_dialog(self):
+        """Open the export task dialog from the inventory list."""
+        self.click_export()
+        self.page.get_by_text("创建导出任务", exact=True).click()
+        dialog = self.page.locator(".el-dialog:visible")
+        dialog.wait_for(state="visible", timeout=30000)
+        return dialog
+
     def select_export_selected(self) -> None:
         self.click_export()
         self.wait_for_page_settle(timeout=30000)

@@ -12,6 +12,11 @@ authority: 专项规范
 
 `auto_test` 是自动化测试执行模块，负责配置测试环境、执行测试脚本、收集测试结果并生成可视化报告。
 
+### 页面知识入口
+
+- 客户报价明细的页面结构、赠品重复规则、新增/编辑及其 2.0 版本、复制和导入探索记录见 [CUSTOMER_QUOTATION_ITEM_AUTOTEST.md](CUSTOMER_QUOTATION_ITEM_AUTOTEST.md)。该文档标注了已观察结果、未确认的产品语义和未来回归门槛。
+- 当前代码入口 `modules/auto_test/pages/customer_quotation_item_page.py` 提供目标页身份校验、只读观察和 `explored_flows()` 流程契约；写操作回归尚未启用。未来添加用例前应先读上述文档，并遵循本流程的数据生命周期和执行授权规则。
+
 ## 工作流程
 
 ### 流程架构
@@ -305,3 +310,15 @@ python -m modules.auto_test delivery-status-regression --env test --execute --fl
 ```
 
 每种状态分别检查返回行的 `deliveryStatus`，重点验证搜索结果与请求状态精确匹配。分页结果按 `orderNo` 检查重复；多页结果缺少订单编号或出现重复时，不得判为完整通过。`交运中` 是中间状态，完整查询返回空结果记为 `EMPTY_OK`，整体可以通过；这不表示有订单行可供状态核对。未交运、交运成功、交运失败的空结果仍记为 `NO_SAMPLE`，需要样本才能确认筛选精度。分页上限不足记为 `PARTIAL`，接口或响应无法验证时记为 `BLOCKED`。报告写入 `.runtime/reports/sales_order_delivery_status/` 的 JSON 文件。正常状态的结果通过，且交运中为 `PASS` 或 `EMPTY_OK` 时返回码 0；确认失败返回码 1，验证不完整返回码 2。CI 在组长账号测试通道运行真实 TEST 环境回归，离线单元测试继续由 `tests/unit/` 执行。
+
+## 需求 1003531 库存 SKU 与销售订单导出回归
+
+`modules/auto_test/tests/test_export_requirement_1003531.py` 同时支持 test 和 uat 配置。管理员 CI 分片只在 test 环境执行 `-m "not slow"`，覆盖库存 SKU 超 5000 条分页实时导出、固定底部按钮，以及库存 SKU 和销售订单从列表直接传查询条件创建导出任务。CI 创建的任务使用 `CI_R1003531_` 前缀，便于在共享任务列表识别来源。
+
+TEST 环境的导出任务定时器不是持续运行，依赖后台任务完成和文件下载的库存全分页对账、销售订单实时文件与异步文件对账统一标记为 `slow`，不进入普通 CI，也不影响合并门禁。人工开启定时器后执行：
+
+```powershell
+pytest modules/auto_test/tests/test_export_requirement_1003531.py -m slow --env test
+```
+
+如后台任务需要更长时间，可通过 `EXPORT_TASK_TIMEOUT_MS` 调整等待上限。UAT 仅保留配置能力，不配置 CI 执行入口。

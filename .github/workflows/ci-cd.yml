@@ -249,6 +249,10 @@ jobs:
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
           - shard: 12
             test_files: "modules/auto_test/tests/test_inventory_variant_stock_query.py modules/auto_test/tests/test_inventory_sku_and_group_query.py"
+          - shard: 13
+            test_files: "modules/auto_test/tests/test_sales_order_fixed_category_1003845.py"
+          - shard: 14
+            test_files: "modules/auto_test/tests/test_export_requirement_1003531.py -m 'not slow'"
       fail-fast: false
       # Each runner has an isolated browser; allow two administrator shards
       # while keeping the account lane bounded.
