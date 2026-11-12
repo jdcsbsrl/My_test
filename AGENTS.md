@@ -80,6 +80,7 @@
 
 ### 自动化测试与报告
 
+- UI 自动化优先复用项目框架，浏览器选择遵循用户明确要求；执行与登录排查按 [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) 进行。
 - [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)：执行流程和数据生命周期。
 - [__main__.py](modules/auto_test/__main__.py)：auto_test 模块原生排序审计入口；排序逻辑、测试和报告由模块维护。
 - [run_regression.py](tools/run_regression.py)：回归测试入口。

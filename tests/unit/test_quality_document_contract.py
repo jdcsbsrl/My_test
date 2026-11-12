@@ -23,7 +23,7 @@ def test_quality_gate_documents_use_85_and_reject_lower_scores():
 
 
 def test_quality_document_contract_requires_business_and_page_object_detail():
-    content = _read("PROJECT_ARTIFACT_PLACEMENT.md")
+    content = _read("TRAE_TEST_WORKFLOW.md")
 
     for fragment in (
         "业务知识和页面对象分点描述",
