@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 import json
+import os
+import re
 import time
 import uuid
 
@@ -364,6 +366,19 @@ def test_new_page_tabs_and_store_filter(logged_in_page, ui_base_url):
         assert field.count() == 1, tab
 
 
+def _dimension_filter_store_scope(role, resolve_store_ids):
+    """Procurement can filter warehouse/country without store permission."""
+    if str(role or "").strip().lower() == "procurement":
+        return []
+    return resolve_store_ids()
+
+
+@pytest.fixture
+def dimension_filter_store_ids(request):
+    role = os.getenv("SALES_VOLUME_ROLE", "admin")
+    return _dimension_filter_store_scope(role, lambda: request.getfixturevalue("sold_store_ids"))
+
+
 @pytest.fixture
 def sold_store_ids(report_query, report_window, authenticated_http_client, api_base_url):
     response = authenticated_http_client.post(
@@ -396,6 +411,118 @@ def sold_store_ids(report_query, report_window, authenticated_http_client, api_b
             break
     assert len(candidates) == 2, "Insufficient sold-store samples: multi-store check incomplete"
     return candidates
+
+
+def _normalize_store_name(value):
+    return re.sub(r"[\u200b-\u200d\ufeff\s]+", "", str(value or "")).casefold()
+
+
+def _visible_store_item_names(popover):
+    items = popover.locator(".store-item:visible")
+    names = []
+    for index in range(items.count()):
+        item = items.nth(index)
+        name = item.locator(".store-name").first
+        text = name.text_content() if name.count() else item.text_content()
+        if text:
+            names.append(text.strip())
+    return names
+
+
+def _store_picker_group_names(summary):
+    lines = [line.strip() for line in str(summary or "").splitlines() if line.strip()]
+    return [lines[index] for index in range(len(lines) - 1) if re.fullmatch(r"\(\d+\)", lines[index + 1])]
+
+
+def _set_store_picker_item(page, popover, search, store_name, selected):
+    expected_name = _normalize_store_name(store_name)
+    page.wait_for_function(
+        """
+        () => Array.from(document.querySelectorAll('.store-select-popover'))
+          .some(popover => /\\(\\s*\\d+\\s*\\)/.test(popover.innerText));
+        """,
+        timeout=10000,
+    )
+    group_names = _store_picker_group_names(popover.inner_text())
+    groups = group_names or [None]
+    found = False
+    for group_name in groups:
+        if group_name:
+            group = popover.get_by_text(group_name, exact=True).first
+            group.click(force=True)
+        search.fill(store_name)
+        try:
+            page.wait_for_function(
+                """
+                (expectedName) => {
+                  const normalize = value => (value || '')
+                    .replace(/[\\u200B-\\u200D\\uFEFF]/g, '')
+                    .replace(/\\s+/g, '').trim().toLocaleLowerCase();
+                  const visible = element => {
+                    const rect = element.getBoundingClientRect();
+                    const style = window.getComputedStyle(element);
+                    return rect.width > 0 && rect.height > 0
+                      && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
+                  const popover = Array.from(document.querySelectorAll('.store-select-popover'))
+                    .find(visible);
+                  if (!popover) return false;
+                  return Array.from(popover.querySelectorAll('.store-item'))
+                    .filter(visible)
+                    .some(
+                      item => normalize(item.querySelector('.store-name')?.textContent)
+                        === normalize(expectedName),
+                    );
+                }
+                """,
+                arg=store_name,
+                timeout=2500,
+            )
+            found = True
+            break
+        except Exception:
+            continue
+    if not found:
+        summary = popover.inner_text()[:500]
+        raise AssertionError(
+            f"店铺搜索结果未显示目标选项：name={store_name!r}; "
+            f"搜索分组={group_names!r}; 可见选项={_visible_store_item_names(popover)!r}; 下拉摘要={summary!r}"
+        )
+
+    items = popover.locator(".store-item:visible")
+    matches = []
+    for index in range(items.count()):
+        item = items.nth(index)
+        name = item.locator(".store-name").first
+        text = name.text_content() if name.count() else item.text_content()
+        if _normalize_store_name(text) == expected_name:
+            matches.append(item)
+    assert len(matches) == 1, {
+        "store": store_name,
+        "matchingOptions": len(matches),
+        "visibleOptions": _visible_store_item_names(popover),
+    }
+
+    item = matches[0]
+    checkbox = item.locator('input[type="checkbox"]').first
+    if checkbox.count():
+        if checkbox.is_checked() != selected:
+            visual_checkbox = item.locator(".el-checkbox__inner:visible").first
+            if visual_checkbox.count():
+                visual_checkbox.click(force=True)
+            else:
+                item.click(force=True)
+        assert checkbox.is_checked() is selected, {"store": store_name, "selected": selected}
+        return
+
+    aria_checkbox = item.locator('[role="checkbox"]').first
+    if aria_checkbox.count():
+        current = aria_checkbox.get_attribute("aria-checked") == "true"
+        if current != selected:
+            aria_checkbox.click(force=True)
+        return
+
+    item.click(force=True)
 
 
 def test_store_filter_must_not_increase_sales(report_query, report_window, sold_store_ids):
@@ -472,8 +599,7 @@ def test_ui_multistore_search_and_reset(
     search = popover.locator('input[placeholder*="店铺"]').first
     for store_id in sold_store_ids:
         name = names[store_id]
-        search.fill(name)
-        popover.get_by_text(name, exact=True).first.click(timeout=10000)
+        _set_store_picker_item(page, popover, search, name, selected=True)
     page.keyboard.press("Escape")
     pay = page.locator(".el-form-item:visible").filter(has_text="订单付款时间").first.locator("input")
     for index, value in enumerate(report_window):
@@ -499,9 +625,12 @@ def test_store_single_select_and_clear(logged_in_page, ui_base_url, authenticate
     stores = authenticated_http_client.post(
         api_base_url.rstrip("/") + "/oms-admin/base/store/queryPermissionStoreList", json={}, timeout=(10, 90)
     ).json()
-    names = {str(row["id"]): row["storeName"] for row in stores.get("data") or [] if row.get("storeName")}
-    assert names, "No permitted store for the single-select check"
-    target_id, target_name = next(iter(names.items()))
+    enabled_stores = [
+        row for row in stores.get("data") or [] if row.get("storeName") and str(row.get("storeStatus")) == "1"
+    ]
+    assert enabled_stores, "No enabled permitted store for the single-select check"
+    target_id = str(enabled_stores[0]["id"])
+    target_name = str(enabled_stores[0]["storeName"])
     page = logged_in_page
     page.goto(root + "/product/productReport/salesVolume", wait_until="domcontentloaded")
     page.get_by_text("SKU维度", exact=True).first.wait_for(state="visible", timeout=30000)
@@ -518,9 +647,8 @@ def test_store_single_select_and_clear(logged_in_page, ui_base_url, authenticate
 
     field.locator(".store-select-trigger").click()
     popover = page.locator(".store-select-popover:visible").first
-    popover.locator('input[placeholder*="店铺"]').first.fill(target_name)
-    page.wait_for_timeout(1500)
-    popover.get_by_text(target_name, exact=True).first.click()
+    search = popover.locator('input[placeholder*="店铺"]').first
+    _set_store_picker_item(page, popover, search, target_name, selected=True)
     page.keyboard.press("Escape")
     page.wait_for_timeout(400)
     assert search_store_ids() == [target_id], {"store": target_name}
@@ -530,9 +658,8 @@ def test_store_single_select_and_clear(logged_in_page, ui_base_url, authenticate
     popover.wait_for(state="visible", timeout=10000)
     page.wait_for_timeout(800)
     has_clear = "清除已选" in popover.inner_text()
-    popover.locator('input[placeholder*="店铺"]').first.fill(target_name)
-    page.wait_for_timeout(1500)
-    popover.get_by_text(target_name, exact=True).first.click()
+    search = popover.locator('input[placeholder*="店铺"]').first
+    _set_store_picker_item(page, popover, search, target_name, selected=False)
     page.keyboard.press("Escape")
     page.wait_for_timeout(400)
     assert search_store_ids() == [], {
@@ -597,13 +724,17 @@ def test_dimension_specific_filter(
     api_base_url,
     report_query,
     report_window,
-    sold_store_ids,
+    dimension_filter_store_ids,
     dimension,
     filter_key,
     detail_key,
     dict_path,
 ):
-    payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
+    payload = {
+        **build_filter(report_window, store_ids=dimension_filter_store_ids),
+        "pageNum": 1,
+        "pageSize": 500,
+    }
     listing = report_query(DIMENSIONS[dimension], payload)
     assert listing.get("code") == 200, listing
     rows = listing.get("rows") or []

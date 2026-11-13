@@ -4,7 +4,7 @@
 
 销售侧旧报表已合并到产品侧商品销量报表。旧页面对象和回归已退役；现有主回归为 `modules/auto_test/tests/test_sales_volume_regression.py`，角色回归为 `test_sales_volume_role_regression.py`，排序和导出顺序为 `test_sales_volume_sort_regression.py`。本地登记表中只读检索未发现旧脚本或旧名称的登记关联，历史测试产物保留。
 
-仅在获得授权的 test/uat 环境执行。管理员非 slow 回归（CI shard 10 用同一条命令）：
+仅在获得授权的 test/uat 环境执行。管理员非 slow 回归命令：
 
 ```powershell
 $env:AUTO_TEST_AUTHORIZED='true'
@@ -13,11 +13,11 @@ $env:SALES_VOLUME_ROLE='admin'
 pytest modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_role_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m 'not slow'
 ```
 
-管理员分片执行非 slow 和 slow 范围；另一个多角色 CI job 按顺序分别运行组长、业务员、业务助理和采购。`SALES_VOLUME_ROLE` 必须与当前账号真实角色一致，可选 `admin`、`manager`、`sales`、`assistant`、`procurement`。采购无店铺维度、店铺权限列表为空，不得将其按受店铺限制的销售角色断言。角色测试需分别用各账号执行；不要在代码或报告中保存凭据。
+CI 将商品销量报表分成两个并行泳道，最多同时运行 2 条：泳道 A 依次执行管理员、业务员；泳道 B 依次执行组长/业务经理、业务助理、采购。管理员从原销售 UI 分片 10 移出，并在泳道 A 执行完整非 slow 和 slow 回归。两条泳道超时为 120 分钟。每个角色切换后单独设置账号和 `SALES_VOLUME_ROLE`，每个 pytest 阶段使用不同的 `.runtime/cache/` 临时目录；一个阶段失败后继续执行同泳道的后续角色，最终汇总失败。角色可选 `admin`、`manager`、`sales`、`assistant`、`procurement`，必须与当前账号真实角色一致。采购无店铺维度、店铺权限列表为空；仓库和国家筛选使用不限制店铺的查询范围，店铺多选与多店异步导出不适用。不要在代码或报告中保存凭据。
 
-CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。四个角色按顺序运行，每次 pytest 使用独立临时目录和登录会话；缺少凭据或任何阶段失败时记录角色结果并继续其他角色，最后使 job 失败。该 job 可能与管理员和其他 CI job 并行。
+CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。各泳道保留每个角色、每个阶段的结果摘要和 Allure 结果；两个泳道可能与其他 CI job 并行。
 
-每次 CI 自动执行角色权限、适用的筛选及来源对账，以及慢速排序和导出：管理员运行主回归 slow；业务经理、业务员、业务助理运行多店异步导出与未授权店铺验证；采购运行采购与管理员数据对账及自身订单和库存接口核对。后台导出任务需要运行中的任务服务，会在共享环境创建并保留任务。各角色执行的筛选范围仍是当前脚本中明确列出的子集；样本、接口权限、未匹配库存或后台服务不足均不能视为通过。四角色输出统一 Allure artifact，步骤摘要和日志按角色及阶段记录结果。
+每次 CI 自动执行角色权限、适用的筛选及来源对账，以及慢速排序和导出：管理员运行完整主回归；业务经理、业务员、业务助理运行多店异步导出与未授权店铺验证；采购运行仓库/国家筛选、采购与管理员数据对账及自身订单和库存接口核对。后台导出任务需要运行中的任务服务，会在共享环境创建并保留任务。各角色执行的筛选范围仍是当前脚本中明确列出的子集；样本、接口权限、未匹配库存或后台服务不足均不能视为通过。两个泳道分别上传 Allure artifact，步骤摘要和日志按角色及阶段记录结果。
 
 异步导出和排序导出属 slow：
 
@@ -54,7 +54,7 @@ pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
 | SKU、主 SKU、品类、销售状态、短输入和空结果 | 主回归 |
 | SKU 创建时间筛选（`createTimeBegin`/`createTimeEnd`） | 主回归，取真实创建日期校验落在窗口内，并验证无数据窗口返回 0 |
 | 四维度店铺多选、查询请求及重置 | 主回归，两个有销量店铺 |
-| 店铺单选、单个店铺清除、`清除已选` 控件 | 主回归，UI 选中与取消都核对请求的 `storeIds` |
+| 店铺单选、单个店铺清除、`清除已选` 控件 | 主回归，只从启用店铺取样；UI 选中与取消都核对请求的 `storeIds` |
 | 默认供应商筛选（`supplierName`） | 主回归，按真实供应商片段过滤并核对每行命中，另验证无匹配返回 0 |
 | 自定义分类筛选（`customClassIds`） | 主回归，从报表数据取真实分类 ID；样本缺失时标记验证不完整并失败 |
 | 创建人下拉选项范围与顺序 | 主回归，下拉顺序必须与字典接口顺序一致，并验证停用用户开关存在且不改变首屏选项 |
@@ -66,6 +66,7 @@ pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
 | 类目汇总导出（不带 `includeSkuDetail`） | 主回归，单 sheet、行数与类目列表一致，销量/库存/订单数逐行相等 |
 | 店铺/仓库/国家明细导出排序 | 主回归，按当前排序列校验导出明细行整体单调 |
 | 五角色 Tab 和店铺权限范围 | 角色回归，须用对应账号执行 |
+| 采购仓库/国家筛选 | 角色回归，使用采购账号可访问的全店铺范围，不依赖店铺权限列表 |
 | 受限角色对管理员可见且有销量的未授权店铺 | slow 角色回归，双账号实时选样并验证四个维度 |
 | 采购与管理员数据范围 | slow 角色回归，双账号同条件对账并检查数据是否变化 |
 | 角色菜单迁移、创建人下拉 | 角色回归；刷新页面后验证当前字典接口和选项 |
