@@ -26,7 +26,9 @@ def test_sales_volume_role_matrix_and_full_regression_are_wired() -> None:
     steps = {step.get("name"): step for step in job["steps"] if step.get("name")}
     assert "-m 'not slow'" in steps["Run role permissions regression"]["run"]
     full = steps["Run full sorting and export regression"]
-    assert "workflow_dispatch" in full["if"] and "inputs.sales_volume_full" in full["if"]
+    assert "inputs.sales_volume_full" not in full.get("if", "")
+    assert "test_multistore_sku_sales_against_order_items" in steps["Run role search and source-data regression"]["run"]
+    assert "test_procurement_source_data" in steps["Run procurement source reconciliation"]["run"]
     for expected in (
         "sort_regression.py",
         "-k async_export",

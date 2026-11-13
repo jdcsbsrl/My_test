@@ -12,6 +12,7 @@ import pytest
 from openpyxl import load_workbook
 
 from modules.auto_test.api.inventory_sku_api import InventorySKUAPI
+from modules.auto_test.api.sku_group_api import SKUGroupAPI
 from modules.auto_test.core.sales_volume_contract import (
     DIMENSIONS,
     aggregate_orders,
@@ -336,13 +337,16 @@ def test_custom_class_filter_matches_rows(report_query, report_window):
     assert baseline.get("code") == 200, baseline
     sample = next((row for row in baseline.get("rows") or [] if row.get("customClassId")), None)
     if sample is None:
-        pytest.skip("No SKU carries a custom class in this window; custom-class filter stays unverified")
-    custom_id = str(sample["customClassId"])
+        pytest.fail("INCOMPLETE: no SKU carries a custom class in this window; custom-class filter stays unverified")
+    custom_id = str(sample["customClassId"]).split(",")[0].strip()
+    assert custom_id, "INCOMPLETE: custom class identifier is empty"
     filtered = report_query(DIMENSIONS["sku"], {**payload, "customClassIds": [custom_id]})
     assert filtered.get("code") == 200, filtered
     matched = filtered.get("rows") or []
     assert matched, {"customClassId": custom_id, "message": "Custom-class filter returned no rows"}
-    assert all(str(row.get("customClassId") or "") == custom_id for row in matched), {
+    assert all(
+        custom_id in {item.strip() for item in str(row.get("customClassId") or "").split(",")} for row in matched
+    ), {
         "customClassId": custom_id,
         "rows": matched[:5],
     }
@@ -661,7 +665,7 @@ def test_warehouse_zero_sales_stock_is_in_expansion(report_query, report_window)
     assert stocks == Decimal(str(summary.get("stockNumber") or 0)), {"summary": summary, "detailStock": stocks}
 
 
-def _fetch_order_data(authenticated_http_client, api_base_url, report_window, sold_store_ids):
+def _fetch_order_data(authenticated_http_client, api_base_url, report_window, sold_store_ids, item_ids=None):
     session = authenticated_http_client
     root = api_base_url.rstrip("/")
     order_payload = {
@@ -672,7 +676,7 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         "platform": "",
         "shopifyLocationId": "",
         "fixedClassId": [],
-        "itemIds": [],
+        "itemIds": item_ids or [],
         "customerClassBoList": [],
         "trackingStatus": "",
         "deptId": None,
@@ -689,13 +693,22 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         "payTimeBegin": report_window[0],
         "payTimeEnd": report_window[1],
     }
-    order_response = session.post(root + "/oms-admin/sales/order/batchListNew", json=order_payload, timeout=(10, 180))
-    order_response.raise_for_status()
-    order_body = order_response.json()
-    assert order_body.get("code") == 200, order_body
-    table = order_body["data"]["tableDataInfo"]
-    orders = table.get("rows") or []
-    assert orders and len(orders) == table["total"] <= 500, "No order sample or pagination incomplete"
+    orders = []
+    for page in range(1, 201):
+        order_payload["pageNum"] = page
+        order_response = session.post(
+            root + "/oms-admin/sales/order/batchListNew", json=order_payload, timeout=(10, 180)
+        )
+        order_response.raise_for_status()
+        order_body = order_response.json()
+        assert order_body.get("code") == 200, order_body
+        table = order_body["data"]["tableDataInfo"]
+        page_rows = table.get("rows") or []
+        orders.extend(page_rows)
+        if len(orders) >= table["total"]:
+            break
+        assert page_rows, "Order pagination incomplete"
+    assert orders and len(orders) == table["total"], "No order sample or pagination incomplete"
     numbers = [str(order["orderNo"]) for order in orders]
     assert len(numbers) == len(set(numbers)), "Duplicate order number"
     details = {}
@@ -719,11 +732,6 @@ def sold_order_data(authenticated_http_client, api_base_url, report_window, sold
 
 def test_multistore_sku_sales_against_order_items(report_query, report_window, sold_store_ids, sold_order_data):
     orders, details = sold_order_data
-    bundles = [
-        row for rows in details.values() for row in rows if isinstance(row.get("detail"), list) and row["detail"]
-    ]
-    if not bundles:
-        pytest.skip("No bundled SKU in the sampled orders; bundle attribution stays unverified")
     source = aggregate_orders(orders, details)
     payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
     report = report_query(DIMENSIONS["sku"], payload)
@@ -735,6 +743,73 @@ def test_multistore_sku_sales_against_order_items(report_query, report_window, s
         for row in rows
     }
     assert actual == source, {"report": actual, "orderSource": source}
+
+
+def test_bundle_order_sample_is_available(
+    sold_order_data, authenticated_http_client, api_base_url, report_window, report_query
+):
+    sampled_orders, details = sold_order_data
+    api = SKUGroupAPI(authenticated_http_client, api_base_url)
+    valid_orders = {str(order["orderNo"]) for order in sampled_orders if str(order.get("orderStatus")) != "6"}
+    bundles = [
+        row
+        for order_no, rows in details.items()
+        if str(order_no) in valid_orders
+        for row in rows
+        if isinstance(row.get("detail"), list) and row["detail"]
+    ]
+    if not bundles:
+        available = api.list_page(page_num=1, page_size=100)
+        api.assert_success(available)
+        end = datetime.strptime(report_window[1], "%Y-%m-%d %H:%M:%S")
+        for day in range(30):
+            period_end = end - timedelta(days=day)
+            window = (
+                period_end.replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S"),
+                period_end.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            try:
+                candidate_orders, candidate_details = _fetch_order_data(
+                    authenticated_http_client, api_base_url, window, []
+                )
+            except AssertionError as exc:
+                if str(exc).startswith("No order sample or pagination incomplete"):
+                    continue
+                raise
+            valid = {str(order["orderNo"]) for order in candidate_orders if str(order.get("orderStatus")) != "6"}
+            bundles = [
+                row
+                for order_no, rows in candidate_details.items()
+                if str(order_no) in valid
+                for row in rows
+                if isinstance(row.get("detail"), list) and row["detail"]
+            ]
+            if bundles:
+                test_multistore_sku_sales_against_order_items(
+                    report_query, window, [], (candidate_orders, candidate_details)
+                )
+                break
+        if not bundles:
+            pytest.fail(
+                f"INCOMPLETE: {available['total']} combination SKUs, but no bundled order in the sampled period"
+            )
+    group_ids = {str(row.get("groupSkuId") or row.get("itemId") or "") for row in bundles}
+    assert "" not in group_ids, "Bundle order rows have no group SKU identifier"
+    for group_id in group_ids:
+        page = 1
+        matches = []
+        while True:
+            body = api.list_page(group_id, page_num=page, page_size=100)
+            api.assert_success(body)
+            rows = api.rows(body)
+            matches.extend(row for row in rows if str(row.get("groupSkuId")) == group_id)
+            if page * 100 >= body["total"]:
+                break
+            assert rows and page < 200, {"groupSkuId": group_id, "page": page}
+            page += 1
+        assert len(matches) == 1, {"groupSkuId": group_id, "matches": len(matches)}
+        components = matches[0].get("omsSkuGroupItemVoList")
+        assert components and all(row.get("itemId") and row.get("itemQty") is not None for row in components), group_id
 
 
 def test_warehouse_expand_keeps_every_sku(report_query, report_window):
@@ -1110,10 +1185,15 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
     rows = categories.get("rows") or []
     assert rows and len(rows) == categories.get("total"), "Category sample missing or incomplete"
     detail_count = 0
+    expected_sales = defaultdict(Decimal)
     for category in rows:
         detail = report_query("queryCategorySalesDimensionExpand", {**payload, "classIds": [category.get("classId")]})
         assert detail.get("code") == 200, detail
-        detail_count += len(detail.get("data") or [])
+        details = detail.get("data") or []
+        detail_count += len(details)
+        assert all(item.get("itemId") for item in details), "Category details lack SKU identifiers"
+        for sku, sales in group_sales_by_sku(details).items():
+            expected_sales[sku] += sales
     assert detail_count > 20000, {"message": "Need more than 20000 details to test limit", "count": detail_count}
     assert detail_count > len(rows), {
         "message": "Detail count must exceed the category row count",
@@ -1136,6 +1216,47 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
     response.raise_for_status()
     body = response.json()
     assert body.get("code") != 200 and "20000" in str(body.get("msg", "")), body
+    marker = uuid.uuid4().hex
+    task_name = "CI_R1003420"
+    task_conditions = {**payload, "includeSkuDetail": 1, "exportReportType": 5}
+    created = authenticated_http_client.post(
+        api_base_url.rstrip("/") + "/oms-admin/base/exportTask",
+        json={
+            "taskName": task_name,
+            "taskType": "1",
+            "exportType": "8",
+            "exportColumn": "{}",
+            "taskDesc": marker,
+            "taskConditions": json.dumps(task_conditions, ensure_ascii=False),
+        },
+        timeout=(10, 90),
+    )
+    created.raise_for_status()
+    assert created.json().get("code") == 200, created.text
+    deadline = time.monotonic() + 600
+    task = None
+    while time.monotonic() < deadline:
+
+        def fetch_page(page_num, page_size):
+            result = authenticated_http_client.get(
+                api_base_url.rstrip("/") + "/oms-admin/base/exportTask/list",
+                params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
+                timeout=(10, 60),
+            )
+            result.raise_for_status()
+            return result.json()
+
+        task = find_task_by_marker(fetch_page, marker)
+        if task and str(task.get("status")) == "1" and task.get("fileUrl"):
+            break
+        assert not task or str(task.get("status")) != "2", task
+        time.sleep(3)
+    assert task and str(task.get("status")) == "1" and task.get("fileUrl"), {"marker": marker, "task": task}
+    download = authenticated_http_client.get(task["fileUrl"], timeout=(10, 300))
+    download.raise_for_status()
+    exported_sales, exported_count = _read_sku_export(download.content)
+    assert exported_count == detail_count, {"expectedDetails": detail_count, "exportedDetails": exported_count}
+    assert dict(exported_sales) == dict(expected_sales), "Asynchronous export SKU sales differ from category details"
 
 
 @pytest.mark.parametrize(

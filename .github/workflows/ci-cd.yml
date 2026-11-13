@@ -9,11 +9,6 @@ on:
     # GitHub Actions uses UTC; 16:00 UTC is 00:00 the next day in China Standard Time.
     - cron: '0 16 * * *'
   workflow_dispatch:
-    inputs:
-      sales_volume_full:
-        description: '运行商品销量报表完整慢速回归（创建导出任务）'
-        type: boolean
-        default: false
 
 permissions:
   actions: read
@@ -359,18 +354,36 @@ jobs:
         run: |
           mkdir -p .runtime/reports/allure-results
           pytest modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow' -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-      - name: Run full sorting and export regression
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.sales_volume_full }}
+      - name: Run role search and source-data regression
+        if: always() && !cancelled()
         run: |
-          pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-          if [ "$SALES_VOLUME_ROLE" = admin ]; then
-            pytest modules/auto_test/tests/test_sales_volume_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-          elif [ "$SALES_VOLUME_ROLE" != procurement ]; then
-            pytest modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+          common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_custom_class_filter_matches_rows or test_dimension_specific_filter or test_warehouse_expand_keeps_every_sku'
+          if [ "$SALES_VOLUME_ROLE" != procurement ]; then
+            common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api or test_bundle_order_sample_is_available"
           else
-            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+            common="$common or (test_dimension_accepts_payment_range and not store)"
           fi
+          pytest modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow' -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Run procurement source reconciliation
+        if: always() && !cancelled() && matrix.role == 'procurement'
+        run: pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_source_data -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Record procurement exclusions
+        if: always() && matrix.role == 'procurement'
+        run: echo '采购无店铺维度和店铺权限，多店筛选与多店异步导出不适用。' >> "$GITHUB_STEP_SUMMARY"
+      - name: Run full sorting and export regression
+        if: always() && !cancelled()
+        run: |
+          result=0
+          pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
+          if [ "$SALES_VOLUME_ROLE" = admin ]; then
+            pytest modules/auto_test/tests/test_sales_volume_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
+          elif [ "$SALES_VOLUME_ROLE" != procurement ]; then
+            pytest modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
+            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
+          else
+            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
+          fi
+          exit "$result"
       - name: Scan role test artifacts for secrets
         id: scan_sales_volume_role_artifacts
         if: always()

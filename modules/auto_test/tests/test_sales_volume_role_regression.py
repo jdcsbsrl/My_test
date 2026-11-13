@@ -1,6 +1,7 @@
 """Role-sensitive checks for the merged sales volume report."""
 
 import os
+from datetime import datetime, timedelta
 
 import pytest
 import requests
@@ -10,6 +11,35 @@ from modules.auto_test.core.secret_provider import get_secret
 from modules.auto_test.pages.login_page import LoginPage
 
 pytest_plugins = ("modules.auto_test.tests.test_sales_volume_regression",)
+
+
+@pytest.mark.slow
+def test_procurement_source_data(administrator_client, api_base_url, report_query, report_window, report_role):
+    assert report_role == "procurement", "This reconciliation is only applicable to procurement"
+    from modules.auto_test.tests.test_sales_volume_regression import (
+        _fetch_order_data,
+        test_multistore_inventory_against_inventory_api,
+        test_multistore_sku_sales_against_order_items,
+    )
+
+    end = datetime.strptime(report_window[1], "%Y-%m-%d %H:%M:%S")
+    for day in range(30):
+        current = end - timedelta(days=day)
+        window = (
+            current.replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S"),
+            current.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S"),
+        )
+        try:
+            orders = _fetch_order_data(administrator_client, api_base_url, window, [])
+        except AssertionError as exc:
+            if str(exc).startswith("No order sample or pagination incomplete"):
+                continue
+            raise
+        test_multistore_sku_sales_against_order_items(report_query, window, [], orders)
+        break
+    else:
+        pytest.fail("No complete daily order sample for procurement source reconciliation")
+    test_multistore_inventory_against_inventory_api(administrator_client, api_base_url, report_query, window, [])
 
 
 @pytest.fixture

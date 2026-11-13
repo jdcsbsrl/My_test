@@ -15,9 +15,9 @@ pytest modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test
 
 管理员分片执行非 slow 范围；各角色另有独立 CI 矩阵，执行角色文件中的非 slow 检查。`SALES_VOLUME_ROLE` 必须与当前账号真实角色一致，可选 `admin`、`manager`、`sales`、`assistant`、`procurement`。采购无店铺维度、店铺权限列表为空，不得将其按受店铺限制的销售角色断言。角色测试需分别用各账号执行；不要在代码或报告中保存凭据。
 
-CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。每个角色缺少账号或密码时该角色 job 失败。五角色矩阵限制为串行，但仍可能与其他 CI job 并行；各 job 使用独立 runner。普通执行不包含 slow 测试。
+CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。每个角色缺少账号或密码时该角色 job 失败。五角色矩阵限制为串行，但仍可能与其他 CI job 并行；各 job 使用独立 runner。
 
-通过 Actions 手动运行工作流并选中 `sales_volume_full` 才会执行慢速测试：所有角色运行排序与导出顺序；管理员运行主回归 slow；业务经理、业务员、业务助理运行多店异步导出与未授权店铺验证；采购运行采购与管理员数据对账。后台导出任务需要运行中的任务服务，会在共享环境创建并保留任务。每个角色产生独立 Allure artifact，数据不足、任务超时和未执行均不能视为通过。
+每次 CI 自动执行角色权限、适用的筛选及来源对账，以及慢速排序和导出：管理员运行主回归 slow；业务经理、业务员、业务助理运行多店异步导出与未授权店铺验证；采购运行采购与管理员数据对账及自身订单和库存接口核对。后台导出任务需要运行中的任务服务，会在共享环境创建并保留任务。各角色执行的筛选范围仍是当前脚本中明确列出的子集；样本、接口权限、未匹配库存或后台服务不足均不能视为通过。每个角色产生独立 Allure artifact。
 
 异步导出和排序导出属 slow：
 
@@ -56,7 +56,7 @@ pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
 | 四维度店铺多选、查询请求及重置 | 主回归，两个有销量店铺 |
 | 店铺单选、单个店铺清除、`清除已选` 控件 | 主回归，UI 选中与取消都核对请求的 `storeIds` |
 | 默认供应商筛选（`supplierName`） | 主回归，按真实供应商片段过滤并核对每行命中，另验证无匹配返回 0 |
-| 自定义分类筛选（`customClassIds`） | 主回归，从报表数据取真实分类 ID；样本缺失时按未覆盖跳过，不判通过 |
+| 自定义分类筛选（`customClassIds`） | 主回归，从报表数据取真实分类 ID；样本缺失时标记验证不完整并失败 |
 | 创建人下拉选项范围与顺序 | 主回归，下拉顺序必须与字典接口顺序一致，并验证停用用户开关存在且不改变首屏选项 |
 | 仓库、国家、类目、店铺展开销量 | 主回归，四维度都做 SKU 明细合计对账 |
 | 仓库展开的多仓完整性 | 主回归，逐 SKU 核对展开库存合计等于汇总库存，且样本必须存在跨仓 SKU |
@@ -72,9 +72,11 @@ pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
 | 无销量但有库存的仓库 | 主回归，需动态找到有效样本并核对汇总库存 |
 | 数值排序与当前页文件顺序 | slow 排序回归；SKU 无订单数列 |
 | 排序跨页保持、排序传入展开 | 排序回归（非 slow，进 CI），校验翻页请求与展开请求都带当前 `sortField`/`sortOrder` |
-| 类目+SKU 明细超过 20000 条 | slow 回归，先确认明细样本超限，再验证明细导出被拒而类目汇总导出仍可下载 |
+| 类目+SKU 明细超过 20000 条 | slow 回归，确认明细超限、直接导出被拒后，同条件创建异步任务并核对文件行数及 SKU 销量 |
 | 类目内订单去重 | slow 回归，自动寻找同单同类目多 SKU 样本并与订单源核对 |
 
-尚未实现完整自动化的内容：所有搜索字段的边界组合；组合 SKU 明细归属（当前时间窗内订单没有组合装样本，按未覆盖跳过）；2 万条精确边界（只有超过 2 万的数据，19999/20000/20001 无法构造）；采购角色的异步文件因无店铺权限标记不适用。原旧 URL 行为此前明确暂缓。CI 非 slow 通过不表示这些场景已经通过；数据不足不等同通过。
+尚未实现完整自动化的内容：所有搜索字段的边界组合；组合 SKU 需找到实际订单样本，样本不存在时明确标记验证不完整并失败，不能证明归属正确；2 万条精确边界（只有超过 2 万的数据，19999/20000/20001 无法构造）；采购角色的多店异步文件因无店铺权限不适用。原旧 URL 行为此前明确暂缓。数据不足不等同通过。
 
 采购可查看全部报表数据但不显示店铺 Tab；类目订单汇总按类目内订单去重，不能要求 SKU 明细订单数简单相加等于类目汇总。作废订单在五维度排除；本报表只有销量、订单数、库存三类数值口径，没有退款、退货、售后字段，不存在按退款退货对账的场景。合并 SKU 按业务规则计入报表销量与库存；库存接口查不到时需要其他可靠来源核对，当前自动化不能据此判通过或判报表错误。
+
+组合 SKU 本身不是 SKU 维度的独立统计行；订单已拆分的库存 SKU 明细按各明细数量汇总销量，订单按库存 SKU 去重。组合定义接口可不传 `groupSkuId` 查询，搜索实际订单时优先从可见订单明细定位组合商品，随后查询组合定义；当前组合定义可能与历史订单时点不同，不能据现行定义重算历史销量。无法找到或关联有效明细时，组合场景报告未完成。
