@@ -218,7 +218,7 @@ jobs:
     name: UI测试 (管理员-销售分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: code-quality
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       TEST_ENV: test
       # CI is an explicitly authorized test-environment execution.
@@ -292,6 +292,11 @@ jobs:
           # an asyncio loop around fixture setup, so UI retries are disabled.
           # The test itself and the framework retain bounded domain retries.
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Run administrator sales volume slow regression
+        if: always() && !cancelled() && matrix.shard == 10
+        run: |
+          mkdir -p .runtime/reports/allure-results .runtime/cache
+          pytest modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --basetemp .runtime/cache/sales-volume-admin-slow --alluredir .runtime/reports/allure-results
       - name: Scan UI test artifacts for secrets
         if: always()
         run: |
@@ -312,28 +317,23 @@ jobs:
           if-no-files-found: warn
 
   sales-volume-roles:
-    name: 商品销量报表角色 (${{ matrix.role }})
+    name: 商品销量报表多角色回归
     runs-on: ubuntu-latest
     needs: code-quality
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      max-parallel: 1
-      matrix:
-        include:
-          - { role: admin, username_secret: ADMIN_USERNAME, password_secret: ADMIN_PASSWORD }
-          - { role: manager, username_secret: LEADER_USERNAME, password_secret: LEADER_PASSWORD }
-          - { role: sales, username_secret: SALES_USERNAME, password_secret: SALES_PASSWORD }
-          - { role: assistant, username_secret: ASSISTANT_USERNAME, password_secret: ASSISTANT_PASSWORD }
-          - { role: procurement, username_secret: PROCUREMENT_USERNAME, password_secret: PROCUREMENT_PASSWORD }
+    timeout-minutes: 360
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: 'true'
-      SALES_VOLUME_ROLE: ${{ matrix.role }}
-      TEST_USERNAME: ${{ secrets[matrix.username_secret] }}
-      TEST_PASSWORD: ${{ secrets[matrix.password_secret] }}
       ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      LEADER_USERNAME: ${{ secrets.LEADER_USERNAME }}
+      LEADER_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
+      SALES_USERNAME: ${{ secrets.SALES_USERNAME }}
+      SALES_PASSWORD: ${{ secrets.SALES_PASSWORD }}
+      ASSISTANT_USERNAME: ${{ secrets.ASSISTANT_USERNAME }}
+      ASSISTANT_PASSWORD: ${{ secrets.ASSISTANT_PASSWORD }}
+      PROCUREMENT_USERNAME: ${{ secrets.PROCUREMENT_USERNAME }}
+      PROCUREMENT_PASSWORD: ${{ secrets.PROCUREMENT_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
     steps:
@@ -343,58 +343,87 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -e . "pytest>=8,<9"
-      - name: Validate CI endpoints and role credentials
-        run: |
-          python tools/validate_ci_environment.py --require-ui
-          test -n "$TEST_USERNAME" || { echo "Missing ${{ matrix.username_secret }}"; exit 1; }
-          test -n "$TEST_PASSWORD" || { echo "Missing ${{ matrix.password_secret }}"; exit 1; }
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
       - name: Install Playwright browser
         run: playwright install --with-deps chromium
-      - name: Run role permissions regression
+      - name: Run each role independently
         run: |
-          mkdir -p .runtime/reports/allure-results
-          pytest modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow' -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-      - name: Run role search and source-data regression
-        if: always() && !cancelled()
-        run: |
-          common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_custom_class_filter_matches_rows or test_dimension_specific_filter or test_warehouse_expand_keeps_every_sku'
-          if [ "$SALES_VOLUME_ROLE" != procurement ]; then
-            common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api or test_bundle_order_sample_is_available"
-          else
-            common="$common or (test_dimension_accepts_payment_range and not store)"
-          fi
-          pytest modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow' -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-      - name: Run procurement source reconciliation
-        if: always() && !cancelled() && matrix.role == 'procurement'
-        run: pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_source_data -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
-      - name: Record procurement exclusions
-        if: always() && matrix.role == 'procurement'
-        run: echo '采购无店铺维度和店铺权限，多店筛选与多店异步导出不适用。' >> "$GITHUB_STEP_SUMMARY"
-      - name: Run full sorting and export regression
-        if: always() && !cancelled()
-        run: |
-          result=0
-          pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
-          if [ "$SALES_VOLUME_ROLE" = admin ]; then
-            pytest modules/auto_test/tests/test_sales_volume_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
-          elif [ "$SALES_VOLUME_ROLE" != procurement ]; then
-            pytest modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
-            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
-          else
-            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results || result=1
-          fi
-          exit "$result"
+          mkdir -p .runtime/reports/allure-results .runtime/cache
+          overall=0
+          counter=0
+          run_phase() {
+            local phase="$1"
+            shift
+            counter=$((counter + 1))
+            echo "::group::$SALES_VOLUME_ROLE - $phase"
+            if pytest "$@" -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --basetemp ".runtime/cache/sales-volume-${SALES_VOLUME_ROLE}-${counter}" --alluredir .runtime/reports/allure-results; then
+              echo "| $SALES_VOLUME_ROLE | $phase | 通过 |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $SALES_VOLUME_ROLE | $phase | 失败或不完整 |" >> "$GITHUB_STEP_SUMMARY"
+              overall=1
+            fi
+            echo '::endgroup::'
+          }
+          printf '| 角色 | 检查 | 结果 |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+          for role in manager sales assistant procurement; do
+            case "$role" in
+              manager) TEST_USERNAME="$LEADER_USERNAME"; TEST_PASSWORD="$LEADER_PASSWORD" ;;
+              sales) TEST_USERNAME="$SALES_USERNAME"; TEST_PASSWORD="$SALES_PASSWORD" ;;
+              assistant) TEST_USERNAME="$ASSISTANT_USERNAME"; TEST_PASSWORD="$ASSISTANT_PASSWORD" ;;
+              procurement) TEST_USERNAME="$PROCUREMENT_USERNAME"; TEST_PASSWORD="$PROCUREMENT_PASSWORD" ;;
+            esac
+            export TEST_USERNAME TEST_PASSWORD
+            export SALES_VOLUME_ROLE="$role"
+            if [ -z "$TEST_USERNAME" ] || [ -z "$TEST_PASSWORD" ]; then
+              echo "| $role | 凭据检查 | 缺失，未执行 |" >> "$GITHUB_STEP_SUMMARY"
+              overall=1
+              continue
+            fi
+            run_phase 权限 modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow'
+            common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_custom_class_filter_matches_rows or test_dimension_specific_filter or test_warehouse_expand_keeps_every_sku'
+            if [ "$role" != procurement ]; then
+              common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api or test_bundle_order_sample_is_available"
+            else
+              common="$common or (test_dimension_accepts_payment_range and not store)"
+            fi
+            run_phase 筛选与来源对账 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow'
+            if [ "$role" = procurement ]; then
+              run_phase 采购来源对账 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_source_data
+              echo '| procurement | 多店筛选与多店异步导出 | 不适用 |' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            run_phase 排序与导出 modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
+            if [ "$role" != procurement ]; then
+              run_phase 多店异步导出 modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow
+              run_phase 越权店铺 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow
+            else
+              run_phase 采购管理员对账 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow
+            fi
+          done
+          exit "$overall"
       - name: Scan role test artifacts for secrets
         id: scan_sales_volume_role_artifacts
         if: always()
         run: |
           mkdir -p .runtime/reports
-          python tools/scan_sensitive_artifacts.py .runtime/reports
+          result=0
+          for role in admin manager sales assistant procurement; do
+            case "$role" in
+              admin) TEST_USERNAME="$ADMIN_USERNAME"; TEST_PASSWORD="$ADMIN_PASSWORD" ;;
+              manager) TEST_USERNAME="$LEADER_USERNAME"; TEST_PASSWORD="$LEADER_PASSWORD" ;;
+              sales) TEST_USERNAME="$SALES_USERNAME"; TEST_PASSWORD="$SALES_PASSWORD" ;;
+              assistant) TEST_USERNAME="$ASSISTANT_USERNAME"; TEST_PASSWORD="$ASSISTANT_PASSWORD" ;;
+              procurement) TEST_USERNAME="$PROCUREMENT_USERNAME"; TEST_PASSWORD="$PROCUREMENT_PASSWORD" ;;
+            esac
+            export TEST_USERNAME TEST_PASSWORD
+            python tools/scan_sensitive_artifacts.py .runtime/reports || result=1
+          done
+          exit "$result"
       - name: Upload role test results
         uses: actions/upload-artifact@v4
         if: always() && steps.scan_sales_volume_role_artifacts.outcome == 'success'
         with:
-          name: allure-results-sales-volume-${{ matrix.role }}
+          name: allure-results-sales-volume-roles
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 

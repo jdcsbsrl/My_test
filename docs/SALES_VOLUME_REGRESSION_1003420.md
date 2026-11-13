@@ -13,11 +13,11 @@ $env:SALES_VOLUME_ROLE='admin'
 pytest modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_role_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m 'not slow'
 ```
 
-管理员分片执行非 slow 范围；各角色另有独立 CI 矩阵，执行角色文件中的非 slow 检查。`SALES_VOLUME_ROLE` 必须与当前账号真实角色一致，可选 `admin`、`manager`、`sales`、`assistant`、`procurement`。采购无店铺维度、店铺权限列表为空，不得将其按受店铺限制的销售角色断言。角色测试需分别用各账号执行；不要在代码或报告中保存凭据。
+管理员分片执行非 slow 和 slow 范围；另一个多角色 CI job 按顺序分别运行组长、业务员、业务助理和采购。`SALES_VOLUME_ROLE` 必须与当前账号真实角色一致，可选 `admin`、`manager`、`sales`、`assistant`、`procurement`。采购无店铺维度、店铺权限列表为空，不得将其按受店铺限制的销售角色断言。角色测试需分别用各账号执行；不要在代码或报告中保存凭据。
 
-CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。每个角色缺少账号或密码时该角色 job 失败。五角色矩阵限制为串行，但仍可能与其他 CI job 并行；各 job 使用独立 runner。
+CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。四个角色按顺序运行，每次 pytest 使用独立临时目录和登录会话；缺少凭据或任何阶段失败时记录角色结果并继续其他角色，最后使 job 失败。该 job 可能与管理员和其他 CI job 并行。
 
-每次 CI 自动执行角色权限、适用的筛选及来源对账，以及慢速排序和导出：管理员运行主回归 slow；业务经理、业务员、业务助理运行多店异步导出与未授权店铺验证；采购运行采购与管理员数据对账及自身订单和库存接口核对。后台导出任务需要运行中的任务服务，会在共享环境创建并保留任务。各角色执行的筛选范围仍是当前脚本中明确列出的子集；样本、接口权限、未匹配库存或后台服务不足均不能视为通过。每个角色产生独立 Allure artifact。
+每次 CI 自动执行角色权限、适用的筛选及来源对账，以及慢速排序和导出：管理员运行主回归 slow；业务经理、业务员、业务助理运行多店异步导出与未授权店铺验证；采购运行采购与管理员数据对账及自身订单和库存接口核对。后台导出任务需要运行中的任务服务，会在共享环境创建并保留任务。各角色执行的筛选范围仍是当前脚本中明确列出的子集；样本、接口权限、未匹配库存或后台服务不足均不能视为通过。四角色输出统一 Allure artifact，步骤摘要和日志按角色及阶段记录结果。
 
 异步导出和排序导出属 slow：
 
