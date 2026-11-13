@@ -9,6 +9,11 @@ on:
     # GitHub Actions uses UTC; 16:00 UTC is 00:00 the next day in China Standard Time.
     - cron: '0 16 * * *'
   workflow_dispatch:
+    inputs:
+      sales_volume_full:
+        description: '运行商品销量报表完整慢速回归（创建导出任务）'
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -228,6 +233,7 @@ jobs:
       # lane below, whose account owns that test data scope.
       TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
       TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      SALES_VOLUME_ROLE: admin
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
       # Keep reportSyncQuery focused on the recent, bounded test data window.
@@ -244,7 +250,7 @@ jobs:
           - shard: 4
             test_files: "modules/auto_test/tests/test_export_full_flow.py"
           - shard: 10
-            test_files: "modules/auto_test/tests/test_sales_report_regression.py"
+            test_files: "modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_role_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m 'not slow'"
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
           - shard: 12
@@ -307,6 +313,75 @@ jobs:
         if: always()
         with:
           name: allure-results-admin-shard-${{ matrix.shard }}
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+
+  sales-volume-roles:
+    name: 商品销量报表角色 (${{ matrix.role }})
+    runs-on: ubuntu-latest
+    needs: code-quality
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - { role: admin, username_secret: ADMIN_USERNAME, password_secret: ADMIN_PASSWORD }
+          - { role: manager, username_secret: LEADER_USERNAME, password_secret: LEADER_PASSWORD }
+          - { role: sales, username_secret: SALES_USERNAME, password_secret: SALES_PASSWORD }
+          - { role: assistant, username_secret: ASSISTANT_USERNAME, password_secret: ASSISTANT_PASSWORD }
+          - { role: procurement, username_secret: PROCUREMENT_USERNAME, password_secret: PROCUREMENT_PASSWORD }
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: 'true'
+      SALES_VOLUME_ROLE: ${{ matrix.role }}
+      TEST_USERNAME: ${{ secrets[matrix.username_secret] }}
+      TEST_PASSWORD: ${{ secrets[matrix.password_secret] }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints and role credentials
+        run: |
+          python tools/validate_ci_environment.py --require-ui
+          test -n "$TEST_USERNAME" || { echo "Missing ${{ matrix.username_secret }}"; exit 1; }
+          test -n "$TEST_PASSWORD" || { echo "Missing ${{ matrix.password_secret }}"; exit 1; }
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      - name: Run role permissions regression
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          pytest modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow' -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Run full sorting and export regression
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.sales_volume_full }}
+        run: |
+          pytest modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+          if [ "$SALES_VOLUME_ROLE" = admin ]; then
+            pytest modules/auto_test/tests/test_sales_volume_regression.py -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+          elif [ "$SALES_VOLUME_ROLE" != procurement ]; then
+            pytest modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+          else
+            pytest modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+          fi
+      - name: Scan role test artifacts for secrets
+        id: scan_sales_volume_role_artifacts
+        if: always()
+        run: |
+          mkdir -p .runtime/reports
+          python tools/scan_sensitive_artifacts.py .runtime/reports
+      - name: Upload role test results
+        uses: actions/upload-artifact@v4
+        if: always() && steps.scan_sales_volume_role_artifacts.outcome == 'success'
+        with:
+          name: allure-results-sales-volume-${{ matrix.role }}
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 
@@ -404,7 +479,7 @@ jobs:
   report:
     name: 生成测试报告
     runs-on: ubuntu-latest
-    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, inventory-tests]
+    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, sales-volume-roles, inventory-tests]
     if: always()
     timeout-minutes: 15
     steps:
@@ -467,7 +542,7 @@ jobs:
   collect-failure-logs:
     name: 收集失败日志
     runs-on: ubuntu-latest
-    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, inventory-tests, report, deploy-test-stub]
+    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, sales-volume-roles, inventory-tests, report, deploy-test-stub]
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     timeout-minutes: 10
     steps:

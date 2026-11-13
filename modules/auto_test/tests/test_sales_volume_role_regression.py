@@ -1,0 +1,226 @@
+"""Role-sensitive checks for the merged sales volume report."""
+
+import os
+
+import pytest
+import requests
+
+from modules.auto_test.core.sales_volume_contract import build_filter
+from modules.auto_test.core.secret_provider import get_secret
+from modules.auto_test.pages.login_page import LoginPage
+
+pytest_plugins = ("modules.auto_test.tests.test_sales_volume_regression",)
+
+
+@pytest.fixture
+def report_role():
+    role = os.environ.get("SALES_VOLUME_ROLE")
+    assert role in {
+        "admin",
+        "manager",
+        "sales",
+        "assistant",
+        "procurement",
+    }, "Set SALES_VOLUME_ROLE explicitly; role behavior must not be inferred from credentials"
+    return role
+
+
+def test_role_tabs(logged_in_page, ui_base_url, report_role):
+    root = ui_base_url.rstrip("/")
+    if root.endswith("/index"):
+        root = root[:-6]
+    page = logged_in_page
+    page.goto(root + "/product/productReport/salesVolume", wait_until="domcontentloaded")
+    page.get_by_text("SKU维度", exact=True).first.wait_for(state="visible", timeout=30000)
+    for tab in ("SKU维度", "发货仓库维度", "国家维度", "类目维度"):
+        assert page.get_by_text(tab, exact=True).first.is_visible(), tab
+    assert page.get_by_text("店铺维度", exact=True).count() == (0 if report_role == "procurement" else 1)
+
+
+def test_role_store_permissions(authenticated_http_client, api_base_url, report_role, report_query, report_window):
+    root = api_base_url.rstrip("/")
+    response = authenticated_http_client.post(
+        root + "/oms-admin/base/store/queryPermissionStoreList", json={}, timeout=(10, 90)
+    )
+    response.raise_for_status()
+    body = response.json()
+    assert body.get("code") == 200, body
+    stores = body.get("data") or []
+    if report_role == "procurement":
+        assert not stores, stores
+        return
+    assert stores, "No permitted stores: cannot verify role data scope"
+    allowed = {str(store.get("storeName")) for store in stores if store.get("storeName")}
+    payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 50}
+    listing = report_query("queryStoreSalesDimensionReport", payload)
+    assert listing.get("code") == 200, listing
+    rows = listing.get("rows") or []
+    assert rows, "No sold SKU sample: role store scope remains unverified"
+    detail = report_query("queryStoreSalesDimensionExpand", {**payload, "itemIds": [r["itemId"] for r in rows]})
+    assert detail.get("code") == 200, detail
+    details = detail.get("data") or []
+    assert details, "No expanded store details: role scope remains unverified"
+    unauthorized = {str(row["storeName"]) for row in details if row.get("storeName")} - allowed
+    assert not unauthorized, sorted(unauthorized)
+
+
+def test_creator_dropdown_available_after_refresh(logged_in_page, ui_base_url, report_role):
+    root = ui_base_url.rstrip("/")
+    if root.endswith("/index"):
+        root = root[:-6]
+    page = logged_in_page
+    page.goto(root + "/product/productReport/salesVolume", wait_until="domcontentloaded")
+    with page.expect_response(
+        lambda response: "/system/dict/data/type/sys_user_username" in response.url, timeout=30000
+    ) as captured:
+        page.reload(wait_until="domcontentloaded")
+    result = captured.value.json()
+    page.get_by_text("SKU维度", exact=True).first.wait_for(state="visible", timeout=30000)
+    field = (
+        page.locator(".el-form-item:visible").filter(has=page.locator(".el-form-item__label", has_text="创建人")).first
+    )
+    field.locator(".keyword-select-trigger").click()
+    popover = page.locator(".el-dialog:visible, .el-popper:visible, [role='dialog']:visible")
+    popover.first.wait_for(state="visible", timeout=10000)
+    assert result.get("code") == 200, {"role": report_role, "response": result}
+    texts = [popover.nth(i).inner_text() for i in range(popover.count())]
+    assert any("显示已停用用户" in text and len(text.splitlines()) > 1 for text in texts), {
+        "role": report_role,
+        "message": "Creator dropdown is empty or lacks the disabled-user control",
+    }
+
+
+def test_merged_report_menu_is_assigned(authenticated_http_client, api_base_url, report_role):
+    response = authenticated_http_client.get(
+        api_base_url.rstrip("/") + "/oms-admin/system/menu/getRouters", timeout=(10, 90)
+    )
+    response.raise_for_status()
+    body = response.json()
+    assert body.get("code") == 200, body
+
+    def nodes(value):
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from nodes(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from nodes(child)
+
+    menu_nodes = list(nodes(body.get("data") or []))
+    fields = [str(node.get(key) or "") for node in menu_nodes for key in ("path", "component", "title")]
+    titles = [str(node.get("meta", {}).get("title") or "") for node in menu_nodes if isinstance(node.get("meta"), dict)]
+    assert any(
+        "productReport/salesVolume" in field or field == "商品销量报表" for field in fields + titles
+    ), report_role
+    assert not any(
+        "salesReport/salesReport" in field or field == "销售商品销量报表" for field in fields + titles
+    ), report_role
+
+
+@pytest.fixture
+def administrator_client(browser):
+    username, password = get_secret("ADMIN_USERNAME"), get_secret("ADMIN_PASSWORD")
+    assert username and password, "Administrator credentials are required for cross-role verification"
+    context = browser.new_context()
+    page = context.new_page()
+    captured = {}
+
+    def capture(response):
+        if "/auth/login" in response.url:
+            captured["body"] = response.json()
+            captured["clientid"] = response.request.all_headers().get("clientid")
+
+    page.on("response", capture)
+    session = requests.Session()
+    try:
+        assert LoginPage(page).login(username, password), "Administrator login failed"
+        body = captured.get("body") or {}
+        token_data = body.get("data") or {}
+        token = token_data.get("token") or token_data.get("access_token")
+        assert token, "Administrator login did not provide a token"
+        session.headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+        if captured.get("clientid"):
+            session.headers["clientid"] = captured["clientid"]
+        for cookie in context.cookies():
+            session.cookies.set(
+                cookie["name"], cookie["value"], domain=cookie.get("domain"), path=cookie.get("path", "/")
+            )
+        yield session
+    finally:
+        session.close()
+        context.close()
+
+
+@pytest.mark.slow
+def test_role_denied_store_with_administrator_sold_sample(
+    administrator_client,
+    authenticated_http_client,
+    api_base_url,
+    report_role,
+    report_window,
+):
+    if report_role in {"admin", "procurement"}:
+        pytest.skip("Not applicable: administrator and procurement may view all data")
+    root = api_base_url.rstrip("/")
+    path = root + "/oms-admin/sales/report/"
+
+    def post(session, url, payload):
+        response = session.post(url, json=payload, timeout=(10, 180))
+        response.raise_for_status()
+        result = response.json()
+        assert result.get("code") == 200, result
+        return result
+
+    own = post(authenticated_http_client, root + "/oms-admin/base/store/queryPermissionStoreList", {})
+    allowed = {str(row["id"]) for row in own.get("data") or []}
+    assert allowed, "No role store sample"
+    admin = post(administrator_client, root + "/oms-admin/base/store/queryPermissionStoreList", {})
+    candidates = [row for row in admin.get("data") or [] if str(row["id"]) not in allowed]
+    assert candidates, "No store outside the role's permission range"
+    base = {**build_filter(report_window), "pageNum": 1, "pageSize": 50}
+    target = None
+    for candidate in candidates[:100]:
+        sample = post(administrator_client, path + "queryOmsInventoryNew", {**base, "storeIds": [str(candidate["id"])]})
+        if float(sample.get("salesVolume") or 0) > 0:
+            target = str(candidate["id"])
+            break
+    assert target, "No administrator-visible sold store outside role permissions; test incomplete"
+    for endpoint in (
+        "queryOmsInventoryNew",
+        "queryWarehouseSalesDimensionReport",
+        "queryCountrySalesDimensionReport",
+        "queryCategorySalesDimensionReport",
+    ):
+        result = post(authenticated_http_client, path + endpoint, {**base, "storeIds": [target]})
+        assert not result.get("rows") and not result.get("total"), {
+            "role": report_role,
+            "endpoint": endpoint,
+            "storeId": target,
+            "response": result,
+        }
+
+
+@pytest.mark.slow
+def test_procurement_data_matches_administrator(
+    administrator_client, authenticated_http_client, api_base_url, report_role, report_window
+):
+    if report_role != "procurement":
+        pytest.skip("Only applicable to procurement")
+    payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
+    url = api_base_url.rstrip("/") + "/oms-admin/sales/report/queryOmsInventoryNew"
+
+    def get(session):
+        response = session.post(url, json=payload, timeout=(10, 180))
+        response.raise_for_status()
+        body = response.json()
+        assert body.get("code") == 200, body
+        rows = body.get("rows") or []
+        assert rows and len(rows) == body.get("total") <= 500, "No sample or incomplete pagination"
+        return {str(row["itemId"]): (row.get("salesNumber"), row.get("stockNum")) for row in rows}
+
+    before = get(administrator_client)
+    procurement = get(authenticated_http_client)
+    after = get(administrator_client)
+    assert before == after, "Administrator data changed during cross-role comparison; test incomplete"
+    assert procurement == before, {"administratorCount": len(before), "procurementCount": len(procurement)}
