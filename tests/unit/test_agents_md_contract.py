@@ -115,7 +115,17 @@ def test_agents_md_keeps_knowledge_base_counts_dynamic():
 def test_ui_automation_browser_and_login_contract_is_documented():
     agents = _read_agents_md()
     workflow = (PROJECT_ROOT / "docs/AUTO_TEST_WORKFLOW.md").read_text(encoding="utf-8")
-    for fragment in ("UI 自动化优先复用项目框架", "浏览器选择遵循用户明确要求", "执行与登录排查按 [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)"):
+    for fragment in (
+        "UI 自动化优先复用项目框架",
+        "浏览器选择遵循用户明确要求",
+        "执行与登录排查按 [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)",
+    ):
         assert fragment in agents
-    for fragment in ("目标账号角色", "使用用户现有浏览器时", "未经用户同意不切换浏览器", "其他角色登录失败不能证明目标角色登录失败", "不能假定独立 `auto_login`"):
+    for fragment in (
+        "目标账号角色",
+        "使用用户现有浏览器时",
+        "未经用户同意不切换浏览器",
+        "其他角色登录失败不能证明目标角色登录失败",
+        "不能假定独立 `auto_login`",
+    ):
         assert fragment in workflow
