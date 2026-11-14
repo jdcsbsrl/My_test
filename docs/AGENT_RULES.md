@@ -1,8 +1,8 @@
 ---
 title: 智能体配置与交互规则
 purpose: Agent 权限、知识访问、审核和交互约束
-version: 3.2.0
-updated: 2026-09-01
+version: 3.3.0
+updated: 2026-11-12
 authority: 专项规范
 ---
 # 智能体配置与交互规则
@@ -11,8 +11,8 @@ authority: 专项规范
 > `CaseGenerationService` / `tools/case_generator_cli.py`。历史低层
 > `modules/trae_test/utils/test_case_generator.py` 仅保留兼容和评估调用。
 
-> 版本：3.2.0
-> 生效日期：2026-09-01
+> 版本：3.3.0
+> 生效日期：2026-11-12
 > 维护人：Test ERP Team
 
 ---
@@ -176,7 +176,7 @@ AutoTestExecutor ──► 数据准备（DataLoader/DynamicDataGen/VersionMgr�
 | 任务类型 | 负责智能体 | 触发条件 |
 |----------|-----------|----------|
 | 测试用例生成 | TestCaseGenerator | 用户提交测试需求 |
-| 自动化测试执行 | AutoTestExecutor | 测试用例生成完成 |
+| 自动化测试执行 | AutoTestExecutor | 用户在当前任务中明确要求执行，且环境与授权已确认 |
 | 知识检索 | KnowledgeRetriever | 其他智能体请求 |
 | 报告生成 | ReportGenerator | 测试执行完成 |
 | 审核监督 | AuditAgent | 测试用例生成完成、测试执行完成、输出文件生成完成 |
@@ -189,23 +189,11 @@ AutoTestExecutor ──► 数据准备（DataLoader/DynamicDataGen/VersionMgr�
 
 ### 审核触发机制
 
-审核Agent在以下关键节点自动触发：
-1. **测试用例生成后**: 审核测试用例格式是否符合15字段标准模板
-2. **知识库访问前**: 审核访问权限是否符合访问控制规则
-3. **输出文件生成后**: 审核文件格式和命名规范
+审核触发节点、范围及结果处理统一见本文件「7.4 审核标准和流程」。
 
 ### 审核反馈流程
 
-```
-Agent执行任务
-    │
-    ▼
-AuditAgent审核
-    │
-    ├── 通过 ──► 继续执行
-    │
-    └── 未通过 ──► 生成审核报告 ──► 返回改进建议 ──► 修正后重新审核
-```
+反馈和重新审核按本文件「7.4 审核标准和流程」执行。
 
 ---
 
@@ -366,9 +354,8 @@ IF 测试环境配置有效
 #### 7.4.1 审核触发机制
 **必须审核**: 所有输出文件必须经过审核Agent审核
 **审核节点**:
-1. 输出文件生成后立即审核
-2. 审核不通过必须阻断任务继续
-3. 修正后重新审核
+1. 测试用例生成后审核字段及格式；知识库访问前审核访问权限；输出文件生成后立即审核文件格式和命名。
+2. 审核不通过必须阻断任务继续，修正后重新审核。
 
 #### 7.4.2 审核内容清单
 **文件审核**:
@@ -464,33 +451,7 @@ IF 测试环境配置有效
 
 ### 7.8 审核Agent工作流程
 
-```
-Agent生成输出
-    │
-    ▼
-AuditAgent接收
-    │
-    ▼
-检查文件命名 ──► 不通过 ──► 记录+反馈+阻断
-    │
-    ▼
-检查文件位置 ──► 不通过 ──► 记录+反馈+阻断
-    │
-    ▼
-检查文件格式 ──► 不通过 ──► 记录+反馈+阻断
-    │
-    ▼
-检查Excel内容 ──► 不通过 ──► 记录+反馈+阻断
-    │
-    ▼
-检查代码规范（如适用） ──► 不通过 ──► 记录+反馈+阻断
-    │
-    ▼
-记录审核结果
-    │
-    ▼
-通过，允许继续
-```
+审核内容、阻断及反馈以「7.4 审核标准和流程」和「7.5 错误反馈机制」为准。
 
 ---
 
@@ -537,12 +498,13 @@ python tools/run_regression.py `
   --impact-query "销售订单创建完整业务规则"
 ```
 
-**Step 3: 确认后执行已登记脚本**
+**Step 3: 确认后执行所选范围或已登记脚本**
 ```powershell
+python tools/run_regression.py --env test --scope module --execute
 python tools/run_regression.py --env test --case-id CASE-ID --execute
 ```
 
-回归入口会统一处理环境安全校验、已登记用例的 `script_id`、数据生命周期、执行证据和 HTML/JSON 报告。报告写入 `.runtime/reports/`；没有有效脚本关联的自然语言用例不能直接执行。
+`--scope` 通过 `regression_session` 执行只读业务查询并生成 HTML/JSON 报告；`--case-id` 和 `--impact-query` 校验登记用例的 `script_id`，再由 pytest 执行关联节点并生成执行证据。登记用例的数据生命周期由 pytest 测试框架管理。报告写入 `.runtime/reports/`；没有有效脚本关联的自然语言用例不能直接执行。
 
 ### 9.3 关键规则摘要
 

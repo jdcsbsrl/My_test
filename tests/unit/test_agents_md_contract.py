@@ -96,7 +96,9 @@ def test_agents_md_keeps_required_harness_engineer_contract_entries():
         "必须通过 `KnowledgeRetriever` API",
         "禁止直接按文件路径读取原始JSON",
         "自动化测试仅允许在 UAT/内网测试环境执行",
+        "只有用户在当前任务中明确要求时，才可按其指定范围处理",
         "需用户明确批准",
+        "`--execute` 只是命令执行开关，不替代用户授权",
     ]
 
     for fragment in required_fragments:

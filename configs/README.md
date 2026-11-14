@@ -3,20 +3,20 @@
 | 配置来源 | 用途 | 与 UAT 关系 |
 |-----------|------|----------------|
 | [test.yaml](test.yaml) | 默认自动化（`pytest --env=test`） | 可通过 `TEST_WEB_*` 覆盖基址；字段与 UAT 同构便于对齐用例 |
-| `test_env` + `TEST_WEB_*` | 专用测试栈（`pytest --env=test_env`）；当前不提交独立 YAML | 通过 `TEST_WEB_BASE_URL` / `TEST_WEB_API_BASE_URL` 指定独立主机/API；端点必须在配置允许列表内 |
+| `test_env` + `TEST_WEB_*` | 测试环境的额外配置档（部分 pytest 入口支持）；不是新增业务环境，也未提交独立 YAML | 通过 `TEST_WEB_BASE_URL` / `TEST_WEB_API_BASE_URL` 配置测试端点；端点必须属于批准的测试环境且通过允许列表校验 |
 | [uat.yaml](uat.yaml) | UAT（`pytest --env=uat`） | 验收环境 |
 
 ## 数据隔离与功能一致性
 
-- **功能一致性**：三套 YAML 中 `api.*`、`playwright.*` 等键对齐，差异主要在 `base_url` / `api_base_url` 与数据库连接。
-- **数据隔离**：由 **不同主机、不同数据库、不同租户** 保证；本仓库只管理 URL 与连接串占位，不存放业务数据。
+- **功能配置**：`test` 和 `uat` 使用各自的 YAML；`test_env` 在没有独立 YAML 时由环境变量构造，并非第三套 YAML。
+- **数据隔离**：取决于实际部署的主机、数据库和租户；配置档名称或不同 URL 本身不能证明数据隔离。
 - **访问验证**：在本地配置 `.env`（参考仓库根目录 `.env.example`）后，使用 pytest 的 `--env` 选择配置环境：
 
 ```bash
 pytest --env=test_env --collect-only
 ```
 
-`test_env` 没有独立的已提交 YAML 时，由 `ConfigManager` 根据 `TEST_WEB_*` 环境变量构造配置；执行真实用例前必须确认网页/API 端点属于批准的 TEST/UAT 环境。
+`test_env` 没有独立的已提交 YAML 时，由 `ConfigManager` 根据 `TEST_WEB_*` 环境变量构造配置；其默认允许的源与 `test` 相同，但配置和凭据来源不一定相同，不能视为完全等价。正式回归命令只接受 `test`、`uat`；执行真实用例前必须确认网页/API 端点属于批准的测试环境。
 
 ## Customer OpenAPI 本地凭证（可选）
 

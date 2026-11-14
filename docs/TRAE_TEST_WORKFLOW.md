@@ -1,8 +1,8 @@
 ---
 title: trae_test 模块工作流程
 purpose: 需求生成、自动校验、固定字段和用例版本管理
-version: 4.0.0
-updated: 2026-09-05
+version: 4.1.0
+updated: 2026-11-12
 authority: 专项规范
 ---
 
@@ -112,6 +112,8 @@ AuditAgent 检查字段、固定值、业务对象、步骤、可观察预期和
 15. 质量评分
 
 
+评分审核统一以格式整理流程写入的“最终评分”为结构参考分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
+
 ## 交付与历史
 
 Excel 使用既有 ExcelGenerator 和固定模板，写入 `workspace/YYYYMMDD/`，历史交付不自动删除。
@@ -131,9 +133,9 @@ python tools/case_generator_cli.py list-cases --history
 ## 自动化关联
 
 用例登记表中的 `script_id` 关联模块内具体pytest节点。`update --script-id` 可写入关联。
-`tools/run_regression.py --case-id <ID>` 默认预览活动版本与脚本；`--execute` 明确执行。
+`tools/run_regression.py` 默认只预览：`--case-id <ID>` 显示活动版本与脚本，`--scope <范围>` 显示场景计划；两者都必须显式加 `--execute` 才执行。
 同一需求的活动P0用例不能被选择范围遗漏。执行结果关联执行时的ID和版本，保留证据位置。
-该入口复用现有授权、环境校验和数据生命周期；不会自动将自然语言用例编译成测试脚本。
+登记用例执行会校验授权、环境和 `script_id`，并由 pytest 执行绑定节点、生成执行证据；`--scope` 则通过独立的只读查询路径执行。两条路径都不会自动将自然语言用例编译成测试脚本。
 
 ## 日常维护和本地助手工作方式
 

@@ -1,8 +1,8 @@
 ---
 title: auto_test 模块工作流程
 purpose: 自动化测试执行、数据生命周期和报告
-version: 3.0.0
-updated: 2026-08-18
+version: 3.1.0
+updated: 2026-11-12
 authority: 专项规范
 ---
 
@@ -75,7 +75,7 @@ authority: 专项规范
 **处理步骤**:
 1. 读取环境配置文件
 2. 验证环境类型（test/uat）
-3. 检查环境安全性（禁止生产环境）
+3. 检查环境安全性（常规自动化回归禁止生产环境；生产数据专项任务只能走 [PROJECT_RULES.md](PROJECT_RULES.md) 规定的专用只读流程）
 4. 验证API端点和认证信息
 5. 初始化 TestDataFactory（注册数据生成器）
 6. 初始化 TestDataLifecycleManager（注册 setUp/cleanup 回调）
@@ -160,11 +160,13 @@ authority: 专项规范
 **处理步骤**:
 1. 生成 HTML 可视化报告
 2. 生成 JSON 格式报告（便于集成）
-3. 发送测试结果通知
+3. （可选）需要通知时按独立通知能力发送结果；正式回归入口只生成报告并打印摘要，不包含通知步骤
 
 **输出**: 测试报告（HTML/JSON），统一写入 `.runtime/reports/`。
 
 ## 支持的测试环境
+
+正式回归会话仅接受 `test`、`uat`。配置管理器和部分 pytest 入口另支持 `test_env` 配置档，须验证具体入口和经批准的测试端点；这不改变项目入口中的环境红线或正式回归会话支持范围。
 
 | 环境 | 配置文件 | 说明 |
 |------|----------|------|
@@ -201,15 +203,18 @@ python tools/run_regression.py --env test --case-id CASE-ID
 python tools/run_regression.py --env test --requirement-id REQ-DEMO --impact-query "销售订单查询完整业务规则"
 ```
 
-### 执行已登记用例
+### 执行所选范围或已登记用例
 
-确认环境、范围和授权后，显式增加 `--execute` 才会执行登记表中关联的 pytest 节点：
+确认环境、范围和当前任务的授权后，显式增加 `--execute` 才会执行：`--case-id` 运行登记表中关联的 pytest 节点，`--scope` 运行该范围的业务查询。
 
 ```powershell
 python tools/run_regression.py --env test --case-id CASE-ID --execute
+python tools/run_regression.py --env test --scope module --execute
 ```
 
-执行过程会复用 `ConfigManager`、环境安全校验、`regression_session`、数据生命周期和已登记用例的脚本关联，不会把自然语言用例自动编译为测试脚本。
+`--execute` 只控制程序是否运行，不构成用户授权。
+
+两种入口的执行路径不同：`--scope` 通过 `regression_session` 执行只读业务查询并生成报告；`--case-id` 和 `--impact-query` 运行登记表关联的 pytest 节点，由测试框架管理用例数据生命周期和执行证据。两条路径都执行环境与授权校验，也都不会把自然语言用例自动编译为测试脚本。
 
 ### Python 调用
 
@@ -262,7 +267,7 @@ HTML 和 JSON 报告由 `run_regression_tests()` 统一写入 `.runtime/reports/
 
 ## 个人回归入口与结果可信度
 
-`python tools/run_regression.py --env test --scope smoke` 验证基础查询、精确筛选和状态筛选；`--scope module` 增加模糊筛选、组合筛选、空结果和分页检查；`--scope release` 执行模块全部查询契约，供发布门禁使用。
+`python tools/run_regression.py --env test --scope smoke --execute` 验证基础查询、精确筛选和状态筛选；`--scope module --execute` 增加模糊筛选、组合筛选、空结果和分页检查；`--scope release --execute` 执行模块全部查询契约，供发布门禁使用。不带 `--execute` 时只输出计划。
 执行需已有明确授权。数据不足返回BLOCKED，不用空列表证明筛选正确；HTTP成功码不能代替业务断言。
 返回码0表示所选范围全部通过，1表示失败，2表示验证不完整。报告展示计划数、实际执行数、跳过和阻断。
  pytest核心/P0用例跳过时不得返回成功；仅包含非核心可选用例的全跳过 shard 记录为验证不完整但不以退出码2阻断，setup/teardown错误进入运行摘要。

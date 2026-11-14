@@ -30,8 +30,8 @@
 
 ## 3. 核心红线
 
-1. **环境红线**：自动化测试仅允许在 UAT/内网测试环境执行（项目配置标识：`test`、`uat`）。
-2. **授权红线**：测试执行需用户明确批准；未经用户明确授权，不得擅自提交、推送、删除或覆盖用户已有改动。
+1. **环境红线**：常规自动化测试仅允许在 UAT/内网测试环境执行（项目配置标识：`test`、`uat`）。生产环境默认禁止测试；只有用户在当前任务中明确要求时，才可按其指定范围处理。现有正式回归入口不支持 `prod`，完整边界见 [PROJECT_RULES.md](docs/PROJECT_RULES.md)。
+2. **授权红线**：每次测试执行需用户明确批准；`--execute` 只是命令执行开关，不替代用户授权。未经用户明确授权，不得擅自提交、推送、删除或覆盖用户已有改动。
 3. **数据红线**：必须通过 `KnowledgeRetriever` API 访问知识库，禁止直接按文件路径读取原始JSON。
 4. **目录红线**：临时缓存、日志、报告、下载文件和脚本进入 `.runtime/`；最终测试用例和交付文件进入 `workspace/YYYYMMDD/`。
 5. **历史红线**：workspace 下的历史测试用例和交付记录永久保留，任何自动清理工具不得触碰。
@@ -82,6 +82,7 @@
 
 - UI 自动化优先复用项目框架，浏览器选择遵循用户明确要求；执行与登录排查按 [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) 进行。
 - [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)：执行流程和数据生命周期。
+- [SALES_VOLUME_REGRESSION_1003420.md](docs/SALES_VOLUME_REGRESSION_1003420.md)：商品销量报表回归的范围、角色矩阵与 slow 用例。
 - [__main__.py](modules/auto_test/__main__.py)：auto_test 模块原生排序审计入口；排序逻辑、测试和报告由模块维护。
 - [run_regression.py](tools/run_regression.py)：回归测试入口。
 - [report_generator.py](tools/report_generator.py)：`TestReportGenerator`，使用 `--help` 查看参数。
@@ -105,6 +106,8 @@
 - `data/`：可变、按场景切换的脱敏输入数据；真实数据放 `data/private/`。
 
 运行时目录由 `runtime_dir()` 管理，允许的 kind 由 `RUNTIME_KINDS` 固定。`tools/clean_runtime.py` 只清理 `.runtime/`；项目不提供 workspace 自动清理工具。
+
+重复件、零字节或锁文件样本、历史报告和非权威知识副本只登记不删改，清单见 [HISTORICAL_ARTIFACTS.md](docs/HISTORICAL_ARTIFACTS.md)。
 
 ## 8. 测试、审核与 CI
 
@@ -138,7 +141,9 @@
 | 项目结构 | [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) |
 | 整体工作流 | [WORKFLOW.md](docs/WORKFLOW.md) |
 | 审核规则 | [AGENT_RULES.md](docs/AGENT_RULES.md) |
+| 环境与安全规则 | [PROJECT_RULES.md](docs/PROJECT_RULES.md) |
 | 文件与产物规则 | [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) |
+| 历史资料登记 | [HISTORICAL_ARTIFACTS.md](docs/HISTORICAL_ARTIFACTS.md) |
 | 结构审核 | [project_structure_auditor.py](tools/project_structure_auditor.py) |
 | 文档一致性审核 | [doc_consistency_checker.py](tools/doc_consistency_checker.py) |
 

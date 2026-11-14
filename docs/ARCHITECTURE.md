@@ -1,8 +1,8 @@
 ---
 title: Test ERP Architecture
 purpose: 项目模块、运行时路径和 Agent 编排架构
-version: 3.0.0
-updated: 2026-08-18
+version: 3.1.0
+updated: 2026-11-12
 authority: 参考架构
 ---
 
@@ -18,7 +18,8 @@ Test ERP separates test-case generation from test execution. The orchestration l
 
 Generates and manages standardized 15-field test cases.
 
-- `utils/test_case_generator.py`: test-case generation.
+- `utils/case_generation_service.py`: the formal requirement-to-case service.
+- `utils/test_case_generator.py`: legacy low-level generator kept for compatibility and evaluation.
 - `utils/test_case_strategy.py`: scoring, optimization, and regeneration.
 - `utils/knowledge_retriever.py`: the only agent-facing knowledge-base API.
 - `utils/file_splitter.py` and `utils/index_builder_v3.py`: chunking and index construction.
@@ -52,16 +53,15 @@ assets/knowledge_base/
 ## Workflow
 
 ```text
-requirement
-  -> scenario analysis
-  -> 15-field test-case generation
-  -> AuditAgent gateway
-  -> workflow state transition
-  -> automated execution
-  -> result collection and report
+generation chain: requirement -> scenario analysis -> 15-field test-case generation
+  -> AuditAgent gateway -> workflow state transition -> deliverable and registry
+
+execution chain (separate, needs explicit user authorization per task):
+  approved test/uat environment -> environment check -> selected scope or registered cases
+  -> TestDataFactory / lifecycle -> execution -> result collection and report
 ```
 
-Audit failures block delivery. Test data is created through `TestDataFactory` and cleaned up through `TestDataLifecycleManager`, including dependency-aware cascading cleanup.
+Audit failures block delivery. The generation chain does not start the execution chain; execution begins only when the user asks for it in the current task and the environment is approved. Test data is created through `TestDataFactory` and cleaned up through `TestDataLifecycleManager`, including dependency-aware cascading cleanup.
 
 ## Quality and recovery
 

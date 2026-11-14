@@ -126,11 +126,14 @@ python tools/run_regression.py --env test --case-id CASE-ID
 python tools/run_regression.py --env test --requirement-id REQ-DEMO --impact-query "销售订单查询完整业务规则"
 ```
 
-获得明确授权并确认环境后，使用 `--execute` 执行已登记脚本：
+获得明确授权并确认环境后，使用 `--execute` 执行所选范围或已登记脚本：
 
 ```powershell
+python tools/run_regression.py --env test --scope module --execute
 python tools/run_regression.py --env test --case-id CASE-ID --execute
 ```
+
+`--execute` 只是命令执行开关，不替代用户授权；入口只接受 `test`、`uat`。
 
 回归执行不会把自然语言用例自动编译为测试脚本。没有有效 `script_id` 的用例只能出现在计划或健康检查结果中，不能直接执行。
 
@@ -142,7 +145,7 @@ python tools/run_regression.py --env test --case-id CASE-ID --execute
 - 最终 Excel 只写入 `workspace/YYYYMMDD/`；
 - 中间 JSON、评分轨迹、审核结果和回归报告只写入 `.runtime/`；
 - `workspace/` 中的历史交付和登记表历史版本不得自动清理；
-- 自动化执行只允许 `test`、`test_env` 或 `uat` 中经批准的测试端点，禁止生产环境。
+- 常规自动化执行只允许经批准的 TEST/UAT 测试端点；生产数据专项任务只有在当前任务明确要求时，才可走 [PROJECT_RULES.md](PROJECT_RULES.md) 规定的专用只读流程，不能通过常规回归入口执行。`test_env` 是部分入口支持的测试配置档，不代表独立业务环境，正式回归入口仅接受 `test`、`uat`。
 
 ## 兼容性说明
 

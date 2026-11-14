@@ -52,9 +52,11 @@ Agents must access business knowledge through `KnowledgeRetriever`; do not read 
 - [Workflow](docs/WORKFLOW.md)
 - [Test-case workflow](docs/TRAE_TEST_WORKFLOW.md)
 - [Automation workflow](docs/AUTO_TEST_WORKFLOW.md)
+- [Project rules](docs/PROJECT_RULES.md)
+- [Sales-volume regression (1003420)](docs/SALES_VOLUME_REGRESSION_1003420.md)
 - [Local knowledge-base guide](docs/LOCAL_KNOWLEDGE_BASE_GUIDE.md)
 - [Agent workspace instructions](AGENTS.md)
 
 ## Safety boundaries
 
-Run automated tests only in approved UAT or internal test environments. Keep credentials, tokens, raw business knowledge, and environment-specific test data out of Git.
+Run routine automated regression only against approved TEST/UAT endpoints. Production access is denied by default; a production data check requires an explicit request in the current task and must use an approved dedicated read-only workflow, not the regular regression entry. The regression entry accepts only `test` and `uat`; see [project rules](docs/PROJECT_RULES.md). Keep credentials, tokens, raw business knowledge, and environment-specific test data out of Git.
