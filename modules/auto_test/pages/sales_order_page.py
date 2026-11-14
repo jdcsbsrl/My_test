@@ -972,9 +972,13 @@ class SalesOrderPage(BasePage):
         """切换每页显示条数并返回加载时间(秒)"""
         import time
 
+        if size <= 0:
+            raise ValueError("每页条数必须为正整数")
         selectors = [
+            ".el-pagination__sizes .el-select__wrapper",
+            ".el-pagination__sizes .el-select",
             "//div[contains(@class, 'el-pagination')]//select",
-            "//div[contains(@class, 'el-pagination__sizes')]//div[contains(@class, 'el-select')]",
+            "//span[contains(@class, 'el-pagination__sizes')]//div[contains(@class, 'el-select')]",
             "//input[contains(@class, 'el-pagination__size')]",
         ]
         size_trigger = None
@@ -988,36 +992,57 @@ class SalesOrderPage(BasePage):
                 continue
         if size_trigger is None:
             raise ValueError("无法找到每页条数选择器")
+
+        selected_size = self.page.locator(".el-pagination__sizes").first.inner_text()
+        if re.search(rf"(?<!\d){size}\s*条/页(?!\d)", selected_size):
+            return 0.0
+
         size_trigger.click()
-        self.wait_for_loading_complete(timeout=10000)
-        option_selectors = [
-            f"//li[contains(@class, 'el-select-dropdown__item')]//span[text()='{size}']",
-            f"//li[contains(@class, 'el-select-dropdown__item') and text()='{size}']",
-            f"//span[text()='{size}条/页']",
-            f"//li[text()='{size}']",
-        ]
-        option = None
-        for selector in option_selectors:
-            try:
-                elem = self.page.locator(selector).first
-                if elem.is_visible():
-                    option = elem
-                    break
-            except Exception:
-                continue
-        if option is None:
-            try:
-                option = self.page.locator(f"text={size}").first
-            except Exception:
-                raise ValueError(f"无法找到每页条数选项 {size}")
-        self.page.wait_for_load_state("networkidle")
+        option = (
+            self.page.locator(".el-select-dropdown__item:visible")
+            .filter(has_text=re.compile(rf"^\s*{size}\s*条/页\s*$"))
+            .first
+        )
+        try:
+            option.wait_for(state="visible", timeout=10000)
+            option_selectors = []
+        except Exception:
+            option = None
+            option_selectors = [
+                f"//li[contains(@class, 'el-select-dropdown__item')]//span[text()='{size}']",
+                f"//li[contains(@class, 'el-select-dropdown__item') and text()='{size}']",
+                f"//span[text()='{size}条/页']",
+                f"//li[text()='{size}']",
+            ]
+        if option_selectors:
+            option = None
+            for selector in option_selectors:
+                try:
+                    elem = self.page.locator(selector).first
+                    if elem.is_visible():
+                        option = elem
+                        break
+                except Exception:
+                    continue
+        if option is None or not option.count():
+            raise ValueError(f"无法找到每页条数选项 {size}")
         start_time = time.time()
-        option.click()
-        self.wait_for_load_state("networkidle")
+        with self.page.expect_response(lambda response: self._is_page_size_response(response, size), timeout=30000):
+            option.click()
         self.wait_for_table_data(timeout=30000)
         elapsed = time.time() - start_time
         logger.info(f"切换每页 {size} 条加载时间: {elapsed:.3f}s")
         return elapsed
+
+    @staticmethod
+    def _is_page_size_response(response, size: int) -> bool:
+        if "batchListNew" not in response.url:
+            return False
+        try:
+            payload = response.request.post_data_json
+        except Exception:
+            return False
+        return isinstance(payload, dict) and int(payload.get("pageSize", 0) or 0) == size
 
     @allure.step("获取表格行数")
     def get_table_row_count(self) -> int:

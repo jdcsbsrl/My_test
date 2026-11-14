@@ -251,6 +251,8 @@ jobs:
             test_files: "modules/auto_test/tests/test_sales_order_fixed_category_1003845.py"
           - shard: 14
             test_files: "modules/auto_test/tests/test_export_requirement_1003531.py -m 'not slow'"
+          - shard: 15
+            test_files: "modules/auto_test/tests/test_customer_bill_exchange_rate_1003647.py"
       fail-fast: false
       # Each runner has an isolated browser; allow two administrator shards
       # while keeping the account lane bounded.
@@ -451,7 +453,7 @@ jobs:
           if-no-files-found: warn
 
   inventory-tests:
-    name: UI测试 (组长-库存分片${{ matrix.shard }})
+    name: UI测试 (组长业务分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     # This lane has its own account. It may run in parallel with the
     # administrator sales/report lane, but its own shards remain serial.
@@ -460,7 +462,7 @@ jobs:
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: "true"
-      # Inventory pages and order-export regression tests use the
+      # Inventory pages, order exports, and pagination regression use the
       # business-group-leader account, which owns the seeded order fixture.
       TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
       TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
@@ -474,13 +476,13 @@ jobs:
           - shard: 6
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k TestInventorySKUSearch"
           - shard: 7
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination\""
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py modules/auto_test/tests/test_pagination_requirement_1004106.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination or test_sales_order_pagination or test_platform_exception_pagination\""
           - shard: 8
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
           - shard: 9
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
       fail-fast: false
-      # Inventory shards share the group-leader account and backend data scope.
+      # Group-leader shards share the account and backend data scope.
       # Allow two isolated runners at a time while keeping the lane bounded.
       max-parallel: 2
     steps:
@@ -517,7 +519,7 @@ jobs:
       - name: Check sales order delivery status filters (group leader)
         if: matrix.shard == 5 && success()
         run: python -m modules.auto_test delivery-status-regression --env test --execute --page-size 500 --max-pages 100
-      - name: Scan inventory UI test artifacts for secrets
+      - name: Scan group-leader UI test artifacts for secrets
         id: scan_leader_artifacts
         if: always()
         run: |
@@ -527,7 +529,7 @@ jobs:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
           TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
-      - name: Upload inventory UI test results
+      - name: Upload group-leader UI test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
