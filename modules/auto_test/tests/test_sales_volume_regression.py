@@ -18,19 +18,19 @@ from modules.auto_test.api.sku_group_api import SKUGroupAPI
 from modules.auto_test.core.sales_volume_contract import (
     DIMENSIONS,
     aggregate_orders,
+    build_completed_report_window,
     build_filter,
     category_order_counts,
     find_task_by_marker,
     group_sales_by_sku,
+    order_source_breakdown,
     order_item_rows,
 )
 
 
 @pytest.fixture
 def report_window():
-    end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=0)
-    start = (end - timedelta(days=30)).replace(hour=0, minute=0, second=0)
-    return start.strftime("%Y-%m-%d %H:%M:%S"), end.strftime("%Y-%m-%d %H:%M:%S")
+    return build_completed_report_window(os.environ.get("SALES_VOLUME_AS_OF_DATE"))
 
 
 @pytest.fixture
@@ -861,7 +861,9 @@ def sold_order_data(authenticated_http_client, api_base_url, report_window, sold
     return _fetch_order_data(authenticated_http_client, api_base_url, report_window, sold_store_ids)
 
 
-def test_multistore_sku_sales_against_order_items(report_query, report_window, sold_store_ids, sold_order_data):
+def test_multistore_sku_sales_against_order_items(
+    report_query, report_window, sold_store_ids, sold_order_data, authenticated_http_client, api_base_url
+):
     orders, details = sold_order_data
     source = aggregate_orders(orders, details)
     payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
@@ -873,7 +875,71 @@ def test_multistore_sku_sales_against_order_items(report_query, report_window, s
         str(row["itemId"]): {"sales": int(row.get("salesNumber") or 0), "orders": int(row.get("orderQuantity") or 0)}
         for row in rows
     }
-    assert actual == source, {"report": actual, "orderSource": source}
+    missing = {"sales": 0, "orders": 0}
+    mismatched_skus = sorted(
+        sku for sku in set(actual) | set(source) if actual.get(sku, missing) != source.get(sku, missing)
+    )
+    if mismatched_skus:
+        rechecked_orders, rechecked_details = _fetch_order_data(
+            authenticated_http_client,
+            api_base_url,
+            report_window,
+            sold_store_ids,
+            item_ids=mismatched_skus,
+        )
+        rechecked_source = aggregate_orders(rechecked_orders, rechecked_details)
+        rechecked_report_body = report_query(DIMENSIONS["sku"], payload)
+        assert rechecked_report_body.get("code") == 200, rechecked_report_body
+        rechecked_report = {
+            str(row["itemId"]): {
+                "sales": int(row.get("salesNumber") or 0),
+                "orders": int(row.get("orderQuantity") or 0),
+            }
+            for row in rechecked_report_body.get("rows") or []
+        }
+        source_stable = all(source.get(sku, missing) == rechecked_source.get(sku, missing) for sku in mismatched_skus)
+        report_stable = all(actual.get(sku, missing) == rechecked_report.get(sku, missing) for sku in mismatched_skus)
+        source_lines = order_source_breakdown(rechecked_orders, rechecked_details, mismatched_skus)
+        mismatches = {}
+        for sku in mismatched_skus[:10]:
+            by_order = defaultdict(lambda: {"quantity": 0, "lineQuantities": [], "groupSkuIds": set()})
+            for line in source_lines.get(sku, []):
+                order = by_order[line["orderNo"]]
+                order["quantity"] += line["quantity"]
+                order["lineQuantities"].append(line["quantity"])
+                if line.get("groupSkuId"):
+                    order["groupSkuIds"].add(line["groupSkuId"])
+                for field in ("orderStatus", "payTime", "storeId"):
+                    if line.get(field) is not None:
+                        order[field] = line[field]
+            order_summary = {
+                order_no: {
+                    **values,
+                    "lineQuantities": values["lineQuantities"],
+                    "groupSkuIds": sorted(values["groupSkuIds"]),
+                }
+                for order_no, values in by_order.items()
+            }
+            mismatches[sku] = {
+                "report": actual.get(sku, missing),
+                "orderSource": source.get(sku, missing),
+                "reportRecheck": rechecked_report.get(sku, missing),
+                "orderSourceRecheck": rechecked_source.get(sku, missing),
+                "orderLinesByOrder": order_summary,
+            }
+        diagnostic = {
+            "status": "STABLE_SOURCE_REPORT_MISMATCH" if source_stable and report_stable else "INCOMPLETE_DATA_CHANGED",
+            "reportWindow": report_window,
+            "storeIds": list(sold_store_ids),
+            "sourceStable": source_stable,
+            "reportStable": report_stable,
+            "mismatchSkuCount": len(mismatched_skus),
+            "mismatches": mismatches,
+        }
+        print("SALES_VOLUME_RECONCILIATION_MISMATCH " + json.dumps(diagnostic, ensure_ascii=True, sort_keys=True))
+        if not source_stable or not report_stable:
+            pytest.fail("INCOMPLETE: source or report values changed during reconciliation; see diagnostic snapshot")
+        assert not mismatched_skus, diagnostic
 
 
 def test_bundle_order_sample_is_available(
@@ -917,7 +983,12 @@ def test_bundle_order_sample_is_available(
             ]
             if bundles:
                 test_multistore_sku_sales_against_order_items(
-                    report_query, window, [], (candidate_orders, candidate_details)
+                    report_query,
+                    window,
+                    [],
+                    (candidate_orders, candidate_details),
+                    authenticated_http_client,
+                    api_base_url,
                 )
                 break
         if not bundles:

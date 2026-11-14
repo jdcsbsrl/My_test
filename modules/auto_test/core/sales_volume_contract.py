@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -13,6 +13,32 @@ DIMENSIONS = {
     "country": "queryCountrySalesDimensionReport",
     "category": "queryCategorySalesDimensionReport",
 }
+
+
+def build_completed_report_window(as_of_date: date | str | None = None, days: int = 30) -> tuple[str, str]:
+    """Build a report window from completed calendar days only.
+
+    ``as_of_date`` is the run's shared anchor date. The window ends the day
+    before that anchor so current-day orders cannot move a reconciliation.
+    """
+    if days < 1:
+        raise ValueError("The completed report window must contain at least one day")
+    if isinstance(as_of_date, str):
+        try:
+            as_of_date = date.fromisoformat(as_of_date.strip())
+        except ValueError as exc:
+            raise ValueError("The report window anchor must use YYYY-MM-DD") from exc
+    elif as_of_date is None:
+        as_of_date = date.today()
+    elif not isinstance(as_of_date, date):
+        raise ValueError("The report window anchor must be a date or YYYY-MM-DD string")
+
+    end_date = as_of_date - timedelta(days=1)
+    start_date = end_date - timedelta(days=days - 1)
+    return (
+        f"{start_date:%Y-%m-%d} 00:00:00",
+        f"{end_date:%Y-%m-%d} 23:59:59",
+    )
 
 
 def build_filter(
@@ -58,10 +84,20 @@ def group_sales_by_sku(
 
 
 def order_item_rows(groups: Iterable[Mapping[str, Any]]) -> Iterator[Mapping[str, Any]]:
-    """Yield actual order items, including children of bundled SKU groups."""
+    """Yield active order items, omitting platform-removed lines."""
     for group in groups:
+        if _is_removed_order_item(group):
+            continue
         children = group.get("detail")
-        yield from children if isinstance(children, list) else [group]
+        items = children if isinstance(children, list) else [group]
+        yield from (item for item in items if not _is_removed_order_item(item))
+
+
+def _is_removed_order_item(item: Mapping[str, Any]) -> bool:
+    """Identify soft-removed marketplace lines still returned by order APIs."""
+    change_type = str(item.get("platformChangeType") or "").strip().casefold()
+    remove_tag = item.get("showRemoveTag")
+    return change_type == "removed" or remove_tag is True or str(remove_tag).strip().casefold() in {"1", "true"}
 
 
 def aggregate_orders(
@@ -85,6 +121,48 @@ def aggregate_orders(
                 sales[str(sku)] += quantity
                 order_numbers[str(sku)].add(order_no)
     return {sku: {"sales": total, "orders": len(order_numbers[sku])} for sku, total in sales.items()}
+
+
+def order_source_breakdown(
+    orders: Iterable[Mapping[str, Any]],
+    items_by_order: Mapping[str, list[Mapping[str, Any]]],
+    item_ids: Iterable[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Return per-order source lines for SKUs with a reconciliation mismatch."""
+    targets = {str(item_id) for item_id in item_ids}
+    breakdown: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for order in orders:
+        order_no = str(order.get("orderNo") or "")
+        if not order_no or str(order.get("orderStatus")) == "6":
+            continue
+        for group in items_by_order.get(order_no, []):
+            if _is_removed_order_item(group):
+                continue
+            children = group.get("detail")
+            item_rows = children if isinstance(children, list) else [group]
+            for item in item_rows:
+                if _is_removed_order_item(item):
+                    continue
+                item_id = str(item.get("itemId") or "")
+                quantity = int(item.get("quantity") or 0)
+                if item_id not in targets or quantity <= 0:
+                    continue
+                line: dict[str, Any] = {
+                    "orderNo": order_no,
+                    "orderStatus": str(order.get("orderStatus") or ""),
+                    "itemId": item_id,
+                    "quantity": quantity,
+                }
+                for field in ("payTime", "storeId"):
+                    value = order.get(field)
+                    if value is not None:
+                        line[field] = value
+                if isinstance(children, list):
+                    group_sku_id = group.get("groupSkuId") or group.get("itemId")
+                    if group_sku_id:
+                        line["groupSkuId"] = str(group_sku_id)
+                breakdown[item_id].append(line)
+    return dict(breakdown)
 
 
 def category_order_counts(

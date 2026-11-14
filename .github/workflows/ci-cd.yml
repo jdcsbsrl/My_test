@@ -308,10 +308,20 @@ jobs:
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 
+  sales-volume-window:
+    name: 商品销量报表固定数据窗口
+    runs-on: ubuntu-latest
+    outputs:
+      as_of_date: ${{ steps.anchor.outputs.as_of_date }}
+    steps:
+      - name: Resolve run date in Asia Shanghai
+        id: anchor
+        run: echo "as_of_date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
+
   sales-volume-regression:
     name: 商品销量报表回归（泳道${{ matrix.lane }}）
     runs-on: ubuntu-latest
-    needs: code-quality
+    needs: [code-quality, sales-volume-window]
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -323,6 +333,7 @@ jobs:
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: 'true'
+      SALES_VOLUME_AS_OF_DATE: ${{ needs.sales-volume-window.outputs.as_of_date }}
       ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
       ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       LEADER_USERNAME: ${{ secrets.LEADER_USERNAME }}
@@ -366,8 +377,8 @@ jobs:
           }
           printf '| 角色 | 检查 | 结果 |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
           case "${{ matrix.lane }}" in
-            A) roles=(admin sales) ;;
-            B) roles=(manager assistant procurement) ;;
+            A) roles=(admin sales procurement) ;;
+            B) roles=(manager assistant) ;;
             *) echo "未知商品销量报表泳道: ${{ matrix.lane }}"; exit 2 ;;
           esac
           for role in "${roles[@]}"; do
