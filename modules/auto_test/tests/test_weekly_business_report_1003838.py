@@ -292,10 +292,18 @@ def test_latest_week_admin_reports_match_source_receivable_bills(
 def test_report_tabs_and_customer_searches_are_available(
     authenticated_http_client, api_base_url: str, logged_in_page, ui_base_url, config_manager
 ) -> None:
-    """Check the six report tabs, customer filters and rendered-text searchability."""
+    """Check report tabs and verify customer-number filtering on populated sections."""
     assert config_manager.env in {"test", "uat"}
     api = _api(authenticated_http_client, api_base_url)
     _, rows = _latest_reports(api)
+    report = api.get_report(rows[0]["id"])
+    customer_no_by_section: dict[str, str] = {}
+    for row in report.get("detailList") or []:
+        section_type = str(row.get("sectionType"))
+        customer_no = row.get("customerNo")
+        if section_type in REPORT_TYPES and customer_no:
+            customer_no_by_section.setdefault(section_type, str(customer_no))
+
     report_page = WeeklyBusinessReportPage(logged_in_page, config=config_manager)
     report_page.open_detail(rows[0]["id"])
 
@@ -306,6 +314,8 @@ def test_report_tabs_and_customer_searches_are_available(
 
     observed_placeholders: set[str] = set()
     missing_customer_searches = []
+    section_for_tab = {tab_name: section_type for section_type, tab_name in REPORT_TYPES.items()}
+    searched_sections: set[str] = set()
     for tab_name in CUSTOMER_REPORT_TABS:
         report_page.select_tab(tab_name)
         placeholders = report_page.visible_input_placeholders() | report_page.visible_search_filter_labels()
@@ -315,10 +325,34 @@ def test_report_tabs_and_customer_searches_are_available(
             missing_customer_searches.append(f"{tab_name}: customer name")
         if not placeholders.intersection({"客户编号", "客户编码"}):
             missing_customer_searches.append(f"{tab_name}: customer number")
+
+        section_type = section_for_tab[tab_name]
+        customer_no = customer_no_by_section.get(section_type)
+        if customer_no:
+            number_filter = logged_in_page.locator(
+                "input[placeholder='客户编号']:visible, input[placeholder='客户编码']:visible"
+            ).first
+            expect(number_filter).to_be_visible(timeout=5000)
+            number_filter.fill(customer_no)
+            logged_in_page.get_by_role("button", name="搜索", exact=True).click()
+            matching_row = (
+                logged_in_page.locator(".el-table__body-wrapper:visible tbody tr.el-table__row:visible")
+                .filter(has_text=customer_no)
+                .first
+            )
+            expect(matching_row).to_be_visible(timeout=10000)
+            result_rows = logged_in_page.locator(".el-table__body-wrapper:visible tbody tr.el-table__row:visible")
+            expect(result_rows).to_have_count(1, timeout=10000)
+            searched_sections.add(section_type)
+            reset = logged_in_page.get_by_role("button", name="重置", exact=True).first
+            if reset.count() and reset.is_visible():
+                reset.click()
+
     assert not missing_customer_searches, (
         f"Customer search controls are missing: {missing_customer_searches}; "
         f"observed placeholders={sorted(observed_placeholders)}"
     )
+    assert searched_sections, "No populated customer section could be searched by customer number"
     assert observed_placeholders.intersection({"店长", "请选择店长"}), "No store-manager search was rendered"
     assert "款期类型" in observed_placeholders, "No payment-term-type search was rendered"
     assert "国家" in observed_placeholders, "No country search was rendered"
