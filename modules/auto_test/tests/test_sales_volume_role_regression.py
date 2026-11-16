@@ -236,14 +236,21 @@ def test_role_denied_store_with_administrator_sold_sample(
 @pytest.mark.slow
 @pytest.mark.parametrize("dimension,report_type", [("sku", 1), ("warehouse", 3), ("country", 4), ("category", 5)])
 def test_procurement_async_export_matches_query(
-    authenticated_http_client, api_base_url, report_query, report_window, report_role, dimension, report_type
+    authenticated_http_client,
+    login_token,
+    api_base_url,
+    report_query,
+    report_window,
+    report_role,
+    dimension,
+    report_type,
 ):
     assert report_role == "procurement", "This export regression is only applicable to procurement"
     from modules.auto_test.tests.test_sales_volume_regression import _assert_async_export_matches_query
 
     payload = _procurement_async_export_payload(report_query, report_window, dimension)
     _assert_async_export_matches_query(
-        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type
+        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type, login_token
     )
 
 

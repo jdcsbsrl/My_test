@@ -1,5 +1,7 @@
 """Shared, side-effect-free rules for the merged product sales report."""
 
+import base64
+import json
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from datetime import date, datetime, timedelta
@@ -239,14 +241,45 @@ def export_task_id(task: Mapping[str, Any]) -> str:
     raise ValueError("Export task row is missing its task ID")
 
 
+def token_user_id(token: str) -> str | None:
+    """Extract a user identifier claim without exposing or persisting the token."""
+    parts = str(token or "").strip().split(".")
+    if len(parts) < 2:
+        return None
+    encoded_payload = parts[1]
+    try:
+        payload = json.loads(base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4)))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    for key in ("userId", "user_id", "uid", "sub"):
+        value = payload.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return None
+
+
+def _task_conditions(task: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    conditions = task.get("taskConditions")
+    if isinstance(conditions, str):
+        try:
+            conditions = json.loads(conditions)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            return None
+    return conditions if isinstance(conditions, Mapping) else None
+
+
 def find_new_export_task(
     fetch_page: Callable[[int, int], Mapping[str, Any]],
     task_name_prefix: str,
     previous_task_ids: set[str],
     page_size: int = 100,
     max_pages: int = 200,
+    creator_id: str | None = None,
+    expected_task_conditions: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any] | None:
-    """Find the single task newly created under the ERP-generated name prefix."""
+    """Find a new default-named task using creator and condition correlation when provided."""
     tasks = list_export_tasks(fetch_page, page_size=page_size, max_pages=max_pages)
     matches = []
     for task in tasks:
@@ -254,7 +287,20 @@ def find_new_export_task(
         if (task_name == task_name_prefix or task_name.startswith(task_name_prefix + "_")) and export_task_id(
             task
         ) not in previous_task_ids:
+            if creator_id is not None and str(task.get("createBy") or "") != str(creator_id):
+                continue
+            if expected_task_conditions is not None and _task_conditions(task) != expected_task_conditions:
+                continue
             matches.append(task)
     if len(matches) > 1:
-        raise ValueError("More than one new export task matched the ERP task name")
+        summaries = [
+            {
+                "id": export_task_id(task),
+                "taskName": task.get("taskName"),
+                "createBy": task.get("createBy"),
+                "createTime": task.get("createTime"),
+            }
+            for task in matches
+        ]
+        raise ValueError(f"More than one new export task matched the requested creator and conditions: {summaries}")
     return matches[0] if matches else None

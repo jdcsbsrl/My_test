@@ -8,9 +8,14 @@ import json
 import os
 import re
 import time
+import zipfile
+import zlib
+from urllib.parse import urlsplit
 
 import pytest
+import requests
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 from modules.auto_test.api.inventory_sku_api import InventorySKUAPI
 from modules.auto_test.api.sku_group_api import SKUGroupAPI
@@ -27,6 +32,7 @@ from modules.auto_test.core.sales_volume_contract import (
     group_sales_by_sku,
     order_source_breakdown,
     order_item_rows,
+    token_user_id,
 )
 
 
@@ -1256,6 +1262,65 @@ def _read_sku_export(content):
     return totals, count
 
 
+def _download_export_workbook(session, file_url, timeout, max_attempts=3):
+    """Retry a task file that becomes visible before its XLSX object is complete."""
+    diagnostics = []
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = session.get(file_url, timeout=timeout)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            diagnostics.append(
+                {
+                    "attempt": attempt,
+                    "status": getattr(getattr(exc, "response", None), "status_code", None),
+                    "error": type(exc).__name__,
+                }
+            )
+            if attempt < max_attempts:
+                time.sleep(attempt * 2)
+            continue
+        content = response.content
+        try:
+            with zipfile.ZipFile(BytesIO(content)) as archive:
+                bad_member = archive.testzip()
+                if bad_member:
+                    raise zipfile.BadZipFile(f"Invalid ZIP member: {bad_member}")
+            workbook = load_workbook(BytesIO(content), read_only=True, data_only=True)
+            return content, workbook
+        except (zipfile.BadZipFile, zlib.error, EOFError, InvalidFileException) as exc:
+            diagnostics.append(
+                {
+                    "attempt": attempt,
+                    "status": response.status_code,
+                    "contentType": response.headers.get("content-type"),
+                    "declaredBytes": response.headers.get("content-length"),
+                    "downloadedBytes": len(content),
+                    "zipMagic": content[:4].hex(),
+                    "error": str(exc)[:300],
+                }
+            )
+            if attempt < max_attempts:
+                time.sleep(attempt * 2)
+    raise AssertionError(
+        {
+            "message": "Export task reported success but its workbook remained unreadable after retries",
+            "filePath": urlsplit(file_url).path,
+            "attempts": diagnostics,
+        }
+    ) from None
+
+
+def _export_task_summary(task):
+    if not task:
+        return None
+    return {
+        key: task.get(key)
+        for key in ("id", "taskId", "taskName", "status", "createBy", "createTime")
+        if task.get(key) is not None
+    } | {"hasFileUrl": bool(task.get("fileUrl"))}
+
+
 def test_search_content_export_covers_all_rows(authenticated_http_client, api_base_url, report_query, report_window):
     root = api_base_url.rstrip("/")
     payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
@@ -1326,7 +1391,9 @@ def test_category_summary_export_matches_listing(authenticated_http_client, api_
     assert exported == expected, {"listing": expected, "export": exported}
 
 
-def _assert_async_export_matches_query(session, api_base_url, report_query, payload, dimension, report_type):
+def _assert_async_export_matches_query(
+    session, api_base_url, report_query, payload, dimension, report_type, login_token
+):
     root = api_base_url.rstrip("/")
     before = report_query(DIMENSIONS["sku"], payload)
     assert before.get("code") == 200, before
@@ -1351,6 +1418,8 @@ def _assert_async_export_matches_query(session, api_base_url, report_query, payl
         return result.json()
 
     previous_task_ids = {export_task_id(task) for task in list_export_tasks(fetch_page)}
+    creator_id = token_user_id(login_token)
+    assert creator_id, "Authenticated token has no supported user ID claim; refusing ambiguous export-task matching"
     response = session.post(
         root + "/oms-admin/base/exportTask",
         json={
@@ -1367,25 +1436,35 @@ def _assert_async_export_matches_query(session, api_base_url, report_query, payl
     deadline = time.monotonic() + 300
     task = None
     while time.monotonic() < deadline:
-        task = find_new_export_task(fetch_page, task_name, previous_task_ids)
+        task = find_new_export_task(
+            fetch_page,
+            task_name,
+            previous_task_ids,
+            creator_id=creator_id,
+            expected_task_conditions=conditions,
+        )
         if task:
             if str(task.get("status")) == "1" and task.get("fileUrl"):
                 break
-            assert str(task.get("status")) != "2", task
+            assert str(task.get("status")) != "2", _export_task_summary(task)
         time.sleep(3)
-    assert task and str(task.get("status")) == "1" and task.get("fileUrl"), {"task": task_name, "last": task}
-    download = session.get(task["fileUrl"], timeout=(10, 180))
-    download.raise_for_status()
-    workbook = load_workbook(BytesIO(download.content), read_only=True, data_only=True)
+    assert task and str(task.get("status")) == "1" and task.get("fileUrl"), {
+        "taskName": task_name,
+        "last": _export_task_summary(task),
+    }
+    _, workbook = _download_export_workbook(session, task["fileUrl"], timeout=(10, 180))
     actual = defaultdict(Decimal)
-    for sheet in workbook:
-        iterator = sheet.iter_rows(values_only=True)
-        header = [str(value or "").replace(" ", "") for value in next(iterator)]
-        sku_index = next(index for index, name in enumerate(header) if name in ("库存SKU", "SKU编码"))
-        sale_index = header.index("销量")
-        for row in iterator:
-            if row[sku_index] not in (None, ""):
-                actual[str(row[sku_index])] += Decimal(str(row[sale_index] or 0))
+    try:
+        for sheet in workbook:
+            iterator = sheet.iter_rows(values_only=True)
+            header = [str(value or "").replace(" ", "") for value in next(iterator)]
+            sku_index = next(index for index, name in enumerate(header) if name in ("库存SKU", "SKU编码"))
+            sale_index = header.index("销量")
+            for row in iterator:
+                if row[sku_index] not in (None, ""):
+                    actual[str(row[sku_index])] += Decimal(str(row[sale_index] or 0))
+    finally:
+        workbook.close()
     after = report_query(DIMENSIONS["sku"], payload)
     assert after.get("code") == 200 and len(after.get("rows") or []) == after.get("total") <= 500, after
     after_values = group_sales_by_sku(after["rows"])
@@ -1402,6 +1481,7 @@ def _assert_async_export_matches_query(session, api_base_url, report_query, payl
 )
 def test_multistore_async_export_matches_query(
     authenticated_http_client,
+    login_token,
     api_base_url,
     report_query,
     report_window,
@@ -1411,12 +1491,14 @@ def test_multistore_async_export_matches_query(
 ):
     payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
     _assert_async_export_matches_query(
-        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type
+        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type, login_token
     )
 
 
 @pytest.mark.slow
-def test_category_detail_export_over_20000_requires_task(authenticated_http_client, api_base_url, report_query):
+def test_category_detail_export_over_20000_requires_task(
+    authenticated_http_client, login_token, api_base_url, report_query
+):
     payload = {
         **build_filter(pay_range=("2026-04-10 00:00:00", "2026-10-10 00:00:00")),
         "pageNum": 1,
@@ -1471,6 +1553,8 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
         return result.json()
 
     previous_task_ids = {export_task_id(task) for task in list_export_tasks(fetch_page)}
+    creator_id = token_user_id(login_token)
+    assert creator_id, "Authenticated token has no supported user ID claim; refusing ambiguous export-task matching"
     created = authenticated_http_client.post(
         api_base_url.rstrip("/") + "/oms-admin/base/exportTask",
         json={
@@ -1487,15 +1571,27 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
     deadline = time.monotonic() + 600
     task = None
     while time.monotonic() < deadline:
-        task = find_new_export_task(fetch_page, task_name, previous_task_ids)
+        task = find_new_export_task(
+            fetch_page,
+            task_name,
+            previous_task_ids,
+            creator_id=creator_id,
+            expected_task_conditions=task_conditions,
+        )
         if task and str(task.get("status")) == "1" and task.get("fileUrl"):
             break
-        assert not task or str(task.get("status")) != "2", task
+        assert not task or str(task.get("status")) != "2", _export_task_summary(task)
         time.sleep(3)
-    assert task and str(task.get("status")) == "1" and task.get("fileUrl"), {"marker": marker, "task": task}
-    download = authenticated_http_client.get(task["fileUrl"], timeout=(10, 300))
-    download.raise_for_status()
-    exported_sales, exported_count = _read_sku_export(download.content)
+    assert task and str(task.get("status")) == "1" and task.get("fileUrl"), {
+        "expectedDetails": detail_count,
+        "taskName": task_name,
+        "last": _export_task_summary(task),
+    }
+    download_content, download_workbook = _download_export_workbook(
+        authenticated_http_client, task["fileUrl"], timeout=(10, 300)
+    )
+    download_workbook.close()
+    exported_sales, exported_count = _read_sku_export(download_content)
     assert exported_count == detail_count, {"expectedDetails": detail_count, "exportedDetails": exported_count}
     assert dict(exported_sales) == dict(expected_sales), "Asynchronous export SKU sales differ from category details"
 

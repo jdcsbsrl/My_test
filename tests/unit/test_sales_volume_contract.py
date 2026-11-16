@@ -1,6 +1,10 @@
+import base64
+import json
 from decimal import Decimal
+from io import BytesIO
 
 import pytest
+from openpyxl import Workbook
 
 from modules.auto_test.core.sales_volume_contract import (
     DIMENSIONS,
@@ -9,6 +13,7 @@ from modules.auto_test.core.sales_volume_contract import (
     build_export_task_name,
     category_order_counts,
     find_new_export_task,
+    token_user_id,
     build_filter,
     group_sales_by_sku,
     order_source_breakdown,
@@ -209,6 +214,123 @@ def test_task_lookup_uses_new_task_id_and_detects_incomplete_results():
     pages[1]["rows"] = []
     with pytest.raises(ValueError, match="pagination"):
         find_new_export_task(lambda page, size: pages[page], "商品销量报表_SKU维度", {"old-1", "old-2"}, page_size=2)
+
+
+def test_task_lookup_correlates_default_name_by_creator_and_conditions():
+    expected_conditions = {"storeIds": ["store-1", "store-2"], "exportReportType": 2}
+    body = {
+        "code": 200,
+        "total": 4,
+        "rows": [
+            {
+                "id": "old-task",
+                "taskName": "商品销量报表_店铺维度_20261116090000",
+                "createBy": "user-1",
+                "taskConditions": json.dumps(expected_conditions),
+            },
+            {
+                "id": "other-user",
+                "taskName": "商品销量报表_店铺维度_20261116100000",
+                "createBy": "user-2",
+                "taskConditions": expected_conditions,
+            },
+            {
+                "id": "other-conditions",
+                "taskName": "商品销量报表_店铺维度_20261116100001",
+                "createBy": "user-1",
+                "taskConditions": {"storeIds": ["store-3"], "exportReportType": 2},
+            },
+            {
+                "id": "current-task",
+                "taskName": "商品销量报表_店铺维度_20261116100002",
+                "createBy": "user-1",
+                "taskConditions": json.dumps(expected_conditions),
+                "status": "1",
+            },
+        ],
+    }
+
+    found = find_new_export_task(
+        lambda page, size: body,
+        "商品销量报表_店铺维度",
+        {"old-task"},
+        creator_id="user-1",
+        expected_task_conditions=expected_conditions,
+    )
+
+    assert found and found["id"] == "current-task"
+
+
+def test_token_user_id_reads_jwt_user_claim_without_returning_token():
+    payload = base64.urlsafe_b64encode(json.dumps({"userId": 12345}).encode()).decode().rstrip("=")
+
+    assert token_user_id(f"header.{payload}.signature") == "12345"
+    assert token_user_id("not-a-jwt") is None
+
+
+def test_export_workbook_download_retries_a_partially_published_file(monkeypatch):
+    from modules.auto_test.tests import test_sales_volume_regression as report_tests
+
+    workbook = Workbook()
+    workbook.active.append(["SKU编码", "销量"])
+    workbook.active.append(["SKU-1", 3])
+    valid_file = BytesIO()
+    workbook.save(valid_file)
+    contents = [b"partial-xlsx", valid_file.getvalue()]
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+
+        def __init__(self, content):
+            self.content = content
+
+        def raise_for_status(self):
+            return None
+
+    class Session:
+        calls = 0
+
+        def get(self, url, timeout):
+            content = contents[self.calls]
+            self.calls += 1
+            return Response(content)
+
+    monkeypatch.setattr(report_tests.time, "sleep", lambda _: None)
+    session = Session()
+    content, loaded = report_tests._download_export_workbook(
+        session, "https://files.invalid/export.xlsx?signature=secret", timeout=(1, 1), max_attempts=2
+    )
+
+    assert session.calls == 2
+    assert content == valid_file.getvalue()
+    assert list(loaded.active.values)[1] == ("SKU-1", 3)
+    loaded.close()
+
+
+def test_export_workbook_failure_diagnostics_hide_signed_url():
+    from modules.auto_test.tests import test_sales_volume_regression as report_tests
+
+    class Response:
+        status_code = 200
+        headers = {"content-type": "application/json", "content-length": "7"}
+        content = b"not-xlsx"
+
+        def raise_for_status(self):
+            return None
+
+    class Session:
+        def get(self, url, timeout):
+            return Response()
+
+    with pytest.raises(AssertionError) as error:
+        report_tests._download_export_workbook(
+            Session(), "https://files.invalid/export.xlsx?signature=secret", timeout=(1, 1), max_attempts=1
+        )
+
+    assert "files.invalid/export.xlsx" not in str(error.value)
+    assert "signature=secret" not in str(error.value)
+    assert "downloadedBytes" in str(error.value)
 
 
 def test_order_source_reconciliation_reads_all_pages():
