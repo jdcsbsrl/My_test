@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytest
 import requests
 
-from modules.auto_test.core.sales_volume_contract import build_filter
+from modules.auto_test.core.sales_volume_contract import DIMENSIONS, build_filter
 from modules.auto_test.core.secret_provider import get_secret
 from modules.auto_test.pages.login_page import LoginPage
 
@@ -17,9 +17,9 @@ pytest_plugins = ("modules.auto_test.tests.test_sales_volume_regression",)
 def test_procurement_source_data(administrator_client, api_base_url, report_query, report_window, report_role):
     assert report_role == "procurement", "This reconciliation is only applicable to procurement"
     from modules.auto_test.tests.test_sales_volume_regression import (
+        _assert_inventory_matches_report,
+        _assert_sku_sales_match_order_source,
         _fetch_order_data,
-        test_multistore_inventory_against_inventory_api,
-        test_multistore_sku_sales_against_order_items,
     )
 
     end = datetime.strptime(report_window[1], "%Y-%m-%d %H:%M:%S")
@@ -30,16 +30,18 @@ def test_procurement_source_data(administrator_client, api_base_url, report_quer
             current.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S"),
         )
         try:
-            orders = _fetch_order_data(administrator_client, api_base_url, window, [])
+            orders, details = _fetch_order_data(administrator_client, api_base_url, window, [])
         except AssertionError as exc:
             if str(exc).startswith("No order sample or pagination incomplete"):
                 continue
             raise
-        test_multistore_sku_sales_against_order_items(report_query, window, [], orders)
+        _assert_sku_sales_match_order_source(
+            report_query, window, [], orders, details, administrator_client, api_base_url
+        )
         break
     else:
         pytest.fail("No complete daily order sample for procurement source reconciliation")
-    test_multistore_inventory_against_inventory_api(administrator_client, api_base_url, report_query, window, [])
+    _assert_inventory_matches_report(administrator_client, api_base_url, report_query, window, [])
 
 
 @pytest.fixture
@@ -229,6 +231,56 @@ def test_role_denied_store_with_administrator_sold_sample(
             "storeId": target,
             "response": result,
         }
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("dimension,report_type", [("sku", 1), ("warehouse", 3), ("country", 4), ("category", 5)])
+def test_procurement_async_export_matches_query(
+    authenticated_http_client, api_base_url, report_query, report_window, report_role, dimension, report_type
+):
+    assert report_role == "procurement", "This export regression is only applicable to procurement"
+    from modules.auto_test.tests.test_sales_volume_regression import _assert_async_export_matches_query
+
+    payload = _procurement_async_export_payload(report_query, report_window, dimension)
+    _assert_async_export_matches_query(
+        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type
+    )
+
+
+def _procurement_async_export_payload(report_query, report_window, dimension):
+    windows = [report_window]
+    if dimension == "category":
+        end = datetime.strptime(report_window[1], "%Y-%m-%d %H:%M:%S")
+        for days in (7, 1):
+            start = (end.date() - timedelta(days=days - 1)).strftime("%Y-%m-%d 00:00:00")
+            windows.append((start, report_window[1]))
+
+    for pay_range in windows:
+        payload = {**build_filter(pay_range=pay_range), "pageNum": 1, "pageSize": 500}
+        if dimension != "category":
+            return payload
+
+        categories = report_query(DIMENSIONS["category"], payload)
+        assert categories.get("code") == 200, categories
+        rows = categories.get("rows") or []
+        assert rows and len(rows) == categories.get("total") <= 500, {
+            "message": "Procurement category sample missing or incomplete",
+            "window": pay_range,
+            "response": categories,
+        }
+        for category in rows:
+            class_id = category.get("classId")
+            if not class_id:
+                continue
+            detail = report_query("queryCategorySalesDimensionExpand", {**payload, "classIds": [class_id]})
+            assert detail.get("code") == 200, detail
+            detail_rows = detail.get("data") or []
+            if detail_rows and len(detail_rows) <= 20000:
+                return {**payload, "classIds": [class_id]}
+
+    pytest.fail(
+        "No procurement category sample under the 20000-row task limit in the selected 30-, 7-, or 1-day windows"
+    )
 
 
 @pytest.mark.slow

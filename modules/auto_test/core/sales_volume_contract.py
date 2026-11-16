@@ -14,6 +14,23 @@ DIMENSIONS = {
     "category": "queryCategorySalesDimensionReport",
 }
 
+DIMENSION_LABELS = {
+    "sku": "SKU维度",
+    "store": "店铺维度",
+    "warehouse": "发货仓库维度",
+    "country": "国家维度",
+    "category": "类目维度",
+}
+
+
+def build_export_task_name(dimension: str) -> str:
+    """Return the ERP default prefix; the server appends the creation timestamp."""
+    try:
+        label = DIMENSION_LABELS[dimension]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported sales report dimension: {dimension}") from exc
+    return f"商品销量报表_{label}"
+
 
 def build_completed_report_window(as_of_date: date | str | None = None, days: int = 30) -> tuple[str, str]:
     """Build a report window from completed calendar days only.
@@ -189,14 +206,13 @@ def category_order_counts(
     return {category: len(order_ids) for category, order_ids in grouped.items()}
 
 
-def find_task_by_marker(
+def list_export_tasks(
     fetch_page: Callable[[int, int], Mapping[str, Any]],
-    marker: str,
     page_size: int = 100,
     max_pages: int = 200,
-) -> Mapping[str, Any] | None:
-    """Search every reported task page; incomplete pagination is an error."""
-    matches = []
+) -> list[Mapping[str, Any]]:
+    """Read every reported export-task page; incomplete pagination is an error."""
+    tasks = []
     for page in range(1, max_pages + 1):
         body = fetch_page(page, page_size)
         if body.get("code") != 200 or not isinstance(body.get("total"), int):
@@ -204,11 +220,41 @@ def find_task_by_marker(
         rows = body.get("rows") or []
         if not isinstance(rows, list):
             raise ValueError("Task list rows must be a list")
-        matches.extend(row for row in rows if row.get("taskDesc") == marker)
-        if len(matches) > 1:
-            raise ValueError("Task marker matched more than one task")
+        tasks.extend(rows)
         if page * page_size >= body["total"]:
-            return matches[0] if matches else None
+            if len(tasks) < body["total"]:
+                raise ValueError("Task pagination ended before the reported total")
+            return tasks
         if not rows:
             raise ValueError("Task pagination ended before the reported total")
     raise ValueError("Task pagination exceeded its safety limit")
+
+
+def export_task_id(task: Mapping[str, Any]) -> str:
+    """Return an export task's stable identifier from supported API field names."""
+    for key in ("id", "taskId", "exportTaskId"):
+        value = task.get(key)
+        if value not in (None, ""):
+            return str(value)
+    raise ValueError("Export task row is missing its task ID")
+
+
+def find_new_export_task(
+    fetch_page: Callable[[int, int], Mapping[str, Any]],
+    task_name_prefix: str,
+    previous_task_ids: set[str],
+    page_size: int = 100,
+    max_pages: int = 200,
+) -> Mapping[str, Any] | None:
+    """Find the single task newly created under the ERP-generated name prefix."""
+    tasks = list_export_tasks(fetch_page, page_size=page_size, max_pages=max_pages)
+    matches = []
+    for task in tasks:
+        task_name = str(task.get("taskName") or "")
+        if (task_name == task_name_prefix or task_name.startswith(task_name_prefix + "_")) and export_task_id(
+            task
+        ) not in previous_task_ids:
+            matches.append(task)
+    if len(matches) > 1:
+        raise ValueError("More than one new export task matched the ERP task name")
+    return matches[0] if matches else None

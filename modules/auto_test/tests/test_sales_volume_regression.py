@@ -8,7 +8,6 @@ import json
 import os
 import re
 import time
-import uuid
 
 import pytest
 from openpyxl import load_workbook
@@ -19,9 +18,12 @@ from modules.auto_test.core.sales_volume_contract import (
     DIMENSIONS,
     aggregate_orders,
     build_completed_report_window,
+    build_export_task_name,
     build_filter,
     category_order_counts,
-    find_task_by_marker,
+    export_task_id,
+    find_new_export_task,
+    list_export_tasks,
     group_sales_by_sku,
     order_source_breakdown,
     order_item_rows,
@@ -861,12 +863,11 @@ def sold_order_data(authenticated_http_client, api_base_url, report_window, sold
     return _fetch_order_data(authenticated_http_client, api_base_url, report_window, sold_store_ids)
 
 
-def test_multistore_sku_sales_against_order_items(
-    report_query, report_window, sold_store_ids, sold_order_data, authenticated_http_client, api_base_url
+def _assert_sku_sales_match_order_source(
+    report_query, report_window, store_ids, orders, details, order_source_client, api_base_url
 ):
-    orders, details = sold_order_data
     source = aggregate_orders(orders, details)
-    payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
+    payload = {**build_filter(report_window, store_ids=store_ids), "pageNum": 1, "pageSize": 500}
     report = report_query(DIMENSIONS["sku"], payload)
     assert report.get("code") == 200, report
     rows = report.get("rows") or []
@@ -881,10 +882,10 @@ def test_multistore_sku_sales_against_order_items(
     )
     if mismatched_skus:
         rechecked_orders, rechecked_details = _fetch_order_data(
-            authenticated_http_client,
+            order_source_client,
             api_base_url,
             report_window,
-            sold_store_ids,
+            store_ids,
             item_ids=mismatched_skus,
         )
         rechecked_source = aggregate_orders(rechecked_orders, rechecked_details)
@@ -930,7 +931,7 @@ def test_multistore_sku_sales_against_order_items(
         diagnostic = {
             "status": "STABLE_SOURCE_REPORT_MISMATCH" if source_stable and report_stable else "INCOMPLETE_DATA_CHANGED",
             "reportWindow": report_window,
-            "storeIds": list(sold_store_ids),
+            "storeIds": list(store_ids),
             "sourceStable": source_stable,
             "reportStable": report_stable,
             "mismatchSkuCount": len(mismatched_skus),
@@ -940,6 +941,21 @@ def test_multistore_sku_sales_against_order_items(
         if not source_stable or not report_stable:
             pytest.fail("INCOMPLETE: source or report values changed during reconciliation; see diagnostic snapshot")
         assert not mismatched_skus, diagnostic
+
+
+def test_multistore_sku_sales_against_order_items(
+    report_query, report_window, sold_store_ids, sold_order_data, authenticated_http_client, api_base_url
+):
+    orders, details = sold_order_data
+    _assert_sku_sales_match_order_source(
+        report_query,
+        report_window,
+        sold_store_ids,
+        orders,
+        details,
+        authenticated_http_client,
+        api_base_url,
+    )
 
 
 def test_bundle_order_sample_is_available(
@@ -1110,14 +1126,8 @@ def test_category_distinct_orders_against_order_source(
     pytest.fail("No order with multiple SKUs in one category; distinct-count scenario incomplete")
 
 
-def test_multistore_inventory_against_inventory_api(
-    authenticated_http_client,
-    api_base_url,
-    report_query,
-    report_window,
-    sold_store_ids,
-):
-    payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
+def _assert_inventory_matches_report(authenticated_http_client, api_base_url, report_query, report_window, store_ids):
+    payload = {**build_filter(report_window, store_ids=store_ids), "pageNum": 1, "pageSize": 500}
     report = report_query(DIMENSIONS["sku"], payload)
     assert report.get("code") == 200, report
     rows = report.get("rows") or []
@@ -1156,6 +1166,18 @@ def test_multistore_inventory_against_inventory_api(
             mismatches.append({"sku": sku, "report": row.get("stockNum"), "inventory": stock})
     assert not missing, {"unverifiedInventorySku": missing}
     assert not mismatches, mismatches
+
+
+def test_multistore_inventory_against_inventory_api(
+    authenticated_http_client,
+    api_base_url,
+    report_query,
+    report_window,
+    sold_store_ids,
+):
+    _assert_inventory_matches_report(
+        authenticated_http_client, api_base_url, report_query, report_window, sold_store_ids
+    )
 
 
 @pytest.mark.parametrize(
@@ -1289,22 +1311,8 @@ def test_category_summary_export_matches_listing(authenticated_http_client, api_
     assert exported == expected, {"listing": expected, "export": exported}
 
 
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    "dimension,report_type", [("sku", 1), ("store", 2), ("warehouse", 3), ("country", 4), ("category", 5)]
-)
-def test_multistore_async_export_matches_query(
-    authenticated_http_client,
-    api_base_url,
-    report_query,
-    report_window,
-    sold_store_ids,
-    dimension,
-    report_type,
-):
-    session = authenticated_http_client
+def _assert_async_export_matches_query(session, api_base_url, report_query, payload, dimension, report_type):
     root = api_base_url.rstrip("/")
-    payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
     before = report_query(DIMENSIONS["sku"], payload)
     assert before.get("code") == 200, before
     rows = before.get("rows") or []
@@ -1315,10 +1323,19 @@ def test_multistore_async_export_matches_query(
         conditions.update({"storeManagerIds": [], "deptIdList": []})
     if dimension == "category":
         conditions["includeSkuDetail"] = 1
-    # The server truncates names before appending a timestamp; keep the search
-    # prefix short and identify this run through its unique task description.
-    task_name = "CI_R1003420"
-    task_marker = uuid.uuid4().hex
+    # Match the ERP's dimension-specific default name; the server appends its timestamp.
+    task_name = build_export_task_name(dimension)
+
+    def fetch_page(page_num, page_size):
+        result = session.get(
+            root + "/oms-admin/base/exportTask/list",
+            params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
+            timeout=(10, 60),
+        )
+        result.raise_for_status()
+        return result.json()
+
+    previous_task_ids = {export_task_id(task) for task in list_export_tasks(fetch_page)}
     response = session.post(
         root + "/oms-admin/base/exportTask",
         json={
@@ -1326,7 +1343,6 @@ def test_multistore_async_export_matches_query(
             "taskType": "1",
             "exportType": "8",
             "exportColumn": "{}",
-            "taskDesc": task_marker,
             "taskConditions": json.dumps(conditions, ensure_ascii=False),
         },
         timeout=(10, 90),
@@ -1336,17 +1352,7 @@ def test_multistore_async_export_matches_query(
     deadline = time.monotonic() + 300
     task = None
     while time.monotonic() < deadline:
-
-        def fetch_page(page_num, page_size):
-            result = session.get(
-                root + "/oms-admin/base/exportTask/list",
-                params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
-                timeout=(10, 60),
-            )
-            result.raise_for_status()
-            return result.json()
-
-        task = find_task_by_marker(fetch_page, task_marker)
+        task = find_new_export_task(fetch_page, task_name, previous_task_ids)
         if task:
             if str(task.get("status")) == "1" and task.get("fileUrl"):
                 break
@@ -1373,6 +1379,25 @@ def test_multistore_async_export_matches_query(
         "task": task_name,
     }
     assert dict(actual) == expected, {"task": task_name, "query": expected, "export": dict(actual)}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "dimension,report_type", [("sku", 1), ("store", 2), ("warehouse", 3), ("country", 4), ("category", 5)]
+)
+def test_multistore_async_export_matches_query(
+    authenticated_http_client,
+    api_base_url,
+    report_query,
+    report_window,
+    sold_store_ids,
+    dimension,
+    report_type,
+):
+    payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
+    _assert_async_export_matches_query(
+        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type
+    )
 
 
 @pytest.mark.slow
@@ -1418,9 +1443,19 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
     response.raise_for_status()
     body = response.json()
     assert body.get("code") != 200 and "20000" in str(body.get("msg", "")), body
-    marker = uuid.uuid4().hex
-    task_name = "CI_R1003420"
+    task_name = build_export_task_name("category")
     task_conditions = {**payload, "includeSkuDetail": 1, "exportReportType": 5}
+
+    def fetch_page(page_num, page_size):
+        result = authenticated_http_client.get(
+            api_base_url.rstrip("/") + "/oms-admin/base/exportTask/list",
+            params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
+            timeout=(10, 60),
+        )
+        result.raise_for_status()
+        return result.json()
+
+    previous_task_ids = {export_task_id(task) for task in list_export_tasks(fetch_page)}
     created = authenticated_http_client.post(
         api_base_url.rstrip("/") + "/oms-admin/base/exportTask",
         json={
@@ -1428,7 +1463,6 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
             "taskType": "1",
             "exportType": "8",
             "exportColumn": "{}",
-            "taskDesc": marker,
             "taskConditions": json.dumps(task_conditions, ensure_ascii=False),
         },
         timeout=(10, 90),
@@ -1438,17 +1472,7 @@ def test_category_detail_export_over_20000_requires_task(authenticated_http_clie
     deadline = time.monotonic() + 600
     task = None
     while time.monotonic() < deadline:
-
-        def fetch_page(page_num, page_size):
-            result = authenticated_http_client.get(
-                api_base_url.rstrip("/") + "/oms-admin/base/exportTask/list",
-                params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
-                timeout=(10, 60),
-            )
-            result.raise_for_status()
-            return result.json()
-
-        task = find_task_by_marker(fetch_page, marker)
+        task = find_new_export_task(fetch_page, task_name, previous_task_ids)
         if task and str(task.get("status")) == "1" and task.get("fileUrl"):
             break
         assert not task or str(task.get("status")) != "2", task

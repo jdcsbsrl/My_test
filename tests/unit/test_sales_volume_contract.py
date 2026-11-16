@@ -6,8 +6,9 @@ from modules.auto_test.core.sales_volume_contract import (
     DIMENSIONS,
     aggregate_orders,
     build_completed_report_window,
+    build_export_task_name,
     category_order_counts,
-    find_task_by_marker,
+    find_new_export_task,
     build_filter,
     group_sales_by_sku,
     order_source_breakdown,
@@ -58,6 +59,16 @@ def test_report_window_rejects_invalid_anchor_and_day_count():
         build_completed_report_window("2026/11/14")
     with pytest.raises(ValueError, match="at least one day"):
         build_completed_report_window("2026-11-14", days=0)
+
+
+def test_export_task_names_match_erp_dimension_defaults():
+    assert build_export_task_name("sku") == "商品销量报表_SKU维度"
+    assert build_export_task_name("store") == "商品销量报表_店铺维度"
+    assert build_export_task_name("warehouse") == "商品销量报表_发货仓库维度"
+    assert build_export_task_name("country") == "商品销量报表_国家维度"
+    assert build_export_task_name("category") == "商品销量报表_类目维度"
+    with pytest.raises(ValueError, match="Unsupported sales report dimension"):
+        build_export_task_name("unknown")
 
 
 def test_flatten_bundle_items_and_group_dimension_sales():
@@ -175,15 +186,29 @@ def test_category_order_count_deduplicates_multiple_skus_in_one_order():
         category_order_counts(orders, details, {"A": "category"})
 
 
-def test_task_lookup_searches_later_pages_and_detects_incomplete_results():
+def test_task_lookup_uses_new_task_id_and_detects_incomplete_results():
     pages = {
-        1: {"code": 200, "total": 3, "rows": [{"taskDesc": "other"}, {"taskDesc": "other2"}]},
-        2: {"code": 200, "total": 3, "rows": [{"taskDesc": "target", "status": "1"}]},
+        1: {
+            "code": 200,
+            "total": 3,
+            "rows": [
+                {"id": "old-1", "taskName": "商品销量报表_SKU维度_20261116090000"},
+                {"id": "old-2", "taskName": "商品销量报表_SKU维度_20261116090100"},
+            ],
+        },
+        2: {
+            "code": 200,
+            "total": 3,
+            "rows": [{"id": "new-1", "taskName": "商品销量报表_SKU维度_20261116090200", "status": "1"}],
+        },
     }
-    assert find_task_by_marker(lambda page, size: pages[page], "target", page_size=2)["status"] == "1"
+    found = find_new_export_task(
+        lambda page, size: pages[page], "商品销量报表_SKU维度", {"old-1", "old-2"}, page_size=2
+    )
+    assert found["status"] == "1" and found["id"] == "new-1"
     pages[1]["rows"] = []
     with pytest.raises(ValueError, match="pagination"):
-        find_task_by_marker(lambda page, size: pages[page], "target", page_size=2)
+        find_new_export_task(lambda page, size: pages[page], "商品销量报表_SKU维度", {"old-1", "old-2"}, page_size=2)
 
 
 def test_order_source_reconciliation_reads_all_pages():

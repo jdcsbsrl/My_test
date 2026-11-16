@@ -415,13 +415,14 @@ jobs:
             run_phase 筛选与来源对账 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow'
             if [ "$role" = procurement ]; then
               run_phase 采购来源对账 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_source_data
-              echo '| procurement | 多店筛选与多店异步导出 | 不适用 |' >> "$GITHUB_STEP_SUMMARY"
+              echo '| procurement | 双店筛选 | 不适用：无店铺权限 |' >> "$GITHUB_STEP_SUMMARY"
             fi
             run_phase 排序与导出 modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
             if [ "$role" != procurement ]; then
               run_phase 多店异步导出 modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow
               run_phase 越权店铺 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow
             else
+              run_phase 采购异步导出 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_async_export_matches_query -m slow
               run_phase 采购管理员对账 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow
             fi
           done
