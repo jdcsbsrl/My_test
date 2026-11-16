@@ -9,6 +9,12 @@ on:
     # GitHub Actions uses UTC; 16:00 UTC is 00:00 the next day in China Standard Time.
     - cron: '0 16 * * *'
   workflow_dispatch:
+    inputs:
+      run_inventory_sync_1004021_order_matrix:
+        description: "运行需求1004021订单矩阵只读预检（需配置订单号 secret）"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -484,6 +490,8 @@ jobs:
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
           - shard: 9
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
+          - shard: 10
+            test_files: "modules/auto_test/tests/test_inventory_sync_requirement_1004021.py"
       fail-fast: false
       # Group-leader shards share the account and backend data scope.
       # Allow two isolated runners at a time while keeping the lane bounded.
@@ -519,6 +527,17 @@ jobs:
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Run inventory sync 1004021 order matrix preflight
+        if: >-
+          matrix.shard == 10 && github.event_name == 'workflow_dispatch' &&
+          inputs.run_inventory_sync_1004021_order_matrix
+        env:
+          INVENTORY_SYNC_ORDER_NUMBERS: ${{ secrets.INVENTORY_SYNC_ORDER_NUMBERS }}
+        run: |
+          test -n "$INVENTORY_SYNC_ORDER_NUMBERS" || { echo '缺少 INVENTORY_SYNC_ORDER_NUMBERS secret'; exit 1; }
+          pytest modules/auto_test/tests/test_inventory_sync_order_matrix_1004021.py \
+            -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures \
+            --no-cov --alluredir .runtime/reports/allure-results
       - name: Check sales order delivery status filters (group leader)
         if: matrix.shard == 5 && success()
         run: python -m modules.auto_test delivery-status-regression --env test --execute --page-size 500 --max-pages 100

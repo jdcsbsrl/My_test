@@ -334,3 +334,25 @@ pytest modules/auto_test/tests/test_export_requirement_1003531.py -m slow --env 
 ```
 
 如后台任务需要更长时间，可通过 `EXPORT_TASK_TIMEOUT_MS` 调整等待上限。UAT 仅保留配置能力，不配置 CI 执行入口。
+
+## 库存同步未发货订单口径（需求 1004021）
+
+`modules/auto_test/core/inventory_sync_calculator.py` 提供不依赖 ERP 响应的订单筛选、SKU 件数/组合套数汇总、组合瓶颈折算、公式计算和负数归零断言。单元测试位于 `tests/unit/test_inventory_sync_calculator_1004021.py` 和 `tests/unit/test_inventory_sync_order_api_1004021.py`，随常规 `unit-tests` CI 执行。
+
+`modules/auto_test/tests/test_inventory_sync_requirement_1004021.py` 使用组长账号，只读取规则 `1113新增规则`，检查两个选项、问号注释和互斥行为。切换选项只发生在未保存的编辑弹窗内，测试结束点击取消。该用例接入组长库存 CI shard 10。
+
+`modules/auto_test/tests/test_inventory_sync_order_matrix_1004021.py` 只读查询订单和订单明细，检查状态码 0（待处理）、2（配货中）、5（待付款）、8（WMS发货中）、10（WMS取消发货）、Hold、`deficitFlag` 以及两个 SKU 的口径差值。组合 SKU 父行没有 `deficitFlag` 时，适配器从组合子明细继承，并要求子明细标志一致。所有订单必须属于规则店铺 `yxl_kehu_zuzhang-test_yxl_new`；每个状态、每种待付款标志和 Hold 样本都要同时覆盖 `DWOYX-LF006` 与 `Merge001`。手动运行前设置 `INVENTORY_SYNC_ORDER_NUMBERS`，值为逗号分隔的 TEST 订单号，不要添加凭证。样本不完整时测试失败并报告缺少的状态或标志，不把缺样本判为通过。
+
+本地 PowerShell 自测示例：
+
+```powershell
+$env:INVENTORY_SYNC_ORDER_NUMBERS = "<orderNo1>,<orderNo2>,<orderNo3>"
+$env:AUTO_TEST_AUTHORIZED = "1"
+pytest modules/auto_test/tests/test_inventory_sync_order_matrix_1004021.py --env test
+Remove-Item Env:INVENTORY_SYNC_ORDER_NUMBERS
+Remove-Item Env:AUTO_TEST_AUTHORIZED
+```
+
+在 GitHub Actions 中，到仓库 **Settings → Secrets and variables → Actions → New repository secret** 创建名为 `INVENTORY_SYNC_ORDER_NUMBERS` 的 secret，值使用同样的逗号分隔订单号。在 Actions 手动运行 CI/CD workflow 时勾选 `run_inventory_sync_1004021_order_matrix`。CI job 使用组长账号；该输入默认关闭，预检只读订单，不修改订单或触发库存同步。
+
+这些用例目前验证规则页面契约和订单源数据矩阵；它们不自动修改规则，也不触发 Shopify 库存同步。若要把最终同步数量和逐 SKU 同步记录纳入自动 E2E，需先在 TEST 确认平台商品手动同步入口产生的记录接口/字段契约，并准备包含待处理、配货中、待付款 `deficitFlag=0/1`、WMS 发货中、WMS 取消发货及 Hold 的完整订单样本。写操作 E2E 应使用可恢复的 CI 专用规则与 SKU 范围，并在独立的手动/夜间通道串行执行。
