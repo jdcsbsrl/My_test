@@ -67,6 +67,31 @@ def test_payment_abnormal_bill_predicates_keep_null_due_date_and_inclusive_end_d
 
 @pytest.mark.unit
 @pytest.mark.requirement("1003838")
+@pytest.mark.parametrize("status", ["0", "1", "3"])
+def test_payment_abnormal_bill_predicates_include_each_open_or_unsettled_status(status) -> None:
+    bills = [
+        {
+            "id": status,
+            "billType": "0",
+            "status": status,
+            "receivableDate": "2026-10-25",
+            "customerId": 77,
+            "customerNo": "C77",
+        }
+    ]
+
+    selected = payment_abnormal_bills(
+        bills,
+        report_end="2026-10-25",
+        customer_id=77,
+        customer_no="C77",
+    )
+
+    assert selected == bills
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
 def test_all_null_receivable_dates_use_week_end_for_the_display_date() -> None:
     expected = direct_currency_expectation(
         [
@@ -138,6 +163,40 @@ def test_raw_bill_balances_preserve_negative_actual_unpaid_and_shipping_split() 
     assert expected["unshippedAmount"] == Decimal("-5.00")
     displayed = direct_currency_expectation([bill], report_end="2026-10-25", use_raw_balances=False)
     assert displayed["receivableAmount"] == Decimal("0.00")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_unpaid_amount_falls_back_to_the_bill_list_value_when_raw_fields_are_incomplete() -> None:
+    assert actual_unpaid_amount({"receivableAmount": "100.00", "unpaid": "12.34"}) == Decimal("12.34")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_shipping_and_term_amounts_conserve_cents_after_ratio_rounding() -> None:
+    expected = direct_currency_expectation(
+        [
+            {
+                "receivableDate": "2026-10-20",
+                "paidButNotReceive": "0",
+                "unpaid": "1.00",
+                "alreadySendAmount": "1",
+                "notSendAmount": "2",
+            },
+            {
+                "receivableDate": "2026-10-21",
+                "paidButNotReceive": "0",
+                "unpaid": "0.01",
+                "alreadySendAmount": "0",
+                "notSendAmount": "0",
+            },
+        ],
+        report_end="2026-10-25",
+    )
+
+    assert expected["receivableAmount"] == Decimal("1.01")
+    assert expected["shippedAmount"] + expected["unshippedAmount"] == expected["receivableAmount"]
+    assert expected["receivableInPeriodAmount"] + expected["receivableOutPeriodAmount"] == expected["receivableAmount"]
 
 
 @pytest.mark.unit
