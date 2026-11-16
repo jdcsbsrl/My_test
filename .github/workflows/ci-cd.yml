@@ -10,11 +10,6 @@ on:
     - cron: '0 16 * * *'
   workflow_dispatch:
     inputs:
-      run_inventory_sync_1004021_order_matrix:
-        description: "运行需求1004021订单矩阵只读预检（需配置订单号 secret）"
-        required: false
-        type: boolean
-        default: false
       run_weekly_report_source_audit:
         description: "在自动回归之外，额外复跑需求1003838周报与源账单只读对账"
         required: false
@@ -670,9 +665,7 @@ jobs:
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
       - name: Run inventory sync 1004021 order matrix preflight
-        if: >-
-          matrix.shard == 10 && github.event_name == 'workflow_dispatch' &&
-          inputs.run_inventory_sync_1004021_order_matrix
+        if: ${{ always() && matrix.shard == 10 && !cancelled() }}
         env:
           INVENTORY_SYNC_ORDER_NUMBERS: ${{ secrets.INVENTORY_SYNC_ORDER_NUMBERS }}
         run: |

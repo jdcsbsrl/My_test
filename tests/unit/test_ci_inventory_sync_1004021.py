@@ -24,17 +24,15 @@ def test_requirement_1004021_is_on_group_leader_ci_shard() -> None:
     )
 
 
-def test_order_matrix_preflight_is_manual_and_uses_order_number_secret() -> None:
+def test_order_matrix_preflight_always_runs_on_shard_10_and_uses_order_number_secret() -> None:
     workflow = _workflow()
-    dispatch_input = workflow["on"]["workflow_dispatch"]["inputs"]["run_inventory_sync_1004021_order_matrix"]
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     inventory_steps = workflow["jobs"]["inventory-tests"]["steps"]
     preflight = next(
         step for step in inventory_steps if step.get("name") == "Run inventory sync 1004021 order matrix preflight"
     )
 
-    assert dispatch_input["type"] == "boolean"
-    assert dispatch_input["default"] == "false"
-    assert "github.event_name == 'workflow_dispatch'" in preflight["if"]
-    assert "inputs.run_inventory_sync_1004021_order_matrix" in preflight["if"]
+    assert "run_inventory_sync_1004021_order_matrix" not in dispatch_inputs
+    assert preflight["if"] == "${{ always() && matrix.shard == 10 && !cancelled() }}"
     assert preflight["env"]["INVENTORY_SYNC_ORDER_NUMBERS"] == "${{ secrets.INVENTORY_SYNC_ORDER_NUMBERS }}"
     assert "test_inventory_sync_order_matrix_1004021.py" in preflight["run"]

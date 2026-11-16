@@ -353,6 +353,6 @@ Remove-Item Env:INVENTORY_SYNC_ORDER_NUMBERS
 Remove-Item Env:AUTO_TEST_AUTHORIZED
 ```
 
-在 GitHub Actions 中，到仓库 **Settings → Secrets and variables → Actions → New repository secret** 创建名为 `INVENTORY_SYNC_ORDER_NUMBERS` 的 secret，值使用同样的逗号分隔订单号。在 Actions 手动运行 CI/CD workflow 时勾选 `run_inventory_sync_1004021_order_matrix`。CI job 使用组长账号；该输入默认关闭，预检只读订单，不修改订单或触发库存同步。
+在 GitHub Actions 中，到仓库 **Settings → Secrets and variables → Actions → New repository secret** 创建名为 `INVENTORY_SYNC_ORDER_NUMBERS` 的 secret，值使用同样的逗号分隔订单号。库存 shard 10 每次运行都会执行订单矩阵预检；即使该 shard 的规则 UI 用例失败，预检也会继续运行（除非 workflow 被取消）。未配置订单号 secret 或样本不完整时，步骤会明确失败，不会静默跳过。预检使用组长账号，只读订单，不修改订单或触发库存同步。
 
 这些用例目前验证规则页面契约和订单源数据矩阵；它们不自动修改规则，也不触发 Shopify 库存同步。若要把最终同步数量和逐 SKU 同步记录纳入自动 E2E，需先在 TEST 确认平台商品手动同步入口产生的记录接口/字段契约，并准备包含待处理、配货中、待付款 `deficitFlag=0/1`、WMS 发货中、WMS 取消发货及 Hold 的完整订单样本。写操作 E2E 应使用可恢复的 CI 专用规则与 SKU 范围，并在独立的手动/夜间通道串行执行。
