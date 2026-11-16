@@ -331,7 +331,8 @@ jobs:
         include:
           - lane: A
           - lane: B
-      max-parallel: 2
+          - lane: C
+      max-parallel: 3
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: 'true'
@@ -379,8 +380,9 @@ jobs:
           }
           printf '| 角色 | 检查 | 结果 |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
           case "${{ matrix.lane }}" in
-            A) roles=(admin sales procurement) ;;
-            B) roles=(manager assistant) ;;
+            A) roles=(admin) ;;
+            B) roles=(sales procurement) ;;
+            C) roles=(manager assistant) ;;
             *) echo "未知商品销量报表泳道: ${{ matrix.lane }}"; exit 2 ;;
           esac
           for role in "${roles[@]}"; do

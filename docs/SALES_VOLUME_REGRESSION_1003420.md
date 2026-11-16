@@ -13,9 +13,9 @@ $env:SALES_VOLUME_ROLE='admin'
 pytest modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_role_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m 'not slow'
 ```
 
-CI 将商品销量报表分成两个并行泳道，最多同时运行 2 条：泳道 A 依次执行管理员、业务员、采购；泳道 B 依次执行组长/业务经理、业务助理。采购移至泳道 A，以平衡本次实际的 A 45 分 50 秒、B 58 分 43 秒运行时间。管理员从原销售 UI 分片 10 移出，并在泳道 A 执行完整非 slow 和 slow 回归。两条泳道超时为 120 分钟。前置 job 按 Asia/Shanghai 时区生成唯一的 `SALES_VOLUME_AS_OF_DATE`，所有角色和 pytest 子进程共用该日期锚点；报表对账窗口取锚点前 30 个完整自然日，排除仍在变化的当天订单。每个角色切换后单独设置账号和 `SALES_VOLUME_ROLE`，每个 pytest 阶段使用不同的 `.runtime/cache/` 临时目录；一个阶段失败后继续执行同泳道的后续角色，最终汇总失败。角色可选 `admin`、`manager`、`sales`、`assistant`、`procurement`，必须与当前账号真实角色一致。采购没有店铺 Tab，店铺权限列表为空；仓库和国家筛选按采购账号可访问的数据范围查询。采购不参加双店筛选，但会单独验证不带店铺筛选的异步导出。不要在代码或报告中保存凭据。
+CI 将商品销量报表分成三个有界并行泳道，最多同时运行 3 条：泳道 A 执行管理员，泳道 B 依次执行业务员和采购，泳道 C 依次执行组长/业务经理和业务助理。拆出管理员泳道可避免其完整慢速导出回归阻塞其他角色；其余角色按当前 CI 的历史运行耗时组合，减少串行关键路径，同时不扩展成五个独立 job。管理员从原销售 UI 分片 10 移出，并在泳道 A 执行完整非 slow 和 slow 回归。每条泳道超时为 120 分钟。前置 job 按 Asia/Shanghai 时区生成唯一的 `SALES_VOLUME_AS_OF_DATE`，所有角色和 pytest 子进程共用该日期锚点；报表对账窗口取锚点前 30 个完整自然日，排除仍在变化的当天订单。每个角色切换后单独设置账号和 `SALES_VOLUME_ROLE`，每个 pytest 阶段使用不同的 `.runtime/cache/` 临时目录；一个阶段失败后继续执行同泳道的后续角色，最终汇总失败。角色可选 `admin`、`manager`、`sales`、`assistant`、`procurement`，必须与当前账号真实角色一致。采购没有店铺 Tab，店铺权限列表为空；仓库和国家筛选按采购账号可访问的数据范围查询。采购不参加双店筛选，但会单独验证不带店铺筛选的异步导出。不要在代码或报告中保存凭据。
 
-CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。各泳道保留每个角色、每个阶段的结果摘要和 Allure 结果；两个泳道可能与其他 CI job 并行。
+CI 使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD`、`LEADER_USERNAME`/`LEADER_PASSWORD`、`SALES_USERNAME`/`SALES_PASSWORD`、`ASSISTANT_USERNAME`/`ASSISTANT_PASSWORD`、`PROCUREMENT_USERNAME`/`PROCUREMENT_PASSWORD` Secrets。各泳道保留每个角色、每个阶段的结果摘要和独立 Allure 结果；三个泳道可能与其他 CI job 并行。
 
 订单源对账失败时，断言会附上共享日期窗口、店铺范围，以及差异 SKU 对应的逐订单状态、付款时间、店铺 ID 和明细数量，并立即用相同窗口重查订单源和报表。重查仍一致则判定为稳定的数据差异并失败；重查期间数值变化则标记为数据变化、测试不完整。这样可以区分报表口径差异与执行期间的数据变化；不得把滚动日期范围的汇总数当作固定预期值。
 

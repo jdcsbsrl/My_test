@@ -11,14 +11,14 @@ from modules.auto_test.tests.test_sales_volume_regression import (
 from modules.auto_test.tests.test_sales_volume_role_regression import _procurement_async_export_payload
 
 
-def test_sales_volume_uses_two_balanced_parallel_lanes() -> None:
+def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     path = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "ci-cd.yml"
     workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["sales-volume-regression"]
     window_job = workflow["jobs"]["sales-volume-window"]
     assert job["timeout-minutes"] == "120"
-    assert job["strategy"]["max-parallel"] == "2"
-    assert [entry["lane"] for entry in job["strategy"]["matrix"]["include"]] == ["A", "B"]
+    assert job["strategy"]["max-parallel"] == "3"
+    assert [entry["lane"] for entry in job["strategy"]["matrix"]["include"]] == ["A", "B", "C"]
     assert job["needs"] == ["code-quality", "sales-volume-window"]
     assert job["env"]["SALES_VOLUME_AS_OF_DATE"] == "${{ needs.sales-volume-window.outputs.as_of_date }}"
     assert window_job["outputs"]["as_of_date"] == "${{ steps.anchor.outputs.as_of_date }}"
@@ -30,8 +30,9 @@ def test_sales_volume_uses_two_balanced_parallel_lanes() -> None:
             assert env[name] == "${{ secrets." + name + " }}"
     steps = {step.get("name"): step for step in job["steps"] if step.get("name")}
     script = steps["Run assigned roles independently"]["run"]
-    assert "A) roles=(admin sales procurement)" in script
-    assert "B) roles=(manager assistant)" in script
+    assert "A) roles=(admin)" in script
+    assert "B) roles=(sales procurement)" in script
+    assert "C) roles=(manager assistant)" in script
     assert 'for role in "${roles[@]}"' in script
     assert "run_phase 完整主回归" in script and "run_phase 慢速排序与导出" in script
     assert 'export SALES_VOLUME_ROLE="$role"' in script

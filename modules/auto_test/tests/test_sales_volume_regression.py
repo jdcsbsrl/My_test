@@ -356,6 +356,21 @@ def test_custom_class_filter_matches_rows(report_query, report_window):
     }
 
 
+def _click_sales_volume_tab(page, tab):
+    """Wait for the report tab bar before switching dimensions in the SPA."""
+    tabs = page.locator(".el-tabs__item:visible, [role='tab']:visible")
+    sku_tab = tabs.filter(has_text="SKU维度").first
+    if not sku_tab.count():
+        sku_tab = page.get_by_text("SKU维度", exact=True).first
+    sku_tab.wait_for(state="visible", timeout=30000)
+
+    target = tabs.filter(has_text=tab).first
+    if not target.count():
+        target = page.get_by_text(tab, exact=True).first
+    target.wait_for(state="visible", timeout=30000)
+    target.click()
+
+
 def test_new_page_tabs_and_store_filter(logged_in_page, ui_base_url):
     page = logged_in_page
     root = ui_base_url.rstrip("/")
@@ -363,7 +378,7 @@ def test_new_page_tabs_and_store_filter(logged_in_page, ui_base_url):
         root = root[:-6]
     page.goto(root + "/product/productReport/salesVolume", wait_until="domcontentloaded")
     for tab in ("SKU维度", "发货仓库维度", "国家维度", "类目维度"):
-        page.get_by_text(tab, exact=True).click(timeout=30000)
+        _click_sales_volume_tab(page, tab)
         field = page.locator(".el-form-item:visible").filter(has=page.locator(".el-form-item__label", has_text="店铺"))
         assert field.count() == 1, tab
 
@@ -592,7 +607,7 @@ def test_ui_multistore_search_and_reset(
     assert all(store_id in names for store_id in sold_store_ids), names
     page = logged_in_page
     page.goto(root + "/product/productReport/salesVolume", wait_until="domcontentloaded")
-    page.get_by_text(tab, exact=True).click(timeout=30000)
+    _click_sales_volume_tab(page, tab)
     field = (
         page.locator(".el-form-item:visible").filter(has=page.locator(".el-form-item__label", has_text="店铺")).first
     )
