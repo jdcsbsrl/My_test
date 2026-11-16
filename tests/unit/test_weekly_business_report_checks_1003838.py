@@ -1,0 +1,216 @@
+"""Boundary tests for the independent requirement-1003838 oracle."""
+
+from decimal import Decimal
+
+import pytest
+
+from modules.auto_test.core.weekly_business_report_checks import (
+    actual_unpaid_amount,
+    direct_currency_expectation,
+    is_declining_customer,
+    is_last_week_new_customer,
+    is_main_customer,
+    is_previous_previous_week_revisit,
+    amount,
+    payment_abnormal_bills,
+    should_write_payment_credit_log,
+    unshipped_order_ready_percent,
+)
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+@pytest.mark.parametrize(
+    ("recent", "previous", "expected"),
+    [
+        ("0", "0", False),
+        ("1", "0", True),
+        ("0", "1", True),
+        ("1", "1", True),
+    ],
+)
+def test_main_customer_includes_either_week_with_positive_average(recent, previous, expected) -> None:
+    assert is_main_customer(recent, previous) is expected
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+@pytest.mark.parametrize(
+    ("recent", "previous", "expected"),
+    [
+        ("0", "0", False),
+        ("9", "10", False),  # exactly 10% decline
+        ("8.5", "10", False),  # exactly 15% decline is excluded
+        ("8.49", "10", True),
+        ("10", "9", False),
+        ("0", "10", True),
+    ],
+)
+def test_decline_requires_more_than_fifteen_percent_and_positive_prior(recent, previous, expected) -> None:
+    assert is_declining_customer(recent, previous) is expected
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_payment_abnormal_bill_predicates_keep_null_due_date_and_inclusive_end_date() -> None:
+    bills = [
+        {"id": 1, "billType": "0", "status": "0", "receivableDate": "2026-10-25", "customerNo": "C1"},
+        {"id": 2, "billType": 0, "status": 1, "receivableDate": None, "customerNo": "C1"},
+        {"id": 3, "billType": "0", "status": "3", "receivableDate": "2026-10-26", "customerNo": "C1"},
+        {"id": 4, "billType": "1", "status": "0", "receivableDate": "2026-10-20", "customerNo": "C1"},
+        {"id": 5, "billType": "0", "status": "2", "receivableDate": "2026-10-20", "customerNo": "C1"},
+        {"id": 6, "billType": "0", "status": "0", "receivableDate": "2026-10-20", "customerNo": "C2"},
+    ]
+    selected = payment_abnormal_bills(bills, report_end="2026-10-25", customer_no="C1")
+    assert [bill["id"] for bill in selected] == [1, 2]
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_all_null_receivable_dates_use_week_end_for_the_display_date() -> None:
+    expected = direct_currency_expectation(
+        [
+            {
+                "receivableDate": None,
+                "paidButNotReceive": "0",
+                "unpaid": "12.34",
+                "alreadySendAmount": "0",
+                "notSendAmount": "0",
+            }
+        ],
+        report_end="2026-10-25",
+    )
+    assert expected["pendingPaymentBillDate"] == "2026-10-25"
+    assert expected["receivableOutPeriodAmount"] == Decimal("12.34")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_direct_currency_amounts_reconcile_and_zero_shipping_basis_goes_to_unshipped() -> None:
+    expected = direct_currency_expectation(
+        [
+            {
+                "receivableDate": "2026-10-20",
+                "paidButNotReceive": "3.00",
+                "unpaid": "7.00",
+                "alreadySendAmount": "0",
+                "notSendAmount": "0",
+            },
+            {
+                "receivableDate": "2026-10-24",
+                "paidButNotReceive": "0",
+                "unpaid": "10.00",
+                "alreadySendAmount": "4.00",
+                "notSendAmount": "6.00",
+            },
+        ],
+        report_end="2026-10-25",
+    )
+    assert expected["paidButNotReceiveAmount"] == Decimal("3.00")
+    assert expected["actualUnpaidAmount"] == Decimal("17.00")
+    assert expected["receivableAmount"] == Decimal("20.00")
+    assert expected["shippedAmount"] == Decimal("4.00")
+    assert expected["unshippedAmount"] == Decimal("16.00")
+    assert expected["receivableInPeriodAmount"] == Decimal("10.00")
+    assert expected["receivableOutPeriodAmount"] == Decimal("10.00")
+    assert expected["pendingPaymentBillDate"] == "2026-10-20~2026-10-24"
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_raw_bill_balances_preserve_negative_actual_unpaid_and_shipping_split() -> None:
+    bill = {
+        "receivableAmount": "100.00",
+        "receivedAmount": "90.00",
+        "balanceAmount": "20.00",
+        "unpaid": "0.00",  # bill-list display may clamp the value
+        "paidButNotReceive": "0.00",
+        "alreadySendAmount": "33.10",
+        "notSendAmount": "33.10",
+        "receivableDate": "2026-10-25",
+    }
+    assert actual_unpaid_amount(bill) == Decimal("-10.00")
+
+    expected = direct_currency_expectation([bill], report_end="2026-10-25")
+    assert expected["actualUnpaidAmount"] == Decimal("-10.00")
+    assert expected["receivableAmount"] == Decimal("-10.00")
+    assert expected["shippedAmount"] == Decimal("-5.00")
+    assert expected["unshippedAmount"] == Decimal("-5.00")
+    displayed = direct_currency_expectation([bill], report_end="2026-10-25", use_raw_balances=False)
+    assert displayed["receivableAmount"] == Decimal("0.00")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_new_customer_and_old_customer_new_store_rules_are_distinct() -> None:
+    week_start, week_end = "2026-10-19", "2026-10-25"
+    assert is_last_week_new_customer(cooperation_date="2026-10-19", week_start=week_start, week_end=week_end)
+    assert is_last_week_new_customer(
+        cooperation_date="2026-01-01",
+        week_start=week_start,
+        week_end=week_end,
+        store_count=2,
+        new_store_created_date="2026-10-25",
+        new_store_has_any_order=True,
+        old_stores_have_any_order=False,
+    )
+    assert not is_last_week_new_customer(
+        cooperation_date="2026-01-01",
+        week_start=week_start,
+        week_end=week_end,
+        store_count=2,
+        new_store_created_date="2026-10-25",
+        new_store_has_any_order=False,
+        old_stores_have_any_order=False,
+    )
+    assert not is_last_week_new_customer(
+        cooperation_date="2026-01-01",
+        week_start=week_start,
+        week_end=week_end,
+        store_count=2,
+        new_store_created_date="2026-10-25",
+        new_store_has_any_order=True,
+        old_stores_have_any_order=True,
+    )
+    assert not is_last_week_new_customer(
+        cooperation_date="2026-01-01",
+        week_start=week_start,
+        week_end=week_end,
+        store_count=1,
+        new_store_created_date="2026-10-25",
+        new_store_has_any_order=True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_revisit_uses_only_cooperation_start_date_in_previous_previous_week() -> None:
+    assert is_previous_previous_week_revisit("2026-10-05", period_start="2026-10-05", period_end="2026-10-11")
+    assert not is_previous_previous_week_revisit("2026-10-12", period_start="2026-10-05", period_end="2026-10-11")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_readiness_ratio_distinguishes_no_unshipped_orders_from_all_shortage() -> None:
+    assert unshipped_order_ready_percent([]) is None
+    assert unshipped_order_ready_percent([[{"quantity": "2", "lockStockQty": "1"}]]) == Decimal("0.00")
+    assert unshipped_order_ready_percent(
+        [
+            [{"quantity": "2", "lockStockQty": "2"}],
+            [{"quantity": "3", "lockStockQty": "1"}],
+        ]
+    ) == Decimal("50.00")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_credit_log_is_only_required_when_the_value_changes() -> None:
+    assert not should_write_payment_credit_log("优秀", "优秀")
+    assert should_write_payment_credit_log("优秀", "良好")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_amount_parser_accepts_currency_formatted_api_values() -> None:
+    assert amount("€ 1,234.50") == Decimal("1234.50")
+    assert amount("-94.19") == Decimal("-94.19")

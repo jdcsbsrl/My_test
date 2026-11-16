@@ -15,6 +15,11 @@ on:
         required: false
         type: boolean
         default: false
+      run_weekly_report_source_audit:
+        description: "运行需求1003838周报与源账单对账（仅在周报刷新后使用）"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -236,6 +241,7 @@ jobs:
       TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      WEEKLY_REPORT_ROLE: admin
       # Keep reportSyncQuery focused on the recent, bounded test data window.
       # Query a broad recent window first, then narrow to 15 minutes and use a
       # five-minute safety window only when the test data is still too dense.
@@ -259,6 +265,8 @@ jobs:
             test_files: "modules/auto_test/tests/test_export_requirement_1003531.py -m 'not slow'"
           - shard: 15
             test_files: "modules/auto_test/tests/test_customer_bill_exchange_rate_1003647.py"
+          - shard: 16
+            test_files: "modules/auto_test/tests/test_weekly_business_report_1003838.py -m 'not slow'"
       fail-fast: false
       # Each runner has an isolated browser; allow two administrator shards
       # while keeping the account lane bounded.
@@ -313,6 +321,140 @@ jobs:
         if: always()
         with:
           name: allure-results-admin-shard-${{ matrix.shard }}
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+
+  weekly-report-role-regression:
+    name: 业务组周报权限回归（${{ matrix.role }}）
+    runs-on: ubuntu-latest
+    needs: code-quality
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role: manager
+          - role: sales
+      max-parallel: 2
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: "true"
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      LEADER_USERNAME: ${{ secrets.LEADER_USERNAME }}
+      LEADER_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
+      SALES_USERNAME: ${{ secrets.SALES_USERNAME }}
+      SALES_PASSWORD: ${{ secrets.SALES_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Validate weekly-report role credentials
+        shell: bash
+        run: |
+          test -n "$ADMIN_USERNAME" || { echo '缺少 ADMIN_USERNAME secret'; exit 1; }
+          test -n "$ADMIN_PASSWORD" || { echo '缺少 ADMIN_PASSWORD secret'; exit 1; }
+          case "${{ matrix.role }}" in
+            manager)
+              test -n "$LEADER_USERNAME" || { echo '缺少 LEADER_USERNAME secret'; exit 1; }
+              test -n "$LEADER_PASSWORD" || { echo '缺少 LEADER_PASSWORD secret'; exit 1; }
+              ;;
+            sales)
+              test -n "$SALES_USERNAME" || { echo '缺少 SALES_USERNAME secret'; exit 1; }
+              test -n "$SALES_PASSWORD" || { echo '缺少 SALES_PASSWORD secret'; exit 1; }
+              ;;
+            *) echo '未知周报权限角色'; exit 2 ;;
+          esac
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('pyproject.toml') }}
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      - name: Run read-only weekly-report role checks
+        shell: bash
+        run: |
+          mkdir -p .runtime/reports/allure-results .runtime/cache
+          case "${{ matrix.role }}" in
+            manager) TEST_USERNAME="$LEADER_USERNAME"; TEST_PASSWORD="$LEADER_PASSWORD" ;;
+            sales) TEST_USERNAME="$SALES_USERNAME"; TEST_PASSWORD="$SALES_PASSWORD" ;;
+          esac
+          export TEST_USERNAME TEST_PASSWORD WEEKLY_REPORT_ROLE="${{ matrix.role }}"
+          pytest modules/auto_test/tests/test_weekly_business_report_1003838.py \
+            -k 'test_report_tabs_and_customer_searches_are_available or test_work_plan_selector_is_scoped_to_the_configured_role' \
+            -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov \
+            --basetemp ".runtime/cache/weekly-report-${{ matrix.role }}" \
+            --alluredir .runtime/reports/allure-results
+      - name: Scan weekly-report role artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        env:
+          TEST_USERNAME: ${{ matrix.role == 'manager' && secrets.LEADER_USERNAME || secrets.SALES_USERNAME }}
+          TEST_PASSWORD: ${{ matrix.role == 'manager' && secrets.LEADER_PASSWORD || secrets.SALES_PASSWORD }}
+      - name: Upload weekly-report role results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-weekly-report-${{ matrix.role }}
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+
+  weekly-report-source-audit:
+    name: 业务组周报源账单对账（手动）
+    if: github.event_name == 'workflow_dispatch' && inputs.run_weekly_report_source_audit
+    runs-on: ubuntu-latest
+    needs: code-quality
+    timeout-minutes: 60
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: "true"
+      TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      WEEKLY_REPORT_ROLE: admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Validate administrator credentials
+        run: |
+          test -n "$TEST_USERNAME" || { echo '缺少 ADMIN_USERNAME secret'; exit 1; }
+          test -n "$TEST_PASSWORD" || { echo '缺少 ADMIN_PASSWORD secret'; exit 1; }
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      - name: Run read-only source-bill reconciliation
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          pytest modules/auto_test/tests/test_weekly_business_report_1003838.py::test_latest_week_admin_reports_match_source_receivable_bills \
+            -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov \
+            --alluredir .runtime/reports/allure-results
+      - name: Scan weekly-report source-audit artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        env:
+          TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+          TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      - name: Upload weekly-report source-audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-weekly-report-source-audit
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 
@@ -568,7 +710,7 @@ jobs:
   report:
     name: 生成测试报告
     runs-on: ubuntu-latest
-    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, sales-volume-regression, inventory-tests]
+    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, weekly-report-role-regression, weekly-report-source-audit, sales-volume-regression, inventory-tests]
     if: always()
     timeout-minutes: 15
     steps:
@@ -631,7 +773,7 @@ jobs:
   collect-failure-logs:
     name: 收集失败日志
     runs-on: ubuntu-latest
-    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, sales-volume-regression, inventory-tests, report, deploy-test-stub]
+    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, weekly-report-role-regression, weekly-report-source-audit, sales-volume-regression, inventory-tests, report, deploy-test-stub]
     if: ${{ always() && contains(needs.*.result, 'failure') }}
     timeout-minutes: 10
     steps:
