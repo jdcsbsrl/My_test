@@ -33,10 +33,10 @@ def test_weekly_report_regression_is_wired_to_admin_and_role_ci_lanes() -> None:
     assert "weekly-report-role-regression" in workflow["jobs"]["collect-failure-logs"]["needs"]
 
     source_audit_job = workflow["jobs"]["weekly-report-source-audit"]
-    assert "github.event_name == 'schedule'" in source_audit_job["if"]
+    assert "github.event_name != 'workflow_dispatch'" in source_audit_job["if"]
     assert "workflow_dispatch" in source_audit_job["if"]
     assert "inputs.run_weekly_report_source_audit" in source_audit_job["if"]
-    assert "夜间自动" in source_audit_job["name"]
+    assert "自动" in source_audit_job["name"]
     assert source_audit_job["needs"] == ["code-quality", "sales-ui-tests", "weekly-report-role-regression"]
     assert source_audit_job["env"]["TEST_ENV"] == "test"
     assert any(

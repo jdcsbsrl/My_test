@@ -11,7 +11,7 @@ updated: 2026-11-16
 
 CI 使用 `modules/auto_test/tests/test_weekly_business_report_1003838.py`。全组金额核对由管理员账号在 TEST 环境执行；业务经理/组长和业务员分别使用独立测试进程、浏览器上下文执行只读权限回归。测试只读当前最新周报，金额来源按每份快照自己的周报截止日查询账单。
 
-GitHub Actions 每晚北京时间 00:00 自动运行源账单对账；也可在 `workflow_dispatch` 额外手动触发。该检查只读 TEST 数据，不更新周报或账单。常规 push/PR 运行非慢速周报 UI 回归，慢速全组金额核对放在夜间任务，避免每次代码提交重复扫描所有组的账单。夜间对账等待管理员、组长和业务员的 UI 回归结束后再运行，减少并发访问 TEST 环境。
+GitHub Actions 在每次 push、PR 和每晚北京时间 00:00 自动运行源账单对账；也可在 `workflow_dispatch` 额外手动复跑。该检查只读 TEST 数据，不更新周报或账单。源账单对账等待管理员、组长和业务员的 UI 回归结束后再运行，减少并发访问 TEST 环境。
 
 本地执行管理员全组核对：
 
@@ -31,7 +31,7 @@ $env:WEEKLY_REPORT_ROLE = 'admin'
 pytest modules/auto_test/tests/test_weekly_business_report_1003838.py::test_latest_week_admin_reports_match_source_receivable_bills -m slow
 ```
 
-工作流夜间自动执行同一核对；`workflow_dispatch` 的 `run_weekly_report_source_audit` 仍可用于额外手动复跑。对账比较历史周报快照与源账单当前可查询状态，账单后续收款、平账或调整可能造成快照漂移；出现差异时需结合周报最后更新时间和账单变更记录判断，不能只据差异判定周报计算错误。
+工作流在每次 push、PR 和夜间定时任务自动执行同一核对；`workflow_dispatch` 的 `run_weekly_report_source_audit` 仅用于额外手动复跑。对账比较历史周报快照与源账单当前可查询状态，账单后续收款、平账或调整可能造成快照漂移；出现差异时需结合周报最后更新时间和账单变更记录判断，不能只据差异判定周报计算错误。
 
 ## 已覆盖检查
 

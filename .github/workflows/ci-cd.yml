@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       run_weekly_report_source_audit:
-        description: "额外运行需求1003838周报与源账单只读对账（常规夜间 CI 已自动执行）"
+        description: "在自动回归之外，额外复跑需求1003838周报与源账单只读对账"
         required: false
         type: boolean
         default: false
@@ -408,8 +408,8 @@ jobs:
           if-no-files-found: warn
 
   weekly-report-source-audit:
-    name: 业务组周报源账单对账（夜间自动）
-    if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_weekly_report_source_audit))
+    name: 业务组周报源账单对账（自动）
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.run_weekly_report_source_audit)
     runs-on: ubuntu-latest
     needs: [code-quality, sales-ui-tests, weekly-report-role-regression]
     timeout-minutes: 60
