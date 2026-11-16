@@ -1392,8 +1392,10 @@ def test_category_summary_export_matches_listing(authenticated_http_client, api_
 
 
 def _assert_async_export_matches_query(
-    session, api_base_url, report_query, payload, dimension, report_type, login_token
+    session, api_base_url, report_query, payload, dimension, report_type, login_token, refresh_auth=None
 ):
+    if refresh_auth:
+        refresh_auth()
     root = api_base_url.rstrip("/")
     before = report_query(DIMENSIONS["sku"], payload)
     assert before.get("code") == 200, before
@@ -1434,8 +1436,12 @@ def _assert_async_export_matches_query(
     response.raise_for_status()
     assert response.json().get("code") == 200, response.text
     deadline = time.monotonic() + 300
+    last_auth_refresh = time.monotonic()
     task = None
     while time.monotonic() < deadline:
+        if refresh_auth and time.monotonic() - last_auth_refresh >= 180:
+            refresh_auth()
+            last_auth_refresh = time.monotonic()
         task = find_new_export_task(
             fetch_page,
             task_name,
@@ -1482,6 +1488,7 @@ def _assert_async_export_matches_query(
 def test_multistore_async_export_matches_query(
     authenticated_http_client,
     login_token,
+    refresh_authenticated_http_client,
     api_base_url,
     report_query,
     report_window,
@@ -1491,14 +1498,26 @@ def test_multistore_async_export_matches_query(
 ):
     payload = {**build_filter(report_window, store_ids=sold_store_ids), "pageNum": 1, "pageSize": 500}
     _assert_async_export_matches_query(
-        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type, login_token
+        authenticated_http_client,
+        api_base_url,
+        report_query,
+        payload,
+        dimension,
+        report_type,
+        login_token,
+        refresh_authenticated_http_client,
     )
 
 
 @pytest.mark.slow
 def test_category_detail_export_over_20000_requires_task(
-    authenticated_http_client, login_token, api_base_url, report_query
+    authenticated_http_client,
+    login_token,
+    refresh_authenticated_http_client,
+    api_base_url,
+    report_query,
 ):
+    refresh_authenticated_http_client()
     payload = {
         **build_filter(pay_range=("2026-04-10 00:00:00", "2026-10-10 00:00:00")),
         "pageNum": 1,
@@ -1510,7 +1529,9 @@ def test_category_detail_export_over_20000_requires_task(
     assert rows and len(rows) == categories.get("total"), "Category sample missing or incomplete"
     detail_count = 0
     expected_sales = defaultdict(Decimal)
-    for category in rows:
+    for index, category in enumerate(rows):
+        if index and index % 3 == 0:
+            refresh_authenticated_http_client()
         detail = report_query("queryCategorySalesDimensionExpand", {**payload, "classIds": [category.get("classId")]})
         assert detail.get("code") == 200, detail
         details = detail.get("data") or []
@@ -1523,6 +1544,7 @@ def test_category_detail_export_over_20000_requires_task(
         "message": "Detail count must exceed the category row count",
         "details": detail_count,
     }
+    refresh_authenticated_http_client()
     summary = authenticated_http_client.post(
         api_base_url.rstrip("/") + "/oms-admin/sales/report/exportCategorySalesDimensionDetailReport",
         json=payload,
@@ -1569,8 +1591,12 @@ def test_category_detail_export_over_20000_requires_task(
     created.raise_for_status()
     assert created.json().get("code") == 200, created.text
     deadline = time.monotonic() + 600
+    last_auth_refresh = time.monotonic()
     task = None
     while time.monotonic() < deadline:
+        if time.monotonic() - last_auth_refresh >= 180:
+            refresh_authenticated_http_client()
+            last_auth_refresh = time.monotonic()
         task = find_new_export_task(
             fetch_page,
             task_name,

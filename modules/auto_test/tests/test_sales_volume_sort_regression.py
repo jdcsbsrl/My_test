@@ -200,11 +200,17 @@ def _sort_desc(page, label):
     return header
 
 
-def test_sort_persists_across_pages(logged_in_page, ui_base_url):
+def test_sort_persists_across_pages(logged_in_page, ui_base_url, refresh_authenticated_http_client):
+    refresh_authenticated_http_client()
     page = logged_in_page
     _open_report(page, ui_base_url)
     page.get_by_text("SKU维度", exact=True).click()
-    page.get_by_role("button", name="搜索", exact=True).click()
+    with page.expect_response(
+        lambda response: "queryOmsInventoryNew" in response.url and response.request.method == "POST",
+        timeout=REPORT_RESPONSE_TIMEOUT_MS,
+    ) as search_event:
+        page.get_by_role("button", name="搜索", exact=True).click()
+    _assert_report_rows(search_event.value, "SKU维度", "search")
     page.wait_for_timeout(3500)
     header = _sort_desc(page, "销量")
     first_page = header.evaluate(COLUMN_VALUES)
@@ -227,12 +233,18 @@ def test_sort_persists_across_pages(logged_in_page, ui_base_url):
     assert max(second_page) <= min(first_page), {"page1": first_page, "page2": second_page}
 
 
-def test_expand_keeps_active_sort(logged_in_page, ui_base_url):
+def test_expand_keeps_active_sort(logged_in_page, ui_base_url, refresh_authenticated_http_client):
+    refresh_authenticated_http_client()
     page = logged_in_page
     _open_report(page, ui_base_url)
     page.get_by_text("类目维度", exact=True).click()
     page.wait_for_timeout(800)
-    page.get_by_role("button", name="搜索", exact=True).click()
+    with page.expect_response(
+        lambda response: "queryCategorySalesDimensionReport" in response.url and response.request.method == "POST",
+        timeout=REPORT_RESPONSE_TIMEOUT_MS,
+    ) as search_event:
+        page.get_by_role("button", name="搜索", exact=True).click()
+    _assert_report_rows(search_event.value, "类目维度", "search")
     page.wait_for_timeout(4000)
     _sort_desc(page, "销量")
     rows = page.locator(".virtual-pro-table__row:visible")
@@ -252,7 +264,13 @@ def test_expand_keeps_active_sort(logged_in_page, ui_base_url):
 
 
 @pytest.mark.slow
-def test_visible_numeric_sort_and_export(logged_in_page, ui_base_url, authenticated_http_client, api_base_url):
+def test_visible_numeric_sort_and_export(
+    logged_in_page,
+    ui_base_url,
+    authenticated_http_client,
+    api_base_url,
+    refresh_authenticated_http_client,
+):
     page = logged_in_page
     latest_rows = {}
     latest_payloads = {}
@@ -263,10 +281,6 @@ def test_visible_numeric_sort_and_export(logged_in_page, ui_base_url, authentica
         "国家维度": "queryCountrySalesDimensionReport",
         "类目维度": "queryCategorySalesDimensionReport",
     }
-
-    root = ui_base_url.rstrip("/")
-    if root.endswith("/index"):
-        root = root[:-6]
 
     pending_report_requests = set()
     report_request_history = []
@@ -282,14 +296,13 @@ def test_visible_numeric_sort_and_export(logged_in_page, ui_base_url, authentica
     page.on("request", track_report_request)
     page.on("requestfinished", complete_report_request)
     page.on("requestfailed", complete_report_request)
-    page.goto(root + "/product/productReport/salesVolume", wait_until="domcontentloaded")
-    page.reload(wait_until="domcontentloaded")
-    page.get_by_text("SKU维度", exact=True).first.wait_for(state="visible", timeout=30000)
-    _wait_for_report_requests_idle(page, pending_report_requests)
     tabs = ["SKU维度", "店铺维度", "发货仓库维度", "国家维度", "类目维度"]
     if os.environ.get("SALES_VOLUME_ROLE") == "procurement":
         tabs.remove("店铺维度")
     for tab in tabs:
+        refresh_authenticated_http_client()
+        _open_report(page, ui_base_url)
+        _wait_for_report_requests_idle(page, pending_report_requests)
         page.get_by_text(tab, exact=True).click()
         _wait_for_report_requests_idle(page, pending_report_requests)
         with page.expect_request(

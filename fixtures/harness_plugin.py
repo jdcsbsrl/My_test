@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 import requests
@@ -183,6 +183,27 @@ def _refresh_authenticated_session(
             raise RuntimeError(f"认证刷新失败: {exc}") from exc
         finally:
             page.remove_listener("response", handler)
+
+
+def _apply_authenticated_state_to_client(client: requests.Session, login_response: dict[str, Any]) -> None:
+    data = login_response.get("data") or {}
+    token = data.get("token") or data.get("access_token")
+    if not token:
+        raise RuntimeError("刷新登录后没有获得 API token")
+    client.headers["Authorization"] = f"Bearer {token}"
+    clientid = login_response.get("_clientid") or get_secret("CLIENTID")
+    if clientid:
+        client.headers["clientid"] = clientid
+    else:
+        client.headers.pop("clientid", None)
+    client.cookies.clear()
+    for cookie in login_response.get("_cookies", []):
+        client.cookies.set(
+            cookie["name"],
+            cookie["value"],
+            domain=cookie.get("domain"),
+            path=cookie.get("path", "/"),
+        )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -712,6 +733,30 @@ def authenticated_http_client(http_client, login_token: str, login_response: dic
     finally:
         # The owning http_client fixture performs the actual close.
         http_client.headers.pop("Authorization", None)
+
+
+@pytest.fixture
+def refresh_authenticated_http_client(
+    request: pytest.FixtureRequest,
+    config_manager: ConfigManager,
+    _authenticated_session: dict[str, Any],
+    logged_in_page: Page,
+    authenticated_http_client: requests.Session,
+) -> Callable[[], None]:
+    """Force a fresh ERP login and synchronize browser and API authentication state."""
+
+    def refresh() -> None:
+        logged_in_page.evaluate("() => { window.localStorage.clear(); window.sessionStorage.clear(); }")
+        logged_in_page.context.clear_cookies()
+        _refresh_authenticated_session(
+            state=_authenticated_session,
+            page=logged_in_page,
+            request=request,
+            config_manager=config_manager,
+        )
+        _apply_authenticated_state_to_client(authenticated_http_client, _authenticated_session["login_response"])
+
+    return refresh
 
 
 @pytest.fixture(scope="function")

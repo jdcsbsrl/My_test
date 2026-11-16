@@ -238,6 +238,7 @@ def test_role_denied_store_with_administrator_sold_sample(
 def test_procurement_async_export_matches_query(
     authenticated_http_client,
     login_token,
+    refresh_authenticated_http_client,
     api_base_url,
     report_query,
     report_window,
@@ -250,7 +251,14 @@ def test_procurement_async_export_matches_query(
 
     payload = _procurement_async_export_payload(report_query, report_window, dimension)
     _assert_async_export_matches_query(
-        authenticated_http_client, api_base_url, report_query, payload, dimension, report_type, login_token
+        authenticated_http_client,
+        api_base_url,
+        report_query,
+        payload,
+        dimension,
+        report_type,
+        login_token,
+        refresh_authenticated_http_client,
     )
 
 
