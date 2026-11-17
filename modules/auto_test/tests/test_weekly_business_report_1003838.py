@@ -18,12 +18,12 @@ from modules.auto_test.api.weekly_business_report_api import WeeklyBusinessRepor
 from modules.auto_test.core.weekly_business_report_checks import (
     amount,
     direct_currency_expectation,
-    has_complete_order_item_stock_snapshot,
     is_declining_customer,
     is_main_customer,
     is_weekly_report_unshipped_order,
     payment_abnormal_bills,
     unshipped_order_ready_percent,
+    unshipped_order_ready_percent_from_stock_marks,
 )
 from modules.auto_test.pages.weekly_business_report_page import (
     CUSTOMER_REPORT_TABS,
@@ -1319,7 +1319,7 @@ def test_latest_week_admin_reports_match_source_receivable_bills(
 def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
     authenticated_http_client, api_base_url: str, config_manager
 ) -> None:
-    """Recompute packing readiness from complete small TEST order sets and order-item rows."""
+    """Reconcile packing readiness with order-level stock marks for small TEST samples."""
     assert config_manager.env == "test", "订单配齐比例源数据核对只允许在 TEST 环境执行"
     assert _role() == "admin", "订单配齐比例源数据核对使用管理员账号"
     api = _api(authenticated_http_client, api_base_url)
@@ -1420,31 +1420,14 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
         if len(order_numbers) != len(unshipped_orders):
             incomplete_source_customers.append(str(row["customerNo"]))
             continue
-        if order_numbers:
-            detail_response = authenticated_http_client.post(
-                f"{api_base_url.rstrip('/')}/oms-admin/sales/orderItem/queryAllList",
-                json={"orderNoList": order_numbers},
-                timeout=(10, 60),
-            )
-            detail_response.raise_for_status()
-            detail_body = detail_response.json()
-            detail_map = detail_body.get("data") if isinstance(detail_body, dict) else None
-            if not isinstance(detail_map, dict) or not set(order_numbers) <= set(detail_map):
-                incomplete_source_customers.append(str(row["customerNo"]))
-                continue
-            order_lines = []
-            complete_source = True
-            for order_number in order_numbers:
-                lines = detail_map[order_number]
-                if not isinstance(lines, list) or not has_complete_order_item_stock_snapshot(lines):
-                    complete_source = False
-                    break
-                order_lines.append(lines)
-            if not complete_source:
-                incomplete_source_customers.append(str(row["customerNo"]))
-                continue
-            verified_unshipped_orders += len(order_lines)
-            expected_ratio = unshipped_order_ready_percent(order_lines)
+        expected_ratio = unshipped_order_ready_percent_from_stock_marks(
+            order.get("outStockMark") for order in unshipped_orders
+        )
+        if unshipped_orders and expected_ratio is None:
+            incomplete_source_customers.append(str(row["customerNo"]))
+            continue
+        if unshipped_orders:
+            verified_unshipped_orders += len(unshipped_orders)
         else:
             no_unshipped_order_samples += 1
             expected_ratio = unshipped_order_ready_percent([])
@@ -1460,7 +1443,7 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
             if displayed != expected_ratio:
                 ratio_mismatches.append(
                     f"{row['customerNo']}: report={displayed}, source={expected_ratio}, "
-                    f"unshipped_orders={len(order_numbers)}"
+                    f"unshipped_orders={len(unshipped_orders)}"
                 )
         verified_customers += 1
 
@@ -1476,7 +1459,7 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
     assert not ratio_mismatches, f"Weekly readiness ratio differs from SQL source order details: {ratio_mismatches}"
     if incomplete_source_customers:
         pytest.skip(
-            "SOURCE_INCOMPLETE: orderItem/queryAllList has missing or null stock values for "
+            "SOURCE_INCOMPLETE: sales-order list has missing or unknown outStockMark values for "
             f"customers {incomplete_source_customers}; cannot reconcile ratio to source SQL"
         )
     assert (

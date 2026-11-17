@@ -203,17 +203,18 @@ def is_weekly_report_unshipped_order(order_status: Any) -> bool:
     return str(order_status) in WEEKLY_REPORT_UNSHIPPED_ORDER_STATUSES
 
 
-def has_complete_order_item_stock_snapshot(lines: Iterable[dict[str, Any]]) -> bool:
-    """Check whether an API order-item response can serve as a stock source.
+def unshipped_order_ready_percent_from_stock_marks(stock_marks: Iterable[Any]) -> Decimal | None:
+    """Reconcile readiness from order-level outStockMark values.
 
-    A null ``lockStockQty`` may mean either a database NULL or a missing field
-    mapping in the API. Since the response cannot distinguish those cases,
-    only populated values are suitable for an independent ratio assertion.
+    The sales-order list exposes ``outStockMark`` as ``0`` for ready and ``1``
+    for shortage. Unknown values make the source incomplete rather than being
+    silently treated as either state.
     """
-    rows = list(lines)
-    return bool(rows) and all(
-        line.get("quantity") not in (None, "") and line.get("lockStockQty") not in (None, "") for line in rows
-    )
+    marks = [str(mark) for mark in stock_marks]
+    if not marks or any(mark not in {"0", "1"} for mark in marks):
+        return None
+    ready_orders = sum(mark == "0" for mark in marks)
+    return (Decimal(ready_orders) * Decimal("100") / Decimal(len(marks))).quantize(CENT)
 
 
 def unshipped_order_ready_percent(orders: Iterable[Iterable[dict[str, Any]]]) -> Decimal | None:

@@ -12,11 +12,11 @@ from modules.auto_test.core.weekly_business_report_checks import (
     is_main_customer,
     is_previous_previous_week_revisit,
     is_weekly_report_unshipped_order,
-    has_complete_order_item_stock_snapshot,
     amount,
     payment_abnormal_bills,
     should_write_payment_credit_log,
     unshipped_order_ready_percent,
+    unshipped_order_ready_percent_from_stock_marks,
 )
 
 
@@ -318,11 +318,12 @@ def test_readiness_ratio_distinguishes_no_unshipped_orders_from_all_shortage() -
 
 @pytest.mark.unit
 @pytest.mark.requirement("1003838")
-def test_order_item_api_snapshot_requires_populated_stock_values() -> None:
-    assert has_complete_order_item_stock_snapshot([{"quantity": 1, "lockStockQty": 1}])
-    assert not has_complete_order_item_stock_snapshot([{"quantity": 1, "lockStockQty": None}])
-    assert not has_complete_order_item_stock_snapshot([{"quantity": 1}])
-    assert not has_complete_order_item_stock_snapshot([])
+def test_readiness_ratio_uses_order_level_stock_marks() -> None:
+    assert unshipped_order_ready_percent_from_stock_marks(["0", "1", "1", "1", "1"]) == Decimal("20.00")
+    assert unshipped_order_ready_percent_from_stock_marks([0, 0]) == Decimal("100.00")
+    assert unshipped_order_ready_percent_from_stock_marks([1, 1]) == Decimal("0.00")
+    assert unshipped_order_ready_percent_from_stock_marks([]) is None
+    assert unshipped_order_ready_percent_from_stock_marks(["0", None]) is None
 
 
 @pytest.mark.unit
