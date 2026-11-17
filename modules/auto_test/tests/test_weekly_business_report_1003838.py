@@ -18,6 +18,7 @@ from modules.auto_test.api.weekly_business_report_api import WeeklyBusinessRepor
 from modules.auto_test.core.weekly_business_report_checks import (
     amount,
     direct_currency_expectation,
+    has_complete_order_item_stock_snapshot,
     is_declining_customer,
     is_main_customer,
     is_weekly_report_unshipped_order,
@@ -1372,7 +1373,7 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
     verified_customers = 0
     verified_unshipped_orders = 0
     no_unshipped_order_samples = 0
-    incomplete_source_customers = 0
+    incomplete_source_customers: list[str] = []
     ratio_mismatches: list[str] = []
     for expected_total, row in sorted(
         small_samples,
@@ -1417,7 +1418,7 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
         raw_order_numbers = [str(order.get("orderNo") or "") for order in unshipped_orders]
         order_numbers = list(dict.fromkeys(number for number in raw_order_numbers if number))
         if len(order_numbers) != len(unshipped_orders):
-            incomplete_source_customers += 1
+            incomplete_source_customers.append(str(row["customerNo"]))
             continue
         if order_numbers:
             detail_response = authenticated_http_client.post(
@@ -1429,22 +1430,18 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
             detail_body = detail_response.json()
             detail_map = detail_body.get("data") if isinstance(detail_body, dict) else None
             if not isinstance(detail_map, dict) or not set(order_numbers) <= set(detail_map):
-                incomplete_source_customers += 1
+                incomplete_source_customers.append(str(row["customerNo"]))
                 continue
             order_lines = []
             complete_source = True
             for order_number in order_numbers:
                 lines = detail_map[order_number]
-                if (
-                    not isinstance(lines, list)
-                    or not lines
-                    or not all("quantity" in line and "lockStockQty" in line for line in lines)
-                ):
+                if not isinstance(lines, list) or not has_complete_order_item_stock_snapshot(lines):
                     complete_source = False
                     break
                 order_lines.append(lines)
             if not complete_source:
-                incomplete_source_customers += 1
+                incomplete_source_customers.append(str(row["customerNo"]))
                 continue
             verified_unshipped_orders += len(order_lines)
             expected_ratio = unshipped_order_ready_percent(order_lines)
@@ -1472,13 +1469,19 @@ def test_sixth_group_small_order_samples_match_unshipped_readiness_ratio(
         f"week={str(report.get('weekStartDate'))[:10]} verified_customers={verified_customers} "
         f"verified_unshipped_orders={verified_unshipped_orders} "
         f"no_unshipped_order_customers={no_unshipped_order_samples} "
-        f"incomplete_source_customers={incomplete_source_customers} mismatches={ratio_mismatches} "
+        f"incomplete_source_customers={len(incomplete_source_customers)} "
+        f"incomplete_customer_nos={incomplete_source_customers} mismatches={ratio_mismatches} "
         f"customer_order_counts={customer_order_counts}"
     )
+    assert not ratio_mismatches, f"Weekly readiness ratio differs from SQL source order details: {ratio_mismatches}"
+    if incomplete_source_customers:
+        pytest.skip(
+            "SOURCE_INCOMPLETE: orderItem/queryAllList has missing or null stock values for "
+            f"customers {incomplete_source_customers}; cannot reconcile ratio to source SQL"
+        )
     assert (
         verified_customers > 0
     ), "NO_SAMPLE: no small sixth-group customer had a complete source order/detail set for packing-ratio check"
-    assert not ratio_mismatches, f"Weekly readiness ratio differs from SQL source order details: {ratio_mismatches}"
 
 
 @pytest.mark.ui

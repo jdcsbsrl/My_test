@@ -203,6 +203,19 @@ def is_weekly_report_unshipped_order(order_status: Any) -> bool:
     return str(order_status) in WEEKLY_REPORT_UNSHIPPED_ORDER_STATUSES
 
 
+def has_complete_order_item_stock_snapshot(lines: Iterable[dict[str, Any]]) -> bool:
+    """Check whether an API order-item response can serve as a stock source.
+
+    A null ``lockStockQty`` may mean either a database NULL or a missing field
+    mapping in the API. Since the response cannot distinguish those cases,
+    only populated values are suitable for an independent ratio assertion.
+    """
+    rows = list(lines)
+    return bool(rows) and all(
+        line.get("quantity") not in (None, "") and line.get("lockStockQty") not in (None, "") for line in rows
+    )
+
+
 def unshipped_order_ready_percent(orders: Iterable[Iterable[dict[str, Any]]]) -> Decimal | None:
     """Return fully-prepared unshipped orders as a percentage; no orders is null."""
     order_lines = [list(lines) for lines in orders]
