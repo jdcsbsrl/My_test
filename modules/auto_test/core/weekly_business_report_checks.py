@@ -9,8 +9,9 @@ from typing import Any, Iterable
 
 PAYMENT_ABNORMAL_BILL_TYPE = "0"
 PAYMENT_ABNORMAL_STATUSES = frozenset({"0", "1", "3"})
+WEEKLY_REPORT_UNSHIPPED_ORDER_STATUSES = frozenset({"0", "1", "2", "5", "7", "8", "10"})
 CENT = Decimal("0.01")
-RAW_UNPAID_FIELDS = ("receivableAmount", "receivedAmount", "balanceAmount")
+RAW_UNPAID_FIELDS = ("receivableAmount", "receivedAmount", "paidButNotReceive", "balanceAmount")
 
 
 def amount(value: Any) -> Decimal:
@@ -67,15 +68,15 @@ def payment_abnormal_bills(
 
 
 def actual_unpaid_amount(bill: dict[str, Any]) -> Decimal:
-    """Rebuild the weekly-report unpaid formula from raw bill balances.
-
-    The customer-bill list may clamp its display value to zero. When raw
-    receivable, received and balance amounts are available, use the report's
-    ``receivable - received - balance`` calculation so negative historical
-    adjustments are reconciled faithfully.
-    """
+    """Rebuild the current weekly-report unpaid formula from raw bill balances."""
     if all(field in bill and bill[field] not in (None, "") for field in RAW_UNPAID_FIELDS):
-        return amount(bill["receivableAmount"]) - amount(bill["receivedAmount"]) - amount(bill["balanceAmount"])
+        return max(
+            amount(bill["receivableAmount"])
+            - amount(bill["receivedAmount"])
+            - amount(bill["paidButNotReceive"])
+            - amount(bill["balanceAmount"]),
+            Decimal("0"),
+        )
     return amount(bill.get("unpaid"))
 
 
@@ -84,11 +85,12 @@ def direct_currency_expectation(
 ) -> dict[str, Any]:
     """Calculate report amounts from same-currency source bills.
 
-    The shipment split mirrors the approved report rule: distribute
-    ``paidButNotReceive + unpaid`` by the source bill's shipped/unshipped
-    sales-amount ratio; when both bases are zero, assign the whole amount to
-    unshipped. The term split assigns bills on the earliest non-empty due date
-    to the in-period amount and the remaining bills to out-of-period.
+    The shipment split distributes ``paidButNotReceive + unpaid`` by each
+    source bill's shipped/unshipped sales-amount ratio; when both bases are
+    zero, assign that bill's whole amount to unshipped. The final shipped
+    amount is clamped to the report receivable total and unshipped is its
+    remainder. The term split assigns bills on the earliest non-empty due
+    date to the in-period amount and the remaining bills to out-of-period.
     """
     source = list(bills)
     if not source:
@@ -102,8 +104,7 @@ def direct_currency_expectation(
     paid_pending = Decimal("0")
     actual_unpaid = Decimal("0")
     receivable = Decimal("0")
-    shipped = Decimal("0")
-    unshipped = Decimal("0")
+    shipped_raw = Decimal("0")
     in_period = Decimal("0")
     out_period = Decimal("0")
 
@@ -120,17 +121,17 @@ def direct_currency_expectation(
         shipping_basis = shipped_basis + unshipped_basis
         if shipping_basis == 0:
             bill_shipped = Decimal("0")
-            bill_unshipped = bill_receivable
         else:
             bill_shipped = (bill_receivable * shipped_basis / shipping_basis).quantize(CENT)
-            bill_unshipped = bill_receivable - bill_shipped
-        shipped += bill_shipped
-        unshipped += bill_unshipped
+        shipped_raw += bill_shipped
 
         if earliest is not None and due_date == earliest:
             in_period += bill_receivable
         else:
             out_period += bill_receivable
+
+    shipped = min(max(shipped_raw, Decimal("0")), max(receivable, Decimal("0")))
+    unshipped = receivable - shipped
 
     return {
         "paidButNotReceiveAmount": paid_pending,
@@ -195,6 +196,11 @@ def is_last_week_new_customer(
 def is_previous_previous_week_revisit(cooperation_date: Any, *, period_start: str, period_end: str) -> bool:
     """Revisit is based only on the customer cooperation-start date."""
     return _is_date_in_period(cooperation_date, period_start=period_start, period_end=period_end)
+
+
+def is_weekly_report_unshipped_order(order_status: Any) -> bool:
+    """Apply the SQL order-status scope used by the weekly readiness ratio."""
+    return str(order_status) in WEEKLY_REPORT_UNSHIPPED_ORDER_STATUSES
 
 
 def unshipped_order_ready_percent(orders: Iterable[Iterable[dict[str, Any]]]) -> Decimal | None:

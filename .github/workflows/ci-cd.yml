@@ -434,7 +434,9 @@ jobs:
       - name: Run read-only source-bill reconciliation
         run: |
           mkdir -p .runtime/reports/allure-results
-          pytest modules/auto_test/tests/test_weekly_business_report_1003838.py::test_latest_week_admin_reports_match_source_receivable_bills \
+          pytest \
+            modules/auto_test/tests/test_weekly_business_report_1003838.py::test_latest_week_admin_reports_match_source_receivable_bills \
+            modules/auto_test/tests/test_weekly_business_report_1003838.py::test_ctrl_f_finds_all_customer_numbers_and_visible_report_values_in_six_group \
             -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov \
             --alluredir .runtime/reports/allure-results
       - name: Scan weekly-report source-audit artifacts for secrets

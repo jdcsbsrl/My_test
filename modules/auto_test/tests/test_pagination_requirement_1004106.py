@@ -12,8 +12,8 @@ from playwright.sync_api import Page, expect
 
 from modules.auto_test.core.config_manager import ConfigManager
 
-PAGE_SIZES = (20, 100, 300, 500, 1000)
-_SIZE_PATTERN = re.compile(r"(?<!\d)(1000|500|300|100|20)(?!\d)")
+PAGE_SIZES = (20, 100, 300, 500, 1000, 2000)
+_SIZE_PATTERN = re.compile(r"(?<!\d)(2000|1000|500|300|100|20)(?!\d)")
 
 
 def _size_control(page: Page):

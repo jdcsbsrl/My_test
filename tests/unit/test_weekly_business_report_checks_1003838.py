@@ -11,6 +11,7 @@ from modules.auto_test.core.weekly_business_report_checks import (
     is_last_week_new_customer,
     is_main_customer,
     is_previous_previous_week_revisit,
+    is_weekly_report_unshipped_order,
     amount,
     payment_abnormal_bills,
     should_write_payment_credit_log,
@@ -143,26 +144,58 @@ def test_direct_currency_amounts_reconcile_and_zero_shipping_basis_goes_to_unshi
 
 @pytest.mark.unit
 @pytest.mark.requirement("1003838")
-def test_raw_bill_balances_preserve_negative_actual_unpaid_and_shipping_split() -> None:
+def test_actual_unpaid_deducts_pending_payment_and_never_goes_below_zero() -> None:
     bill = {
         "receivableAmount": "100.00",
         "receivedAmount": "90.00",
         "balanceAmount": "20.00",
-        "unpaid": "0.00",  # bill-list display may clamp the value
-        "paidButNotReceive": "0.00",
+        "unpaid": "0.00",
+        "paidButNotReceive": "5.00",
         "alreadySendAmount": "33.10",
         "notSendAmount": "33.10",
         "receivableDate": "2026-10-25",
     }
-    assert actual_unpaid_amount(bill) == Decimal("-10.00")
+    assert actual_unpaid_amount(bill) == Decimal("0.00")
 
     expected = direct_currency_expectation([bill], report_end="2026-10-25")
-    assert expected["actualUnpaidAmount"] == Decimal("-10.00")
-    assert expected["receivableAmount"] == Decimal("-10.00")
-    assert expected["shippedAmount"] == Decimal("-5.00")
-    assert expected["unshippedAmount"] == Decimal("-5.00")
+    assert expected["actualUnpaidAmount"] == Decimal("0.00")
+    assert expected["receivableAmount"] == Decimal("5.00")
+    assert expected["shippedAmount"] == Decimal("2.50")
+    assert expected["unshippedAmount"] == Decimal("2.50")
     displayed = direct_currency_expectation([bill], report_end="2026-10-25", use_raw_balances=False)
-    assert displayed["receivableAmount"] == Decimal("0.00")
+    assert displayed["receivableAmount"] == Decimal("5.00")
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+def test_shipped_amount_is_clamped_to_report_receivable_and_unshipped_is_remainder() -> None:
+    expected = direct_currency_expectation(
+        [
+            {
+                "receivableAmount": "10.00",
+                "receivedAmount": "0.00",
+                "paidButNotReceive": "10.00",
+                "balanceAmount": "0.00",
+                "receivableDate": "2026-10-20",
+                "alreadySendAmount": "1.00",
+                "notSendAmount": "0.00",
+            },
+            {
+                "receivableAmount": "-10.00",
+                "receivedAmount": "0.00",
+                "paidButNotReceive": "-5.00",
+                "balanceAmount": "0.00",
+                "receivableDate": "2026-10-21",
+                "alreadySendAmount": "0.00",
+                "notSendAmount": "1.00",
+            },
+        ],
+        report_end="2026-10-25",
+    )
+    assert expected["receivableAmount"] == Decimal("5.00")
+    assert expected["shippedAmount"] == Decimal("5.00")
+    assert expected["unshippedAmount"] == Decimal("0.00")
+    assert expected["shippedAmount"] + expected["unshippedAmount"] == expected["receivableAmount"]
 
 
 @pytest.mark.unit
@@ -250,6 +283,27 @@ def test_revisit_uses_only_cooperation_start_date_in_previous_previous_week() ->
 
 @pytest.mark.unit
 @pytest.mark.requirement("1003838")
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        ("0", True),
+        ("1", True),
+        ("2", True),
+        ("5", True),
+        ("7", True),
+        ("8", True),
+        ("10", True),
+        ("6", False),
+        ("20", False),
+        (None, False),
+    ],
+)
+def test_readiness_ratio_uses_sql_order_status_scope(status, expected) -> None:
+    assert is_weekly_report_unshipped_order(status) is expected
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
 def test_readiness_ratio_distinguishes_no_unshipped_orders_from_all_shortage() -> None:
     assert unshipped_order_ready_percent([]) is None
     assert unshipped_order_ready_percent([[{"quantity": "2", "lockStockQty": "1"}]]) == Decimal("0.00")
@@ -263,9 +317,19 @@ def test_readiness_ratio_distinguishes_no_unshipped_orders_from_all_shortage() -
 
 @pytest.mark.unit
 @pytest.mark.requirement("1003838")
-def test_credit_log_is_only_required_when_the_value_changes() -> None:
-    assert not should_write_payment_credit_log("优秀", "优秀")
-    assert should_write_payment_credit_log("优秀", "良好")
+@pytest.mark.parametrize(
+    ("previous", "current", "expected"),
+    [
+        ("优秀", "优秀", False),
+        ("一般", "一般", False),
+        ("优秀", "一般", True),
+        ("一般", "差劲", True),
+        (None, None, False),
+        (None, "优秀", True),
+    ],
+)
+def test_credit_log_is_only_required_when_the_value_changes(previous, current, expected) -> None:
+    assert should_write_payment_credit_log(previous, current) is expected
 
 
 @pytest.mark.unit

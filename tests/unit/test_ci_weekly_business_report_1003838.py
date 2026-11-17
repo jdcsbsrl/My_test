@@ -25,6 +25,7 @@ def test_weekly_report_regression_is_wired_to_admin_and_role_ci_lanes() -> None:
     role_steps = {step.get("name"): step for step in role_job["steps"] if step.get("name")}
     command = role_steps["Run read-only weekly-report role checks"]["run"]
     assert "WEEKLY_REPORT_ROLE" in command
+    assert "test_report_tabs_and_customer_searches_are_available" in command
     assert "test_payment_abnormal_tab_renders_all_required_amount_columns" in command
     assert "test_ctrl_f_finds_customer_numbers_across_populated_report_sections" in command
     assert "test_work_plan_selector_is_scoped_to_the_configured_role" in command
@@ -43,5 +44,9 @@ def test_weekly_report_regression_is_wired_to_admin_and_role_ci_lanes() -> None:
         "test_latest_week_admin_reports_match_source_receivable_bills" in step.get("run", "")
         for step in source_audit_job["steps"]
     )
+    assert any(
+        "test_ctrl_f_finds_all_customer_numbers_and_visible_report_values_in_six_group" in step.get("run", "")
+        for step in source_audit_job["steps"]
+    ), "Full rendered-content Ctrl+F check is missing from the scheduled TEST audit"
     assert "weekly-report-source-audit" in workflow["jobs"]["report"]["needs"]
     assert "weekly-report-source-audit" in workflow["jobs"]["collect-failure-logs"]["needs"]
