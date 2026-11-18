@@ -2,9 +2,10 @@
 
 import base64
 import json
+from calendar import monthrange
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -60,6 +61,48 @@ def build_completed_report_window(as_of_date: date | str | None = None, days: in
     )
 
 
+def build_report_sample_history_windows(
+    report_window: Sequence[str], lookback_months: int = 6, chunk_days: int = 30
+) -> list[tuple[str, str]]:
+    """Return contiguous, bounded windows before the report window.
+
+    The combined history and report window never reaches farther back than
+    ``lookback_months`` calendar months. Older history is split into chunks so
+    order-source sample discovery does not issue one request per day.
+    """
+    if len(report_window) != 2:
+        raise ValueError("A report window requires both endpoints")
+    if lookback_months < 1 or chunk_days < 1:
+        raise ValueError("Lookback months and chunk days must be positive")
+
+    report_start = datetime.fromisoformat(report_window[0])
+    report_end = datetime.fromisoformat(report_window[1])
+    if report_start > report_end:
+        raise ValueError("Report window start must not exceed end")
+
+    month_index = report_end.year * 12 + report_end.month - 1 - lookback_months
+    start_year, start_month_index = divmod(month_index, 12)
+    start_month = start_month_index + 1
+    history_start_day = min(report_end.day, monthrange(start_year, start_month)[1])
+    history_start = date(start_year, start_month, history_start_day)
+
+    cursor_end = report_start.date() - timedelta(days=1)
+    if cursor_end < history_start:
+        return []
+
+    windows = []
+    while cursor_end >= history_start:
+        cursor_start = max(history_start, cursor_end - timedelta(days=chunk_days - 1))
+        windows.append(
+            (
+                datetime.combine(cursor_start, time.min).strftime("%Y-%m-%d %H:%M:%S"),
+                datetime.combine(cursor_end, time(23, 59, 59)).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+        )
+        cursor_end = cursor_start - timedelta(days=1)
+    return windows
+
+
 def build_filter(
     pay_range: Sequence[str] | None = None,
     ship_range: Sequence[str] | None = None,
@@ -110,6 +153,27 @@ def order_item_rows(groups: Iterable[Mapping[str, Any]]) -> Iterator[Mapping[str
         children = group.get("detail")
         items = children if isinstance(children, list) else [group]
         yield from (item for item in items if not _is_removed_order_item(item))
+
+
+def bundle_order_rows(
+    orders: Iterable[Mapping[str, Any]],
+    items_by_order: Mapping[str, list[Mapping[str, Any]]],
+) -> list[tuple[Mapping[str, Any], Mapping[str, Any]]]:
+    """Return non-void order groups with expanded bundle component rows."""
+    bundles = []
+    for order in orders:
+        order_no = str(order.get("orderNo") or "")
+        if not order_no or str(order.get("orderStatus")) == "6":
+            continue
+        for row in items_by_order.get(order_no, []):
+            if _is_removed_order_item(row):
+                continue
+            children = row.get("detail")
+            if isinstance(children, list) and any(
+                isinstance(child, Mapping) and not _is_removed_order_item(child) for child in children
+            ):
+                bundles.append((order, row))
+    return bundles
 
 
 def _is_removed_order_item(item: Mapping[str, Any]) -> bool:

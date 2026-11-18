@@ -1,5 +1,6 @@
 import base64
 import json
+from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 
@@ -11,6 +12,8 @@ from modules.auto_test.core.sales_volume_contract import (
     aggregate_orders,
     build_completed_report_window,
     build_export_task_name,
+    build_report_sample_history_windows,
+    bundle_order_rows,
     category_order_counts,
     find_new_export_task,
     token_user_id,
@@ -64,6 +67,54 @@ def test_report_window_rejects_invalid_anchor_and_day_count():
         build_completed_report_window("2026/11/14")
     with pytest.raises(ValueError, match="at least one day"):
         build_completed_report_window("2026-11-14", days=0)
+
+
+def test_bundle_sample_history_windows_stay_within_six_calendar_months():
+    report_window = ("2026-10-18 00:00:00", "2026-11-16 23:59:59")
+
+    windows = build_report_sample_history_windows(report_window)
+
+    assert windows == [
+        ("2026-09-18 00:00:00", "2026-10-17 23:59:59"),
+        ("2026-08-19 00:00:00", "2026-09-17 23:59:59"),
+        ("2026-07-20 00:00:00", "2026-08-18 23:59:59"),
+        ("2026-06-20 00:00:00", "2026-07-19 23:59:59"),
+        ("2026-05-21 00:00:00", "2026-06-19 23:59:59"),
+        ("2026-05-16 00:00:00", "2026-05-20 23:59:59"),
+    ]
+    for newer, older in zip(windows, windows[1:]):
+        assert (older[1], newer[0]) == (
+            (datetime.fromisoformat(newer[0]) - timedelta(days=1))
+            .replace(hour=23, minute=59, second=59)
+            .strftime("%Y-%m-%d %H:%M:%S"),
+            newer[0],
+        )
+
+
+def test_bundle_sample_history_windows_validate_range_and_chunk_size():
+    with pytest.raises(ValueError, match="both endpoints"):
+        build_report_sample_history_windows(("2026-01-01 00:00:00",))
+    with pytest.raises(ValueError, match="must not exceed"):
+        build_report_sample_history_windows(("2026-02-01 00:00:00", "2026-01-01 23:59:59"))
+    with pytest.raises(ValueError, match="must be positive"):
+        build_report_sample_history_windows(("2026-01-01 00:00:00", "2026-01-30 23:59:59"), chunk_days=0)
+
+
+def test_bundle_order_rows_ignore_void_orders_and_empty_component_lists():
+    active = {"orderNo": "active", "orderStatus": "0"}
+    void = {"orderNo": "void", "orderStatus": "6"}
+    bundle = {"itemId": "GROUP-A", "detail": [{"itemId": "SKU-A", "quantity": 2}]}
+    details = {
+        "active": [
+            bundle,
+            {"itemId": "SKU-B", "detail": []},
+            {"itemId": "REMOVED-GROUP", "detail": [{"itemId": "SKU-C"}], "showRemoveTag": True},
+            {"itemId": "EMPTY-GROUP", "detail": [{"itemId": "SKU-D", "showRemoveTag": True}]},
+        ],
+        "void": [bundle],
+    }
+
+    assert bundle_order_rows([active, void], details) == [(active, bundle)]
 
 
 def test_export_task_names_match_erp_dimension_defaults():

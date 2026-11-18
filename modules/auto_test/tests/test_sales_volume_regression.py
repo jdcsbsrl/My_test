@@ -24,7 +24,9 @@ from modules.auto_test.core.sales_volume_contract import (
     aggregate_orders,
     build_completed_report_window,
     build_export_task_name,
+    build_report_sample_history_windows,
     build_filter,
+    bundle_order_rows,
     category_order_counts,
     export_task_id,
     find_new_export_task,
@@ -862,7 +864,8 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         if len(orders) >= table["total"]:
             break
         assert page_rows, "Order pagination incomplete"
-    assert orders and len(orders) == table["total"], "No order sample or pagination incomplete"
+    assert orders, "No order sample in this period"
+    assert len(orders) == table["total"], "Order pagination incomplete"
     numbers = [str(order["orderNo"]) for order in orders]
     assert len(numbers) == len(set(numbers)), "Duplicate order number"
     details = {}
@@ -984,55 +987,78 @@ def test_bundle_order_sample_is_available(
 ):
     sampled_orders, details = sold_order_data
     api = SKUGroupAPI(authenticated_http_client, api_base_url)
-    valid_orders = {str(order["orderNo"]) for order in sampled_orders if str(order.get("orderStatus")) != "6"}
-    bundles = [
-        row
-        for order_no, rows in details.items()
-        if str(order_no) in valid_orders
-        for row in rows
-        if isinstance(row.get("detail"), list) and row["detail"]
-    ]
+    bundles = bundle_order_rows(sampled_orders, details)
     if not bundles:
         available = api.list_page(page_num=1, page_size=100)
         api.assert_success(available)
-        end = datetime.strptime(report_window[1], "%Y-%m-%d %H:%M:%S")
-        for day in range(30):
-            period_end = end - timedelta(days=day)
-            window = (
-                period_end.replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S"),
-                period_end.strftime("%Y-%m-%d %H:%M:%S"),
-            )
+        role = os.environ.get("SALES_VOLUME_ROLE", "unknown")
+        search_windows = [report_window, *build_report_sample_history_windows(report_window)]
+        for window in search_windows:
             try:
                 candidate_orders, candidate_details = _fetch_order_data(
                     authenticated_http_client, api_base_url, window, []
                 )
             except AssertionError as exc:
-                if str(exc).startswith("No order sample or pagination incomplete"):
+                if str(exc).startswith("No order sample in this period"):
                     continue
                 raise
-            valid = {str(order["orderNo"]) for order in candidate_orders if str(order.get("orderStatus")) != "6"}
-            bundles = [
-                row
-                for order_no, rows in candidate_details.items()
-                if str(order_no) in valid
-                for row in rows
-                if isinstance(row.get("detail"), list) and row["detail"]
-            ]
-            if bundles:
-                test_multistore_sku_sales_against_order_items(
-                    report_query,
-                    window,
-                    [],
-                    (candidate_orders, candidate_details),
-                    authenticated_http_client,
-                    api_base_url,
+            candidates = bundle_order_rows(candidate_orders, candidate_details)
+            if not candidates:
+                continue
+
+            timed_candidates = []
+            for order, row in candidates:
+                raw_pay_time = str(order.get("payTime") or "").replace("T", " ")[:19]
+                try:
+                    pay_time = datetime.strptime(raw_pay_time, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue
+                group_id = str(row.get("groupSkuId") or row.get("itemId") or "")
+                timed_candidates.append((pay_time, str(order.get("orderNo") or ""), group_id, order))
+
+            if not timed_candidates:
+                pytest.fail("INCOMPLETE: visible bundle orders have no usable payment time")
+
+            pay_time, order_no, _, _ = min(timed_candidates, key=lambda item: item[:3])
+            minute_start = pay_time.replace(second=0, microsecond=0)
+            sample_window = (
+                minute_start.strftime("%Y-%m-%d %H:%M:%S"),
+                minute_start.replace(second=59).strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            try:
+                sample_orders, sample_details = _fetch_order_data(
+                    authenticated_http_client, api_base_url, sample_window, []
                 )
-                break
+            except AssertionError as exc:
+                if str(exc).startswith("No order sample in this period"):
+                    pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
+                raise
+
+            bundles = [
+                (order, row)
+                for order, row in bundle_order_rows(sample_orders, sample_details)
+                if str(order.get("orderNo") or "") == order_no
+            ]
+            if not bundles:
+                pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
+
+            _assert_sku_sales_match_order_source(
+                report_query,
+                sample_window,
+                [],
+                sample_orders,
+                sample_details,
+                authenticated_http_client,
+                api_base_url,
+            )
+            break
         if not bundles:
             pytest.fail(
-                f"INCOMPLETE: {available['total']} combination SKUs, but no bundled order in the sampled period"
+                "INCOMPLETE: no non-void bundle order was visible to role="
+                f"{role} within the six-calendar-month sample search; "
+                f"{available['total']} combination SKU definitions are not order samples"
             )
-    group_ids = {str(row.get("groupSkuId") or row.get("itemId") or "") for row in bundles}
+    group_ids = sorted({str(row.get("groupSkuId") or row.get("itemId") or "") for _, row in bundles})
     assert "" not in group_ids, "Bundle order rows have no group SKU identifier"
     for group_id in group_ids:
         page = 1
