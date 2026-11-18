@@ -8,7 +8,7 @@ import uuid
 import json
 from collections import Counter
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import pytest
 import requests
@@ -392,6 +392,193 @@ def test_latest_week_admin_can_read_the_sixth_group_snapshot(
     assert detail_rows, "Latest sixth-group report has no detail rows"
     section_types = {str(row.get("sectionType")) for row in detail_rows}
     assert {"1", "3"} <= section_types, "Latest sixth-group report is missing main-customer or payment-abnormal rows"
+
+
+@pytest.mark.api
+@pytest.mark.regression
+@pytest.mark.p1
+@pytest.mark.slow
+@pytest.mark.requirement("1003838")
+def test_sixth_group_all_customers_match_unshipped_readiness_ratio(
+    authenticated_http_client, api_base_url: str, config_manager
+) -> None:
+    """Page through every order for each sixth-group payment customer and compare packing ratios."""
+    assert config_manager.env == "test", "订单配齐比例源数据核对只允许在 TEST 环境执行"
+    assert _role() == "admin", "订单配齐比例源数据核对使用管理员账号"
+    api = _api(authenticated_http_client, api_base_url)
+    _, reports = _latest_reports(api)
+    sixth_reports = _sixth_group_reports(reports)
+    assert len(sixth_reports) == 1, f"Expected one latest sixth-group report; found {len(sixth_reports)}"
+    report = api.get_report(sixth_reports[0]["id"])
+    payment_rows = [
+        row
+        for row in report.get("detailList") or []
+        if str(row.get("sectionType")) == "3" and row.get("customerId") and row.get("customerNo")
+    ]
+    assert payment_rows, "Latest sixth-group report has no payment-abnormal customers"
+
+    order_path = f"{api_base_url.rstrip('/')}/oms-admin/sales/order/batchListNew"
+    page_size = 2000
+    max_pages_per_customer = 100
+    customer_order_counts: list[tuple[str, int]] = []
+    incomplete_customers: list[str] = []
+    mismatches: list[str] = []
+    verified_customers = 0
+    verified_unshipped_orders = 0
+    no_unshipped_order_customers = 0
+
+    def fetch_page(row: dict, page_num: int) -> tuple[list[dict], int]:
+        response = authenticated_http_client.post(
+            order_path,
+            json={
+                "pageNum": page_num,
+                "pageSize": page_size,
+                "orderByColumn": "",
+                "isAsc": "",
+                "orderId": "",
+                "orderNo": "",
+                "customerId": row["customerId"],
+                "customerNo": row["customerNo"],
+                "orderStatus": "",
+                "storeIds": "",
+            },
+            timeout=(10, 120),
+        )
+        response.raise_for_status()
+        body = response.json()
+        assert isinstance(body, dict) and body.get("code") == 200, (
+            f"Sales-order page {page_num} returned an unsuccessful business response "
+            f"for customer {row['customerNo']}"
+        )
+        table = (body.get("data") or {}).get("tableDataInfo") or {}
+        rows = table.get("rows") if isinstance(table, dict) else None
+        assert isinstance(rows, list), f"Sales-order page {page_num} is missing rows for {row['customerNo']}"
+        try:
+            total = int(table.get("total"))
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"Sales-order page {page_num} is missing total for {row['customerNo']}") from exc
+        return rows, total
+
+    for row in payment_rows:
+        first_page, expected_total = fetch_page(row, 1)
+        customer_no = str(row["customerNo"])
+        customer_order_counts.append((customer_no, expected_total))
+        page_count = max(1, (expected_total + page_size - 1) // page_size)
+        if page_count > max_pages_per_customer:
+            incomplete_customers.append(customer_no)
+            print(
+                f"[weekly_report_readiness_ratio_customer] customer={customer_no} "
+                f"status=SOURCE_INCOMPLETE orders={expected_total} pages={page_count}",
+                flush=True,
+            )
+            continue
+
+        seen_order_numbers: set[str] = set()
+        unshipped_marks: list[object] = []
+        returned_orders = 0
+        page_error: str | None = None
+        for page_num in range(1, page_count + 1):
+            page_rows, page_total = (first_page, expected_total) if page_num == 1 else fetch_page(row, page_num)
+            if page_total != expected_total:
+                page_error = f"total changed on page {page_num} ({page_total} != {expected_total})"
+                break
+            if not page_rows and returned_orders < expected_total:
+                page_error = f"page {page_num} was empty before all orders were returned"
+                break
+            returned_orders += len(page_rows)
+            for order in page_rows:
+                if not isinstance(order, dict):
+                    page_error = f"page {page_num} contains a non-object order row"
+                    break
+                if not (
+                    str(order.get("customerId") or "") == str(row["customerId"])
+                    or str(order.get("customerNo") or "") == customer_no
+                ):
+                    page_error = f"page {page_num} returned another customer's order"
+                    break
+                order_no = str(order.get("orderNo") or "").strip()
+                if not order_no or order_no in seen_order_numbers:
+                    page_error = f"page {page_num} has a missing or duplicate order number"
+                    break
+                seen_order_numbers.add(order_no)
+                order_status = order.get("orderStatus")
+                if order_status in (None, ""):
+                    page_error = f"page {page_num} has an order without orderStatus"
+                    break
+                # The user's source SQL intentionally has no order-date filter.
+                if is_weekly_report_unshipped_order(order_status):
+                    unshipped_marks.append(order.get("outStockMark"))
+            if page_error:
+                break
+
+        if page_error or returned_orders != expected_total or len(seen_order_numbers) != expected_total:
+            incomplete_customers.append(customer_no)
+            print(
+                f"[weekly_report_readiness_ratio_customer] customer={customer_no} "
+                f"status=SOURCE_INCOMPLETE orders={expected_total} returned={returned_orders} "
+                f"unique={len(seen_order_numbers)} error={page_error}",
+                flush=True,
+            )
+            continue
+
+        expected_ratio = unshipped_order_ready_percent_from_stock_marks(unshipped_marks)
+        if unshipped_marks and expected_ratio is None:
+            incomplete_customers.append(customer_no)
+            print(
+                f"[weekly_report_readiness_ratio_customer] customer={customer_no} "
+                f"status=SOURCE_INCOMPLETE unshipped_orders={len(unshipped_marks)} "
+                "missing_or_unknown_outStockMark=True",
+                flush=True,
+            )
+            continue
+        if unshipped_marks:
+            verified_unshipped_orders += len(unshipped_marks)
+        else:
+            no_unshipped_order_customers += 1
+
+        report_value = row.get("unshippedOrderReadyRate")
+        mismatch_count_before = len(mismatches)
+        rounded_source = (
+            expected_ratio.quantize(Decimal("1"), rounding=ROUND_HALF_UP) if expected_ratio is not None else None
+        )
+        if expected_ratio is None:
+            if report_value not in (None, ""):
+                mismatches.append(f"{customer_no}: report={report_value!r}, source=None, unshipped_orders=0")
+        else:
+            displayed = Decimal(str(report_value).strip().removesuffix("%"))
+            if displayed != rounded_source:
+                mismatches.append(
+                    f"{customer_no}: report={displayed}, source_exact={expected_ratio}, "
+                    f"source_rounded={rounded_source}, "
+                    f"unshipped_orders={len(unshipped_marks)}"
+                )
+        verified_customers += 1
+        print(
+            f"[weekly_report_readiness_ratio_customer] customer={customer_no} "
+            f"status={'FAIL' if len(mismatches) > mismatch_count_before else 'PASS'} "
+            f"orders={expected_total} unshipped_orders={len(unshipped_marks)} "
+            f"source_exact={expected_ratio} "
+            f"source_rounded={rounded_source} "
+            f"report={report_value}",
+            flush=True,
+        )
+
+    print(
+        "[weekly_report_readiness_ratio_all_customers] "
+        f"week={str(report.get('weekStartDate'))[:10]} "
+        f"verified_customers={verified_customers}/{len(payment_rows)} "
+        f"verified_unshipped_orders={verified_unshipped_orders} "
+        f"no_unshipped_order_customers={no_unshipped_order_customers} "
+        f"incomplete_customers={incomplete_customers} mismatches={mismatches} "
+        f"customer_order_counts={customer_order_counts}",
+        flush=True,
+    )
+    assert not mismatches, f"Weekly readiness ratio differs from order-level stock marks: {mismatches}"
+    if incomplete_customers:
+        pytest.skip(f"SOURCE_INCOMPLETE: could not fully verify customers {incomplete_customers}")
+    assert verified_customers == len(
+        payment_rows
+    ), f"SOURCE_INCOMPLETE: verified {verified_customers}/{len(payment_rows)} customers"
 
 
 @pytest.mark.ui
