@@ -1,7 +1,7 @@
 """Regression checks for the merged product sales report (requirement 1003420)."""
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 import json
