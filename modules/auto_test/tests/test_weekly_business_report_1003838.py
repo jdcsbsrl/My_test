@@ -159,6 +159,50 @@ def _visible_exact_text_counts(page, values: list[str]) -> dict[str, int]:
     )
 
 
+def _wait_for_visible_exact_text_counts(
+    page,
+    values: list[str],
+    *,
+    expected_counts: dict[str, int] | None = None,
+    min_visible: int = 1,
+    timeout: int = 15000,
+    description: str,
+) -> dict[str, int]:
+    """Wait for the report table to render a source or filtered customer set."""
+    if not values:
+        raise ValueError("At least one customer number is required")
+    if expected_counts is None and min_visible < 1:
+        raise ValueError("min_visible must be positive")
+
+    try:
+        page.wait_for_function(
+            """({values, expectedCounts, minVisible}) => {
+              const isVisible = element => {
+                const style = window.getComputedStyle(element);
+                return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+              };
+              const counts = Object.fromEntries(values.map(value => [value, 0]));
+              const wanted = new Set(values);
+              for (const element of document.querySelectorAll('*')) {
+                if (element.children.length !== 0) continue;
+                const value = element.textContent.trim();
+                if (wanted.has(value) && isVisible(element)) counts[value] += 1;
+              }
+              if (expectedCounts) {
+                return Object.entries(expectedCounts).every(([value, count]) => counts[value] === count);
+              }
+              return Object.values(counts).filter(count => count > 0).length >= minVisible;
+            }""",
+            arg={"values": values, "expectedCounts": expected_counts, "minVisible": min_visible},
+            timeout=timeout,
+        )
+    except PlaywrightTimeoutError as exc:
+        visible_counts = _visible_exact_text_counts(page, values)
+        raise AssertionError(f"{description} did not settle (visible_counts={visible_counts})") from exc
+
+    return _visible_exact_text_counts(page, values)
+
+
 def _choose_search_option(page, placeholder: str, value: str) -> bool:
     search_value_lengths = []
     page.keyboard.press("Escape")
@@ -1705,7 +1749,12 @@ def test_report_tabs_and_customer_searches_are_available(
                 "input[placeholder='客户编号']:visible, input[placeholder='客户编码']:visible"
             ).first
             expect(number_filter).to_be_visible(timeout=5000)
-            initial_counts = _visible_exact_text_counts(logged_in_page, customer_nos)
+            initial_counts = _wait_for_visible_exact_text_counts(
+                logged_in_page,
+                customer_nos,
+                min_visible=min(2, len(customer_nos)),
+                description=f"{tab_name} did not render source customer rows",
+            )
             if len(customer_nos) > 1:
                 assert sum(count > 0 for count in initial_counts.values()) > 1, (
                     f"{tab_name} has multiple source customers but the unfiltered UI did not render multiple rows "
@@ -1713,7 +1762,12 @@ def test_report_tabs_and_customer_searches_are_available(
                 )
             number_filter.fill(customer_no)
             logged_in_page.get_by_role("button", name="搜索", exact=True).click()
-            filtered_counts = _visible_exact_text_counts(logged_in_page, customer_nos)
+            filtered_counts = _wait_for_visible_exact_text_counts(
+                logged_in_page,
+                customer_nos,
+                expected_counts={code: int(code == customer_no) for code in customer_nos},
+                description=f"{tab_name} customer-number search results",
+            )
             assert filtered_counts[customer_no] == 1, (
                 f"{tab_name} customer-number search did not retain exactly one matching customer "
                 f"(initial_visible_counts={sorted(initial_counts.values())}, "
