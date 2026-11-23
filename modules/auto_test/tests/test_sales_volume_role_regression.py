@@ -14,8 +14,9 @@ pytest_plugins = ("modules.auto_test.tests.test_sales_volume_regression",)
 
 
 @pytest.mark.slow
-def test_procurement_source_data(administrator_client, api_base_url, report_query, report_window, report_role):
+def test_procurement_source_data(request, api_base_url, report_query, report_window, report_role):
     assert report_role == "procurement", "This reconciliation is only applicable to procurement"
+    administrator_client = request.getfixturevalue("administrator_client")
     from modules.auto_test.tests.test_sales_volume_regression import (
         _assert_inventory_matches_report,
         _assert_sku_sales_match_order_source,
@@ -160,17 +161,34 @@ def administrator_client(browser):
 
     def capture(response):
         if "/auth/login" in response.url:
-            captured["body"] = response.json()
-            captured["clientid"] = response.request.all_headers().get("clientid")
+            captured["http_status"] = response.status
+            captured["request_id"] = response.headers.get("x-request-id") or response.headers.get("x-trace-id")
+            try:
+                captured["body"] = response.json()
+            except (ValueError, AttributeError):
+                captured["body"] = {}
+            try:
+                captured["clientid"] = response.request.all_headers().get("clientid")
+            except (AttributeError, TypeError):
+                captured["clientid"] = None
 
     page.on("response", capture)
     session = requests.Session()
     try:
-        assert LoginPage(page).login(username, password), "Administrator login failed"
+        login_succeeded = LoginPage(page).login(username, password)
         body = captured.get("body") or {}
         token_data = body.get("data") or {}
         token = token_data.get("token") or token_data.get("access_token")
-        assert token, "Administrator login did not provide a token"
+        if not login_succeeded or not token or str(body.get("code")) != "200":
+            raise AssertionError(
+                {
+                    "message": "Administrator login failed",
+                    "page_login_succeeded": login_succeeded,
+                    "http_status": captured.get("http_status"),
+                    "app_code": body.get("code"),
+                    "request_id": captured.get("request_id"),
+                }
+            )
         session.headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
         if captured.get("clientid"):
             session.headers["clientid"] = captured["clientid"]
@@ -186,7 +204,7 @@ def administrator_client(browser):
 
 @pytest.mark.slow
 def test_role_denied_store_with_administrator_sold_sample(
-    administrator_client,
+    request,
     authenticated_http_client,
     api_base_url,
     report_role,
@@ -194,6 +212,7 @@ def test_role_denied_store_with_administrator_sold_sample(
 ):
     if report_role in {"admin", "procurement"}:
         pytest.skip("Not applicable: administrator and procurement may view all data")
+    administrator_client = request.getfixturevalue("administrator_client")
     root = api_base_url.rstrip("/")
     path = root + "/oms-admin/sales/report/"
 
@@ -300,10 +319,11 @@ def _procurement_async_export_payload(report_query, report_window, dimension):
 
 @pytest.mark.slow
 def test_procurement_data_matches_administrator(
-    administrator_client, authenticated_http_client, api_base_url, report_role, report_window
+    request, authenticated_http_client, api_base_url, report_role, report_window
 ):
     if report_role != "procurement":
         pytest.skip("Only applicable to procurement")
+    administrator_client = request.getfixturevalue("administrator_client")
     payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
     url = api_base_url.rstrip("/") + "/oms-admin/sales/report/queryOmsInventoryNew"
 

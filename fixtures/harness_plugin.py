@@ -178,6 +178,8 @@ def _refresh_authenticated_session(
             state["login_response"].clear()
             state["login_response"].update(login_response)
             state["refresh_count"] += 1
+            state["login_count"] = int(state.get("login_count", 1)) + 1
+            state["last_login_monotonic"] = time.monotonic()
         except Exception as exc:
             _capture_authentication_diagnostic(page, "refresh-failure", request.config)
             raise RuntimeError(f"认证刷新失败: {exc}") from exc
@@ -564,6 +566,8 @@ def _authenticated_session(
                 "credentials": test_user_credentials,
                 "refresh_lock": threading.Lock(),
                 "refresh_count": 0,
+                "login_count": 1,
+                "last_login_monotonic": time.monotonic(),
             }
         except Exception as exc:
             if auth_page is not None:

@@ -1,9 +1,13 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import requests
 import yaml
 
 from modules.auto_test.tests.test_sales_volume_regression import (
+    _fetch_export_task_page,
+    _report_auth_failure_diagnostic,
     _dimension_filter_store_scope,
     _normalize_store_name,
     _store_picker_group_names,
@@ -19,7 +23,13 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert job["timeout-minutes"] == "120"
     assert job["strategy"]["max-parallel"] == "3"
     assert [entry["lane"] for entry in job["strategy"]["matrix"]["include"]] == ["A", "B", "C"]
-    assert job["needs"] == ["code-quality", "sales-volume-window"]
+    assert job["needs"] == [
+        "code-quality",
+        "sales-volume-window",
+        "sales-ui-tests",
+        "weekly-report-role-regression",
+        "weekly-report-source-audit",
+    ]
     assert job["env"]["SALES_VOLUME_AS_OF_DATE"] == "${{ needs.sales-volume-window.outputs.as_of_date }}"
     assert window_job["outputs"]["as_of_date"] == "${{ steps.anchor.outputs.as_of_date }}"
     assert "TZ=Asia/Shanghai date +%F" in window_job["steps"][0]["run"]
@@ -38,22 +48,36 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert 'export SALES_VOLUME_ROLE="$role"' in script
     assert "--basetemp" in script and "${SALES_VOLUME_ROLE}-${counter}" in script
     assert "overall=1" in script and 'exit "$overall"' in script
+    assert "run_phase 采购来源对账" not in script
+    assert "run_phase 采购管理员对账" not in script
+    assert "run_phase 越权店铺" not in script
     for expected in (
         "test_multistore_sku_sales_against_order_items",
-        "test_procurement_source_data",
         "test_procurement_async_export_matches_query",
-        "test_role_denied_store",
-        "test_procurement_data_matches_administrator",
         "sort_regression.py",
         "-k async_export",
         "run_phase 采购异步导出",
         "test_dimension_specific_filter",
     ):
         assert expected in script
+    weekly_job = workflow["jobs"]["weekly-report-role-regression"]
+    assert weekly_job["needs"] == ["code-quality", "sales-ui-tests"]
+    assert weekly_job["strategy"]["max-parallel"] == "1"
+    crosschecks = workflow["jobs"]["sales-volume-admin-crosschecks"]
+    crosscheck_script = {step.get("name"): step for step in crosschecks["steps"] if step.get("name")}[
+        "Run administrator comparisons serially"
+    ]["run"]
+    for expected in (
+        "test_procurement_source_data",
+        "test_procurement_data_matches_administrator",
+        "test_role_denied_store_with_administrator_sold_sample",
+    ):
+        assert expected in crosscheck_script
+    assert crosschecks["needs"][-1] == "sales-volume-regression"
+    assert "sales-volume-admin-crosschecks" in workflow["jobs"]["report"]["needs"]
+    assert "sales-volume-admin-crosschecks" in workflow["jobs"]["collect-failure-logs"]["needs"]
     scan = steps["Scan role test artifacts for secrets"]["run"]
     assert "for role in admin manager sales assistant procurement" in scan
-    assert "sales-volume-regression" in workflow["jobs"]["report"]["needs"]
-    assert "sales-volume-regression" in workflow["jobs"]["collect-failure-logs"]["needs"]
     ui_matrix = workflow["jobs"]["sales-ui-tests"]["strategy"]["matrix"]["include"]
     assert all(entry["shard"] != "10" for entry in ui_matrix)
 
@@ -104,6 +128,122 @@ def test_procurement_category_export_selects_a_detail_sample_under_limit():
     assert payload["storeIds"] == []
 
 
+def test_export_task_list_retries_transient_server_errors_only(monkeypatch):
+    from modules.auto_test.tests import test_sales_volume_regression as report_tests
+
+    class FakeResponse:
+        def __init__(self, status, body):
+            self.status_code = status
+            self.headers = {"X-Request-ID": f"request-{status}"}
+            self._body = body
+
+        def json(self):
+            return self._body
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError(f"HTTP {self.status_code}")
+
+    class FakeSession:
+        def __init__(self):
+            self.responses = [
+                FakeResponse(503, {"code": 503, "msg": "temporary"}),
+                FakeResponse(200, {"code": 200, "data": []}),
+            ]
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return self.responses.pop(0)
+
+    monkeypatch.setattr(report_tests.time, "sleep", lambda _: None)
+    session = FakeSession()
+
+    result = _fetch_export_task_page(session, "https://test.invalid", "商品销量报表_SKU维度", 1, 20)
+
+    assert result == {"code": 200, "data": []}
+    assert session.calls == 2
+
+
+def test_export_task_list_does_not_retry_authentication_errors(monkeypatch):
+    class FakeResponse:
+        status_code = 200
+        headers = {"X-Trace-ID": "trace-auth"}
+
+        @staticmethod
+        def json():
+            return {"code": "401", "msg": "unauthorized"}
+
+    class FakeSession:
+        calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return FakeResponse()
+
+    session = FakeSession()
+    monkeypatch.setattr("modules.auto_test.tests.test_sales_volume_regression.time.sleep", lambda _: None)
+
+    with pytest.raises(AssertionError, match="authentication failure"):
+        _fetch_export_task_page(session, "https://test.invalid", "task", 1, 20)
+
+    assert session.calls == 1
+
+
+def test_export_task_list_stops_after_bounded_network_failures(monkeypatch):
+    class FakeSession:
+        calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            raise requests.ConnectionError("connection refused")
+
+    session = FakeSession()
+    monkeypatch.setattr("modules.auto_test.tests.test_sales_volume_regression.time.sleep", lambda _: None)
+
+    with pytest.raises(AssertionError, match="after 2 attempts"):
+        _fetch_export_task_page(
+            session,
+            "https://test.invalid",
+            "task",
+            1,
+            20,
+            max_attempts=2,
+        )
+
+    assert session.calls == 2
+
+
+def test_auth_failure_diagnostic_contains_session_context_without_credentials():
+    response = SimpleNamespace(
+        status_code=401,
+        headers={"X-Request-ID": "req-123"},
+    )
+    auth_state = {
+        "last_login_monotonic": 100.0,
+        "login_count": 2,
+        "refresh_count": 1,
+    }
+
+    diagnostic = _report_auth_failure_diagnostic(
+        response,
+        "querySkuSalesDimensionReport",
+        {"code": 401, "msg": "not authorized", "token": "must-not-log"},
+        "admin",
+        auth_state,
+    )
+
+    assert diagnostic["role"] == "admin"
+    assert diagnostic["endpoint"] == "querySkuSalesDimensionReport"
+    assert diagnostic["http_status"] == 401
+    assert diagnostic["app_code"] == 401
+    assert diagnostic["request_id"] == "req-123"
+    assert diagnostic["login_count"] == 2
+    assert diagnostic["refresh_count"] == 1
+    assert "token" not in diagnostic
+    assert "message" not in diagnostic
+
+
 def test_procurement_source_reconciliation_calls_shared_assertions(monkeypatch):
     from modules.auto_test.tests import test_sales_volume_regression as report_tests
     from modules.auto_test.tests import test_sales_volume_role_regression as role_tests
@@ -127,7 +267,7 @@ def test_procurement_source_reconciliation_calls_shared_assertions(monkeypatch):
     )
 
     role_tests.test_procurement_source_data(
-        administrator_client,
+        SimpleNamespace(getfixturevalue=lambda name: administrator_client),
         "https://test.invalid",
         report_query,
         ("2026-11-13 00:00:00", "2026-11-13 23:59:59"),

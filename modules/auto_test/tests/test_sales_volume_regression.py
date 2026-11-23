@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
 import json
+import logging
 import os
 import re
 import time
@@ -37,6 +38,8 @@ from modules.auto_test.core.sales_volume_contract import (
     token_user_id,
 )
 
+_LOG = logging.getLogger(__name__)
+
 
 @pytest.fixture
 def report_window():
@@ -44,17 +47,61 @@ def report_window():
 
 
 @pytest.fixture
-def report_query(authenticated_http_client, api_base_url):
+def report_query(authenticated_http_client, api_base_url, _authenticated_session):
     def query(endpoint, payload):
         response = authenticated_http_client.post(
             api_base_url.rstrip("/") + "/oms-admin/sales/report/" + endpoint,
             json=payload,
             timeout=(10, 180),
         )
+        if response.status_code == 401:
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            raise AssertionError(
+                _report_auth_failure_diagnostic(
+                    response,
+                    endpoint,
+                    body,
+                    os.environ.get("SALES_VOLUME_ROLE", "unknown"),
+                    _authenticated_session,
+                )
+            )
         response.raise_for_status()
-        return response.json()
+        body = response.json()
+        if isinstance(body, dict) and str(body.get("code")) == "401":
+            raise AssertionError(
+                _report_auth_failure_diagnostic(
+                    response,
+                    endpoint,
+                    body,
+                    os.environ.get("SALES_VOLUME_ROLE", "unknown"),
+                    _authenticated_session,
+                )
+            )
+        return body
 
     return query
+
+
+def _report_auth_failure_diagnostic(response, endpoint, body, role, auth_state) -> dict:
+    last_login = auth_state.get("last_login_monotonic")
+    age_seconds = None if last_login is None else round(max(0, time.monotonic() - last_login), 2)
+    headers = response.headers
+    request_id = headers.get("X-Request-ID") or headers.get("X-Trace-ID") or headers.get("Trace-Id")
+    diagnostic = {
+        "role": role,
+        "endpoint": endpoint,
+        "http_status": response.status_code,
+        "app_code": body.get("code") if isinstance(body, dict) else None,
+        "session_age_seconds": age_seconds,
+        "login_count": auth_state.get("login_count"),
+        "refresh_count": auth_state.get("refresh_count"),
+        "request_id": request_id,
+    }
+    _LOG.error("Product-sales API authentication failure: %s", diagnostic)
+    return diagnostic
 
 
 @pytest.mark.parametrize("dimension", ["sku", "store", "warehouse", "country", "category"])
@@ -1417,6 +1464,68 @@ def test_category_summary_export_matches_listing(authenticated_http_client, api_
     assert exported == expected, {"listing": expected, "export": exported}
 
 
+def _fetch_export_task_page(
+    session: requests.Session,
+    api_root: str,
+    task_name: str,
+    page_num: int,
+    page_size: int,
+    max_attempts: int = 3,
+) -> dict:
+    """Retry only the idempotent task-list GET for transient server failures."""
+    url = api_root.rstrip("/") + "/oms-admin/base/exportTask/list"
+    params = {"pageNum": page_num, "pageSize": page_size, "taskName": task_name}
+    last_diagnostic = {}
+    for attempt in range(1, max_attempts + 1):
+        try:
+            response = session.get(url, params=params, timeout=(10, 60))
+        except requests.RequestException as exc:
+            last_diagnostic = {"error_type": type(exc).__name__, "attempts": attempt}
+            if attempt == max_attempts:
+                break
+            _LOG.warning("Export-task list request failed; retrying: %s", last_diagnostic)
+            time.sleep(attempt)
+            continue
+
+        headers = response.headers
+        request_id = headers.get("X-Request-ID") or headers.get("X-Trace-ID") or headers.get("Trace-Id")
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        app_code = body.get("code") if isinstance(body, dict) else None
+        try:
+            numeric_code = int(app_code)
+        except (TypeError, ValueError):
+            numeric_code = None
+        last_diagnostic = {
+            "http_status": response.status_code,
+            "app_code": app_code,
+            "request_id": request_id,
+            "attempts": attempt,
+        }
+
+        if response.status_code == 401 or numeric_code == 401:
+            raise AssertionError(f"Export-task list authentication failure: {last_diagnostic}")
+
+        transient_server_error = 500 <= response.status_code < 600 or (
+            numeric_code is not None and 500 <= numeric_code < 600
+        )
+        if transient_server_error:
+            if attempt == max_attempts:
+                break
+            _LOG.warning("Export-task list returned a transient server error; retrying: %s", last_diagnostic)
+            time.sleep(attempt)
+            continue
+
+        response.raise_for_status()
+        if not isinstance(body, dict):
+            raise AssertionError(f"Export-task list returned a non-object response: http_status={response.status_code}")
+        return body
+
+    raise AssertionError(f"Export-task list remained unavailable after {max_attempts} attempts: {last_diagnostic}")
+
+
 def _assert_async_export_matches_query(
     session, api_base_url, report_query, payload, dimension, report_type, login_token, refresh_auth=None
 ):
@@ -1437,13 +1546,7 @@ def _assert_async_export_matches_query(
     task_name = build_export_task_name(dimension)
 
     def fetch_page(page_num, page_size):
-        result = session.get(
-            root + "/oms-admin/base/exportTask/list",
-            params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
-            timeout=(10, 60),
-        )
-        result.raise_for_status()
-        return result.json()
+        return _fetch_export_task_page(session, root, task_name, page_num, page_size)
 
     previous_task_ids = {export_task_id(task) for task in list_export_tasks(fetch_page)}
     creator_id = token_user_id(login_token)
@@ -1592,13 +1695,13 @@ def test_category_detail_export_over_20000_requires_task(
     task_conditions = {**payload, "includeSkuDetail": 1, "exportReportType": 5}
 
     def fetch_page(page_num, page_size):
-        result = authenticated_http_client.get(
-            api_base_url.rstrip("/") + "/oms-admin/base/exportTask/list",
-            params={"pageNum": page_num, "pageSize": page_size, "taskName": task_name},
-            timeout=(10, 60),
+        return _fetch_export_task_page(
+            authenticated_http_client,
+            api_base_url,
+            task_name,
+            page_num,
+            page_size,
         )
-        result.raise_for_status()
-        return result.json()
 
     previous_task_ids = {export_task_id(task) for task in list_export_tasks(fetch_page)}
     creator_id = token_user_id(login_token)
