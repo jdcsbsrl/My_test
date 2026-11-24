@@ -20,7 +20,7 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     workflow = yaml.load(path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     job = workflow["jobs"]["sales-volume-regression"]
     window_job = workflow["jobs"]["sales-volume-window"]
-    assert job["timeout-minutes"] == "120"
+    assert job["timeout-minutes"] == "110"
     assert job["strategy"]["max-parallel"] == "3"
     assert [entry["lane"] for entry in job["strategy"]["matrix"]["include"]] == ["A", "B", "C"]
     assert job["needs"] == [
@@ -44,7 +44,16 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert "B) roles=(sales procurement)" in script
     assert "C) roles=(manager assistant)" in script
     assert 'for role in "${roles[@]}"' in script
-    assert "run_phase 完整主回归" in script and "run_phase 慢速排序与导出" in script
+    assert "run_phase 服务就绪检查 12" in script
+    assert "run_phase 完整主回归 25" in script
+    assert "run_phase 类目订单数对账 15" in script
+    assert "run_phase 慢速排序与导出 40" in script
+    assert "timeout --signal=TERM --kill-after=20s" in script
+    assert ".runtime/reports/sales-volume-ci-logs/${SALES_VOLUME_ROLE}-${counter}.log" in script
+    source_path = (
+        Path(__file__).resolve().parents[2] / "modules" / "auto_test" / "tests" / "test_sales_volume_regression.py"
+    )
+    assert "REPORT_SERVICE_NOT_READY" in source_path.read_text(encoding="utf-8")
     assert 'export SALES_VOLUME_ROLE="$role"' in script
     assert "--basetemp" in script and "${SALES_VOLUME_ROLE}-${counter}" in script
     assert "overall=1" in script and 'exit "$overall"' in script
@@ -76,6 +85,12 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert crosschecks["needs"][-1] == "sales-volume-regression"
     assert "sales-volume-admin-crosschecks" in workflow["jobs"]["report"]["needs"]
     assert "sales-volume-admin-crosschecks" in workflow["jobs"]["collect-failure-logs"]["needs"]
+    collector = workflow["jobs"]["collect-failure-logs"]
+    assert "contains(needs.*.result, 'cancelled')" in collector["if"]
+    collector_script = {step.get("name"): step for step in collector["steps"] if step.get("name")}[
+        "Download each failed job log and annotations"
+    ]["run"]
+    assert 'job.get("conclusion") in {"failure", "cancelled"}' in collector_script
     scan = steps["Scan role test artifacts for secrets"]["run"]
     assert "for role in admin manager sales assistant procurement" in scan
     ui_matrix = workflow["jobs"]["sales-ui-tests"]["strategy"]["matrix"]["include"]

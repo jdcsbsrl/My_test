@@ -28,7 +28,6 @@ from modules.auto_test.core.sales_volume_contract import (
     build_report_sample_history_windows,
     build_filter,
     bundle_order_rows,
-    category_order_counts,
     export_task_id,
     find_new_export_task,
     list_export_tasks,
@@ -39,6 +38,10 @@ from modules.auto_test.core.sales_volume_contract import (
 )
 
 _LOG = logging.getLogger(__name__)
+REPORT_SERVICE_READINESS_TIMEOUT_SECONDS = 600
+REPORT_SERVICE_READINESS_RETRY_SECONDS = 15
+CATEGORY_ORDER_SAMPLE_TIMEOUT_SECONDS = 900
+CATEGORY_ORDER_SAMPLE_MAX_PAGES = 20
 
 
 @pytest.fixture
@@ -48,11 +51,11 @@ def report_window():
 
 @pytest.fixture
 def report_query(authenticated_http_client, api_base_url, _authenticated_session):
-    def query(endpoint, payload):
+    def query(endpoint, payload, *, timeout=(10, 180)):
         response = authenticated_http_client.post(
             api_base_url.rstrip("/") + "/oms-admin/sales/report/" + endpoint,
             json=payload,
-            timeout=(10, 180),
+            timeout=timeout,
         )
         if response.status_code == 401:
             try:
@@ -83,6 +86,95 @@ def report_query(authenticated_http_client, api_base_url, _authenticated_session
         return body
 
     return query
+
+
+def _wait_for_sales_volume_report_services(
+    authenticated_http_client,
+    api_base_url,
+    report_window,
+    role,
+    *,
+    timeout_seconds=REPORT_SERVICE_READINESS_TIMEOUT_SECONDS,
+    retry_interval=REPORT_SERVICE_READINESS_RETRY_SECONDS,
+    clock=time.monotonic,
+    sleep=time.sleep,
+):
+    """Wait for all report endpoints visible to a role after a TEST restart."""
+    dimensions = ["sku", "warehouse", "country", "category"]
+    if str(role or "").strip().lower() != "procurement":
+        dimensions.insert(1, "store")
+    payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 1}
+    root = api_base_url.rstrip("/") + "/oms-admin/sales/report/"
+    deadline = clock() + timeout_seconds
+    attempts = 0
+    last_failure = None
+
+    while clock() < deadline:
+        attempts += 1
+        last_failure = None
+        for dimension in dimensions:
+            remaining = deadline - clock()
+            if remaining <= 0:
+                break
+            endpoint = DIMENSIONS[dimension]
+            timeout = (min(10, remaining), min(30, remaining))
+            try:
+                response = authenticated_http_client.post(
+                    root + endpoint,
+                    json=payload,
+                    timeout=timeout,
+                )
+            except requests.RequestException as exc:
+                last_failure = {"endpoint": endpoint, "error": type(exc).__name__}
+                break
+
+            try:
+                body = response.json()
+            except ValueError:
+                body = {}
+            app_code = body.get("code") if isinstance(body, dict) else None
+            failure = {"endpoint": endpoint, "http_status": response.status_code, "app_code": app_code}
+            if response.status_code == 401 or str(app_code) == "401":
+                raise AssertionError(f"Report readiness authentication failure: {failure}")
+            if response.status_code >= 500 or (str(app_code).isdigit() and int(app_code) >= 500):
+                failure["message"] = str(body.get("msg") or body.get("message") or "")[:120]
+                last_failure = failure
+                break
+            if response.status_code != 200 or app_code != 200:
+                failure["message"] = str(body.get("msg") or body.get("message") or "")[:120]
+                raise AssertionError(f"Report readiness returned a non-retryable response: {failure}")
+
+        if last_failure is None:
+            return {"attempts": attempts, "dimensions": dimensions}
+
+        remaining = deadline - clock()
+        if remaining > 0:
+            sleep(min(retry_interval, remaining))
+
+    raise AssertionError(
+        "REPORT_SERVICE_NOT_READY: report endpoints did not stabilize within "
+        f"{timeout_seconds}s; attempts={attempts}; lastFailure={last_failure}"
+    )
+
+
+@pytest.mark.ci_readiness
+def test_sales_volume_report_service_readiness(
+    authenticated_http_client,
+    api_base_url,
+    report_window,
+):
+    role = os.environ.get("SALES_VOLUME_ROLE", "admin")
+    result = _wait_for_sales_volume_report_services(
+        authenticated_http_client,
+        api_base_url,
+        report_window,
+        role,
+    )
+    print(
+        f"[sales_volume_readiness] role={role} attempts={result['attempts']} "
+        f"dimensions={','.join(result['dimensions'])}",
+        flush=True,
+    )
 
 
 def _report_auth_failure_diagnostic(response, endpoint, body, role, auth_state) -> dict:
@@ -872,7 +964,29 @@ class NoOrderSampleError(AssertionError):
     """Raised when a complete order query returns no rows for its time window."""
 
 
-def _fetch_order_data(authenticated_http_client, api_base_url, report_window, sold_store_ids, item_ids=None):
+class OrderSourceScanLimitError(AssertionError):
+    """Raised when a bounded source query cannot complete within its safety limits."""
+
+
+def _order_source_timeout(deadline, operation):
+    if deadline is None:
+        return (10, 180)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise OrderSourceScanLimitError(f"INCOMPLETE: category order source budget expired during {operation}")
+    return (min(10, remaining), min(60, remaining))
+
+
+def _fetch_order_data(
+    authenticated_http_client,
+    api_base_url,
+    report_window,
+    sold_store_ids,
+    item_ids=None,
+    *,
+    max_pages=200,
+    deadline=None,
+):
     session = authenticated_http_client
     root = api_base_url.rstrip("/")
     order_payload = {
@@ -901,10 +1015,12 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         "payTimeEnd": report_window[1],
     }
     orders = []
-    for page in range(1, 201):
+    for page in range(1, max_pages + 1):
         order_payload["pageNum"] = page
         order_response = session.post(
-            root + "/oms-admin/sales/order/batchListNew", json=order_payload, timeout=(10, 180)
+            root + "/oms-admin/sales/order/batchListNew",
+            json=order_payload,
+            timeout=_order_source_timeout(deadline, f"order page {page}"),
         )
         order_response.raise_for_status()
         order_body = order_response.json()
@@ -915,6 +1031,11 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         if len(orders) >= table["total"]:
             break
         assert page_rows, "Order pagination incomplete"
+    else:
+        if len(orders) < table["total"]:
+            raise OrderSourceScanLimitError(
+                f"INCOMPLETE: order query exceeded {max_pages} pages " f"({len(orders)}/{table['total']} orders)"
+            )
     if not orders:
         raise NoOrderSampleError("No order sample in this period")
     assert len(orders) == table["total"], "Order pagination incomplete"
@@ -925,13 +1046,51 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         response = session.post(
             root + "/oms-admin/sales/orderItem/queryAllList",
             json={"orderNoList": numbers[start : start + 100]},
-            timeout=(10, 180),
+            timeout=_order_source_timeout(deadline, f"order detail batch {start // 100 + 1}"),
         )
         response.raise_for_status()
         body = response.json()
         assert body.get("code") == 200, body
         details.update(body.get("data") or {})
     return orders, details
+
+
+def _category_sku_candidates(sku_rows, category_rows):
+    """Return SKU-to-category mapping and narrow multi-SKU category candidates."""
+    category_ids = {str(row.get("classId")) for row in category_rows if row.get("classId")}
+    sku_categories = {}
+    grouped_skus = defaultdict(set)
+    for row in sku_rows:
+        item_id = str(row.get("itemId") or "")
+        class_id = str(row.get("classId") or "")
+        if item_id and class_id in category_ids:
+            sku_categories[item_id] = class_id
+            grouped_skus[class_id].add(item_id)
+    candidates = [(class_id, sorted(item_ids)) for class_id, item_ids in grouped_skus.items() if len(item_ids) > 1]
+    candidates.sort(key=lambda candidate: (len(candidate[1]), candidate[0]))
+    return sku_categories, candidates
+
+
+def _category_order_source_count(orders, details, category_sku_ids):
+    """Count active distinct orders for a category and detect an order with multiple SKUs."""
+    order_numbers = set()
+    has_multi_sku_order = False
+    for order in orders:
+        if str(order.get("orderStatus")) == "6":
+            continue
+        order_no = str(order.get("orderNo") or "")
+        assert order_no, "Order number is required for category order reconciliation"
+        assert order_no in details, f"Order details are missing for {order_no}"
+        matching_skus = {
+            str(item.get("itemId"))
+            for item in order_item_rows(details.get(order_no) or [])
+            if str(item.get("itemId") or "") in category_sku_ids and int(item.get("quantity") or 0) > 0
+        }
+        if matching_skus:
+            order_numbers.add(order_no)
+        if len(matching_skus) > 1:
+            has_multi_sku_order = True
+    return len(order_numbers), has_multi_sku_order
 
 
 @pytest.fixture
@@ -1163,18 +1322,19 @@ def test_category_distinct_orders_against_order_source(
     report_query,
     report_window,
 ):
+    deadline = time.monotonic() + CATEGORY_ORDER_SAMPLE_TIMEOUT_SECONDS
     base = {**build_filter(report_window), "pageNum": 1, "pageSize": 100}
     stores_response = authenticated_http_client.post(
         api_base_url.rstrip("/") + "/oms-admin/base/store/queryPermissionStoreList",
         json={},
-        timeout=(10, 90),
+        timeout=_order_source_timeout(deadline, "permitted store list"),
     )
     stores_response.raise_for_status()
     stores_body = stores_response.json()
     assert stores_body.get("code") == 200, stores_body
     stores = stores_body.get("data") or []
     assert stores, "No permitted stores"
-    store_report = report_query(DIMENSIONS["store"], base)
+    store_report = report_query(DIMENSIONS["store"], base, timeout=_order_source_timeout(deadline, "store report"))
     assert store_report.get("code") == 200 and store_report.get("rows"), "No store-dimension sales sample"
     expanded = report_query(
         "queryStoreSalesDimensionExpand",
@@ -1182,47 +1342,69 @@ def test_category_distinct_orders_against_order_source(
             **base,
             "itemIds": [row["itemId"] for row in store_report["rows"]],
         },
+        timeout=_order_source_timeout(deadline, "store report expansion"),
     )
     assert expanded.get("code") == 200, expanded
     sold_names = {row.get("storeName") for row in expanded.get("data") or [] if row.get("storeName")}
     candidates = [row for row in stores if row.get("storeName") in sold_names]
     assert candidates, "No sold stores matched to permitted store list"
     for store in candidates[:30]:
+        if time.monotonic() >= deadline:
+            raise OrderSourceScanLimitError("INCOMPLETE: category order source budget expired while selecting a store")
         ids = [str(store["id"])]
         payload = {**build_filter(report_window, store_ids=ids), "pageNum": 1, "pageSize": 500}
-        sku_body = report_query(DIMENSIONS["sku"], payload)
-        category_body = report_query(DIMENSIONS["category"], payload)
+        sku_body = report_query(DIMENSIONS["sku"], payload, timeout=_order_source_timeout(deadline, "SKU report"))
+        category_body = report_query(
+            DIMENSIONS["category"], payload, timeout=_order_source_timeout(deadline, "category report")
+        )
         assert sku_body.get("code") == category_body.get("code") == 200, (sku_body, category_body)
         sku_rows, categories = sku_body.get("rows") or [], category_body.get("rows") or []
         if not sku_rows or len(sku_rows) != sku_body.get("total") or len(sku_rows) > 500:
             continue
         if not categories or len(categories) != category_body.get("total"):
             continue
-        orders, details = _fetch_order_data(authenticated_http_client, api_base_url, report_window, ids)
-        category_ids = {str(row.get("classId")) for row in categories if row.get("classId")}
-        sku_categories = {
-            str(row["itemId"]): str(row["classId"]) if str(row.get("classId") or "") in category_ids else ""
-            for row in sku_rows
-        }
-        has_multiple_skus = False
-        for order in orders:
-            if str(order.get("orderStatus")) == "6":
+        _, category_candidates = _category_sku_candidates(sku_rows, categories)
+        categories_by_id = {str(row.get("classId") or ""): row for row in categories}
+        for class_id, item_ids in category_candidates:
+            if time.monotonic() >= deadline:
+                raise OrderSourceScanLimitError(
+                    "INCOMPLETE: category order source budget expired while selecting a category"
+                )
+            try:
+                orders, details = _fetch_order_data(
+                    authenticated_http_client,
+                    api_base_url,
+                    report_window,
+                    ids,
+                    item_ids=item_ids,
+                    max_pages=CATEGORY_ORDER_SAMPLE_MAX_PAGES,
+                    deadline=deadline,
+                )
+            except NoOrderSampleError:
                 continue
-            groups = defaultdict(set)
-            for item in order_item_rows(details.get(str(order["orderNo"])) or []):
-                sku = str(item.get("itemId") or "")
-                if sku in sku_categories and int(item.get("quantity") or 0) > 0:
-                    groups[sku_categories[sku]].add(sku)
-            if any(len(skus) > 1 for skus in groups.values()):
-                has_multiple_skus = True
-                break
-        if not has_multiple_skus:
-            continue
-        expected = category_order_counts(orders, details, sku_categories)
-        actual = {str(row.get("classId") or ""): int(row.get("orderNumber") or 0) for row in categories}
-        assert actual == expected, {"storeId": ids[0], "report": actual, "orderSource": expected}
-        return
-    pytest.fail("No order with multiple SKUs in one category; distinct-count scenario incomplete")
+            expected_count, has_multi_sku_order = _category_order_source_count(orders, details, set(item_ids))
+            if not has_multi_sku_order:
+                continue
+            expected = expected_count
+            actual = int(categories_by_id[class_id].get("orderNumber") or 0)
+            assert actual == expected, {
+                "storeId": ids[0],
+                "categoryId": class_id,
+                "categorySkuCount": len(item_ids),
+                "reportOrderCount": actual,
+                "orderSourceDistinctCount": expected,
+            }
+            print(
+                "[category_order_reconciliation] "
+                f"storeId={ids[0]} categoryId={class_id} skuCount={len(item_ids)} "
+                f"sourceOrders={len(orders)} matchingCategoryOrders={expected}",
+                flush=True,
+            )
+            return
+    pytest.fail(
+        "No completed order-source sample contained multiple SKUs in one category; "
+        "distinct-count scenario incomplete"
+    )
 
 
 def _assert_inventory_matches_report(authenticated_http_client, api_base_url, report_query, report_window, store_ids):
