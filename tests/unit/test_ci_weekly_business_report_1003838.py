@@ -19,7 +19,7 @@ def test_weekly_report_regression_is_wired_to_admin_and_role_ci_lanes() -> None:
     assert admin_job_env["WEEKLY_REPORT_ROLE"] == "admin"
 
     role_job = workflow["jobs"]["weekly-report-role-regression"]
-    assert role_job["needs"] == "code-quality"
+    assert role_job["needs"] == ["code-quality", "sales-ui-tests"]
     role_values = [entry["role"] for entry in role_job["strategy"]["matrix"]["include"]]
     assert role_values == ["manager", "sales"]
     role_steps = {step.get("name"): step for step in role_job["steps"] if step.get("name")}

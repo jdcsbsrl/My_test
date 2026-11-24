@@ -7,8 +7,9 @@ import re
 import uuid
 import json
 from collections import Counter
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from zoneinfo import ZoneInfo
 
 import pytest
 import requests
@@ -19,8 +20,10 @@ from modules.auto_test.core.weekly_business_report_checks import (
     amount,
     direct_currency_expectation,
     is_declining_customer,
+    is_latest_completed_week_report,
     is_main_customer,
     is_weekly_report_unshipped_order,
+    latest_completed_week_start,
     payment_abnormal_bills,
     unshipped_order_ready_percent,
     unshipped_order_ready_percent_from_stock_marks,
@@ -1322,16 +1325,25 @@ def test_tenth_group_export_name_and_contents(
 def test_latest_week_admin_reports_match_source_receivable_bills(
     authenticated_http_client, api_base_url: str, config_manager
 ) -> None:
-    """Reconcile payment-abnormal rows in the latest week to source bills.
+    """Reconcile only the latest completed week's report to currently queryable bills.
 
-    This is read-only and uses each report's own end date, so it validates the
-    saved historical snapshot instead of comparing it with today's open bills.
+    Older saved reports are immutable snapshots, while the bill endpoint exposes
+    current values. Skip stale or partial report periods instead of comparing
+    them as though the API could reconstruct bill state at snapshot time.
     WEEKLY_REPORT_GROUP_SCOPE=sixth limits a local run to the sixth group; CI defaults to all groups.
     """
     assert config_manager.env == "test", "需求1003838自动化周报回归仅允许在 TEST 环境执行"
     assert _role() == "admin", "Latest-week source-bill reconciliation requires the admin role"
     api = _api(authenticated_http_client, api_base_url)
     latest_start, report_rows = _latest_reports(api)
+    shanghai_today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    expected_week_start = latest_completed_week_start(shanghai_today).isoformat()
+    if not is_latest_completed_week_report(latest_start, shanghai_today):
+        pytest.skip(
+            "SOURCE_AUDIT_INCOMPLETE: latest saved report week "
+            f"{latest_start} does not match the latest completed week {expected_week_start}; "
+            "skipping historical-snapshot versus current-bill comparison"
+        )
     group_scope = os.getenv("WEEKLY_REPORT_GROUP_SCOPE", "all").strip().lower()
     if group_scope == "sixth":
         report_rows = _sixth_group_reports(report_rows)

@@ -1,5 +1,6 @@
 """Boundary tests for the independent requirement-1003838 oracle."""
 
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -8,16 +9,49 @@ from modules.auto_test.core.weekly_business_report_checks import (
     actual_unpaid_amount,
     direct_currency_expectation,
     is_declining_customer,
+    is_latest_completed_week_report,
     is_last_week_new_customer,
     is_main_customer,
     is_previous_previous_week_revisit,
     is_weekly_report_unshipped_order,
+    latest_completed_week_start,
     amount,
     payment_abnormal_bills,
     should_write_payment_credit_log,
     unshipped_order_ready_percent,
     unshipped_order_ready_percent_from_stock_marks,
 )
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+@pytest.mark.parametrize(
+    ("as_of", "expected_start"),
+    [
+        (date(2026, 11, 23), date(2026, 11, 16)),  # Monday: prior week is complete.
+        (date(2026, 11, 24), date(2026, 11, 16)),
+        (date(2026, 11, 22), date(2026, 11, 9)),  # Sunday is not complete until day end.
+    ],
+)
+def test_latest_completed_week_start(as_of: date, expected_start: date) -> None:
+    assert latest_completed_week_start(as_of) == expected_start
+
+
+@pytest.mark.unit
+@pytest.mark.requirement("1003838")
+@pytest.mark.parametrize(
+    ("report_week_start", "as_of", "expected"),
+    [
+        ("2026-11-09", date(2026, 11, 23), False),
+        ("2026-11-16", date(2026, 11, 23), True),
+        ("2026-11-16 00:00:00", date(2026, 11, 24), True),
+        (None, date(2026, 11, 23), False),
+    ],
+)
+def test_historical_snapshot_is_not_misidentified_as_latest_complete_week(
+    report_week_start: str | None, as_of: date, expected: bool
+) -> None:
+    assert is_latest_completed_week_report(report_week_start, as_of) is expected
 
 
 @pytest.mark.unit

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import re
 from typing import Any, Iterable
@@ -35,6 +35,18 @@ def _date_part(value: Any) -> str | None:
     result = str(value)[:10]
     date.fromisoformat(result)
     return result
+
+
+def latest_completed_week_start(as_of_date: date) -> date:
+    """Return Monday for the most recent fully completed Monday-Sunday week."""
+    this_week_monday = as_of_date - timedelta(days=as_of_date.weekday())
+    return this_week_monday - timedelta(days=7)
+
+
+def is_latest_completed_week_report(report_week_start: Any, as_of_date: date) -> bool:
+    """Whether a saved report belongs to the latest fully completed week."""
+    week_start = _date_part(report_week_start)
+    return week_start == latest_completed_week_start(as_of_date).isoformat()
 
 
 def payment_abnormal_bills(

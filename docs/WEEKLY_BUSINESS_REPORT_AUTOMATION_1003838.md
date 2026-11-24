@@ -41,7 +41,7 @@ $env:WEEKLY_REPORT_GROUP_SCOPE = 'sixth'
 pytest modules/auto_test/tests/test_weekly_business_report_1003838.py::test_latest_week_admin_reports_match_source_receivable_bills -m slow
 ```
 
-工作流在每次 push、PR 和夜间定时任务自动执行同一核对；`workflow_dispatch` 的 `run_weekly_report_source_audit` 仅用于额外手动复跑。对账比较历史周报快照与源账单当前可查询状态，账单后续收款、平账或调整可能造成快照漂移；出现差异时需结合周报最后更新时间和账单变更记录判断，不能只据差异判定周报计算错误。
+工作流在每次 push、PR 和夜间定时任务自动执行同一核对；`workflow_dispatch` 的 `run_weekly_report_source_audit` 仅用于额外手动复跑。源账单接口只返回当前可查询状态，不能按历史报告生成时点还原账单；因此用例只在周报周期等于上海时区最近一个完整周时进行金额对账。如果最新周报尚未生成或接口仍只返回更早周期，测试会以 `SOURCE_AUDIT_INCOMPLETE` 跳过，避免把旧快照和当前账单误判为计算缺陷。该周期门禁不能重建账单历史版本；若最新周期对账仍有差异，仍需结合账单变更记录判断，不能只据差异断言产品计算错误。
 
 ## 已覆盖检查
 
