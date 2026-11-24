@@ -868,6 +868,10 @@ def test_warehouse_zero_sales_stock_is_in_expansion(report_query, report_window)
     assert stocks == Decimal(str(summary.get("stockNumber") or 0)), {"summary": summary, "detailStock": stocks}
 
 
+class NoOrderSampleError(AssertionError):
+    """Raised when a complete order query returns no rows for its time window."""
+
+
 def _fetch_order_data(authenticated_http_client, api_base_url, report_window, sold_store_ids, item_ids=None):
     session = authenticated_http_client
     root = api_base_url.rstrip("/")
@@ -911,7 +915,8 @@ def _fetch_order_data(authenticated_http_client, api_base_url, report_window, so
         if len(orders) >= table["total"]:
             break
         assert page_rows, "Order pagination incomplete"
-    assert orders, "No order sample in this period"
+    if not orders:
+        raise NoOrderSampleError("No order sample in this period")
     assert len(orders) == table["total"], "Order pagination incomplete"
     numbers = [str(order["orderNo"]) for order in orders]
     assert len(numbers) == len(set(numbers)), "Duplicate order number"

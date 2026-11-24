@@ -157,11 +157,18 @@ def _refresh_authenticated_session(
         login_result, handler = _login_response_capture(page)
         try:
             credentials = state["credentials"]
-            if not LoginPage(page).login(credentials["username"], credentials["password"]):
-                raise RuntimeError("重新登录未成功返回")
+            login_succeeded = LoginPage(page).login(credentials["username"], credentials["password"])
+            authenticated_by_fallback = False
+            if not login_succeeded:
+                # The login helper's URL/DOM checks can miss a valid app session
+                # when the SPA keeps a stale /login URL after the API response.
+                # A fresh navigation must still prove that the session works.
+                _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+                authenticated_by_fallback = True
             if "response" not in login_result:
                 raise RuntimeError("重新登录未捕获到 auth/login 响应")
-            _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+            if not authenticated_by_fallback:
+                _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
 
             login_response = login_result["response"]
             login_response["_clientid"] = login_result.get("clientid")

@@ -29,6 +29,7 @@ COLUMN_VALUES = """header => {
 
 REPORT_RESPONSE_TIMEOUT_MS = 90_000
 REPORT_DOWNLOAD_TIMEOUT_MS = 90_000
+SORT_RENDER_TIMEOUT_MS = 15_000
 
 
 def _response_diagnostics(response):
@@ -269,7 +270,6 @@ def test_visible_numeric_sort_and_export(
     ui_base_url,
     authenticated_http_client,
     api_base_url,
-    refresh_authenticated_http_client,
 ):
     page = logged_in_page
     latest_rows = {}
@@ -300,7 +300,6 @@ def test_visible_numeric_sort_and_export(
     if os.environ.get("SALES_VOLUME_ROLE") == "procurement":
         tabs.remove("店铺维度")
     for tab in tabs:
-        refresh_authenticated_http_client()
         _open_report(page, ui_base_url)
         _wait_for_report_requests_idle(page, pending_report_requests)
         page.get_by_text(tab, exact=True).click()
@@ -341,29 +340,48 @@ def test_visible_numeric_sort_and_export(
                     is_active = "is-active" in (arrow.get_attribute("class") or "")
                     if is_active and is_sorted:
                         break
-                    box = arrow.bounding_box()
-                    assert box, (tab, label, direction)
-                    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                    # Clicking the locator avoids coordinate hits on nearby tooltip/header
+                    # overlays, which can leave the sort arrow and request unchanged.
+                    arrow.click(timeout=10_000)
                     header.evaluate("""header => {const table=header.closest('.virtual-pro-table');
                       for (const el of [table,...table.querySelectorAll('*')]) {
                         if (el.scrollHeight>el.clientHeight+1) {const old=el.scrollTop;el.scrollTop=old+1;
                         el.dispatchEvent(new Event('scroll',{bubbles:true}));el.scrollTop=old;
                         el.dispatchEvent(new Event('scroll',{bubbles:true}));}}
                       window.dispatchEvent(new Event('resize'));}""")
-                    values = _wait_for_sorted_numeric_values(page, header, arrow, expected_descending, timeout_ms=3_000)
-                assert "is-active" in (arrow.get_attribute("class") or ""), (tab, label, direction)
+                    _wait_for_report_requests_idle(page, pending_report_requests)
+                    values = _wait_for_sorted_numeric_values(
+                        page, header, arrow, expected_descending, timeout_ms=SORT_RENDER_TIMEOUT_MS
+                    )
+                arrow_class = arrow.get_attribute("class") or ""
+                assert "is-active" in arrow_class, {
+                    "tab": tab,
+                    "field": label,
+                    "direction": direction,
+                    "arrowClass": arrow_class,
+                    "values": values[:20],
+                    "sortRequests": _sort_request_history(report_request_history, endpoints[tab]),
+                }
                 assert len(values) >= 2, {"tab": tab, "field": label, "values": values}
                 assert values == sorted(values, reverse=direction == "descending"), {
                     "tab": tab,
                     "field": label,
                     "direction": direction,
                     "values": values,
+                    "sortRequests": _sort_request_history(report_request_history, endpoints[tab]),
                 }
                 page.get_by_role("button", name="导出", exact=True).first.click()
                 menu = "导出类目" if tab == "类目维度" else "导出当前页"
                 downloaded_file, export_response, export_request = _download_report_export(
                     page, page.get_by_text(menu, exact=True).last, tab, label, direction
                 )
+                expected_sort_order = "asc" if direction == "ascending" else "desc"
+                assert export_request.get("sortOrder") == expected_sort_order, {
+                    "tab": tab,
+                    "field": label,
+                    "direction": direction,
+                    "exportRequest": export_request,
+                }
                 destination = runtime_dir("downloads") / ("sales_volume_sort_" + uuid4().hex + ".xlsx")
                 downloaded_file.save_as(str(destination))
                 workbook = load_workbook(destination, read_only=True, data_only=True)
@@ -496,3 +514,41 @@ def test_visible_numeric_sort_and_export(
                     "values": exported[:30],
                     "download": str(destination),
                 }
+
+
+def _sort_request_history(requests, endpoint):
+    """Keep safe request and numeric response evidence for an ordering failure."""
+    numeric_keys = {
+        "salesNumber",
+        "salesVolume",
+        "averageSales",
+        "dailySales",
+        "stockNumber",
+        "stockNum",
+        "stockQty",
+        "orderNumber",
+        "orderCount",
+    }
+    history = []
+    for request in requests:
+        if endpoint not in request.url or request.method != "POST":
+            continue
+        item = {"request": _request_diagnostics(request)}
+        response = request.response()
+        if response is None:
+            item["response"] = None
+        else:
+            item["status"] = response.status
+            try:
+                body = response.json()
+            except (TypeError, ValueError):
+                body = {}
+            rows = body.get("rows") if isinstance(body, dict) else None
+            if isinstance(rows, list):
+                item["rowCount"] = len(rows)
+                item["numericValues"] = [
+                    {key: row.get(key) for key in numeric_keys if isinstance(row.get(key), (int, float))}
+                    for row in rows[:10]
+                ]
+        history.append(item)
+    return history[-10:]

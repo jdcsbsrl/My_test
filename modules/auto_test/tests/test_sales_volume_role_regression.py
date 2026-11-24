@@ -9,6 +9,7 @@ import requests
 from modules.auto_test.core.sales_volume_contract import DIMENSIONS, build_filter
 from modules.auto_test.core.secret_provider import get_secret
 from modules.auto_test.pages.login_page import LoginPage
+from modules.auto_test.tests.test_sales_volume_regression import NoOrderSampleError
 
 pytest_plugins = ("modules.auto_test.tests.test_sales_volume_regression",)
 
@@ -23,26 +24,28 @@ def test_procurement_source_data(request, api_base_url, report_query, report_win
         _fetch_order_data,
     )
 
-    end = datetime.strptime(report_window[1], "%Y-%m-%d %H:%M:%S")
-    for day in range(30):
+    orders, details, window = _find_daily_order_sample(
+        report_window[1],
+        lambda daily_window: _fetch_order_data(administrator_client, api_base_url, daily_window, []),
+    )
+    _assert_sku_sales_match_order_source(report_query, window, [], orders, details, administrator_client, api_base_url)
+    _assert_inventory_matches_report(administrator_client, api_base_url, report_query, window, [])
+
+
+def _find_daily_order_sample(end_time, fetch_order_data, days=30):
+    end = datetime.strptime(end_time, "%Y-%m-%d %H:%M:%S")
+    for day in range(days):
         current = end - timedelta(days=day)
         window = (
             current.replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S"),
             current.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S"),
         )
         try:
-            orders, details = _fetch_order_data(administrator_client, api_base_url, window, [])
-        except AssertionError as exc:
-            if str(exc).startswith("No order sample or pagination incomplete"):
-                continue
-            raise
-        _assert_sku_sales_match_order_source(
-            report_query, window, [], orders, details, administrator_client, api_base_url
-        )
-        break
-    else:
-        pytest.fail("No complete daily order sample for procurement source reconciliation")
-    _assert_inventory_matches_report(administrator_client, api_base_url, report_query, window, [])
+            orders, details = fetch_order_data(window)
+        except NoOrderSampleError:
+            continue
+        return orders, details, window
+    raise AssertionError(f"No complete daily order sample in the last {days} days")
 
 
 @pytest.fixture
