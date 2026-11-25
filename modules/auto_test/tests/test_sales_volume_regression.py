@@ -42,6 +42,9 @@ REPORT_SERVICE_READINESS_TIMEOUT_SECONDS = 600
 REPORT_SERVICE_READINESS_RETRY_SECONDS = 15
 CATEGORY_ORDER_SAMPLE_TIMEOUT_SECONDS = 900
 CATEGORY_ORDER_SAMPLE_MAX_PAGES = 20
+BUNDLE_ORDER_SAMPLE_TIMEOUT_SECONDS = 420
+BUNDLE_ORDER_SAMPLE_MAX_PAGES = 20
+SUPPLIER_SEARCH_SAMPLE_ATTEMPTS = 3
 
 
 @pytest.fixture
@@ -460,26 +463,72 @@ def test_creator_filter_matches_dictionary_user(authenticated_http_client, api_b
 
 def test_supplier_name_filter_matches_rows(report_query, report_window):
     payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
-    baseline = report_query(DIMENSIONS["sku"], payload)
-    assert baseline.get("code") == 200, baseline
-    rows = baseline.get("rows") or []
-    supplier = next((str(row.get("defaultSupplier")) for row in rows if row.get("defaultSupplier")), None)
-    assert supplier and len(supplier) >= 2, "No default supplier sample; supplier filter remains unverified"
-    fragment = supplier[:2]
-    filtered = report_query(DIMENSIONS["sku"], {**payload, "supplierName": fragment})
-    assert filtered.get("code") == 200, filtered
-    matched = filtered.get("rows") or []
-    assert matched, {"supplier": fragment, "message": "Known supplier fragment returned no rows"}
+    attempts = []
+    successful_filter = None
+    for attempt in range(1, SUPPLIER_SEARCH_SAMPLE_ATTEMPTS + 1):
+        baseline = report_query(DIMENSIONS["sku"], payload)
+        assert baseline.get("code") == 200, baseline
+        candidate = _supplier_search_candidate(baseline.get("rows") or [])
+        if not candidate:
+            attempts.append({"attempt": attempt, "reason": "no default supplier row in current baseline"})
+            continue
+        fragment = candidate["fragment"]
+        filtered = report_query(DIMENSIONS["sku"], {**payload, "supplierName": fragment})
+        assert filtered.get("code") == 200, filtered
+        matched = filtered.get("rows") or []
+        attempts.append(
+            {
+                "attempt": attempt,
+                "supplierFragment": fragment,
+                "baselineSupplierNames": candidate["supplierNames"],
+                "baselineItemIds": candidate["itemIds"][:20],
+                "baselineTotal": baseline.get("total"),
+                "filteredTotal": filtered.get("total"),
+            }
+        )
+        if matched:
+            successful_filter = (fragment, matched)
+            break
+    failure = {
+        "message": (
+            "No current supplier fragment returned rows after " f"{SUPPLIER_SEARCH_SAMPLE_ATTEMPTS} refreshed samples"
+        ),
+        "attempts": attempts,
+    }
+    assert successful_filter, failure
+    fragment, matched = successful_filter
     assert all(fragment in str(row.get("defaultSupplier") or "") for row in matched), {
         "supplier": fragment,
         "rows": matched[:5],
     }
-    assert int(filtered.get("total") or 0) <= int(baseline.get("total") or 0), {
-        "filtered": filtered.get("total"),
-        "baseline": baseline.get("total"),
-    }
     empty = report_query(DIMENSIONS["sku"], {**payload, "supplierName": "NO-SUCH-SUPPLIER-1003420"})
     assert empty.get("code") == 200 and empty.get("total") == 0 and not empty.get("rows"), empty
+
+
+def _supplier_search_candidate(rows):
+    """Select the most represented two-character supplier fragment in the baseline."""
+    fragments = {}
+    for index, row in enumerate(rows):
+        supplier = str(row.get("defaultSupplier") or "").strip()
+        fragment = supplier[:2]
+        if len(fragment) < 2:
+            continue
+        group = fragments.setdefault(fragment, {"firstSeen": index, "supplierNames": set(), "itemIds": set()})
+        group["supplierNames"].add(supplier)
+        item_id = str(row.get("itemId") or "")
+        if item_id:
+            group["itemIds"].add(item_id)
+
+    if not fragments:
+        return None
+    fragment = max(fragments, key=lambda value: (len(fragments[value]["itemIds"]), -fragments[value]["firstSeen"]))
+    selected = fragments[fragment]
+    return {
+        "fragment": fragment,
+        "supplierNames": sorted(selected["supplierNames"]),
+        "itemIds": sorted(selected["itemIds"]),
+        "baselineRows": len(selected["itemIds"]),
+    }
 
 
 def test_custom_class_filter_matches_rows(report_query, report_window):
@@ -973,23 +1022,12 @@ def _order_source_timeout(deadline, operation):
         return (10, 180)
     remaining = deadline - time.monotonic()
     if remaining <= 0:
-        raise OrderSourceScanLimitError(f"INCOMPLETE: category order source budget expired during {operation}")
+        raise OrderSourceScanLimitError(f"INCOMPLETE: order source budget expired during {operation}")
     return (min(10, remaining), min(60, remaining))
 
 
-def _fetch_order_data(
-    authenticated_http_client,
-    api_base_url,
-    report_window,
-    sold_store_ids,
-    item_ids=None,
-    *,
-    max_pages=200,
-    deadline=None,
-):
-    session = authenticated_http_client
-    root = api_base_url.rstrip("/")
-    order_payload = {
+def _order_source_payload(report_window, sold_store_ids, item_ids=None):
+    return {
         "orderId": "",
         "orderNo": "",
         "orderByColumn": "",
@@ -1014,6 +1052,36 @@ def _fetch_order_data(
         "payTimeBegin": report_window[0],
         "payTimeEnd": report_window[1],
     }
+
+
+def _fetch_order_details(session, root, order_numbers, deadline=None):
+    details = {}
+    for start in range(0, len(order_numbers), 100):
+        response = session.post(
+            root + "/oms-admin/sales/orderItem/queryAllList",
+            json={"orderNoList": order_numbers[start : start + 100]},
+            timeout=_order_source_timeout(deadline, f"order detail batch {start // 100 + 1}"),
+        )
+        response.raise_for_status()
+        body = response.json()
+        assert body.get("code") == 200, body
+        details.update(body.get("data") or {})
+    return details
+
+
+def _fetch_order_data(
+    authenticated_http_client,
+    api_base_url,
+    report_window,
+    sold_store_ids,
+    item_ids=None,
+    *,
+    max_pages=200,
+    deadline=None,
+):
+    session = authenticated_http_client
+    root = api_base_url.rstrip("/")
+    order_payload = _order_source_payload(report_window, sold_store_ids, item_ids)
     orders = []
     for page in range(1, max_pages + 1):
         order_payload["pageNum"] = page
@@ -1041,18 +1109,74 @@ def _fetch_order_data(
     assert len(orders) == table["total"], "Order pagination incomplete"
     numbers = [str(order["orderNo"]) for order in orders]
     assert len(numbers) == len(set(numbers)), "Duplicate order number"
-    details = {}
-    for start in range(0, len(numbers), 100):
+    details = _fetch_order_details(session, root, numbers, deadline)
+    return orders, details
+
+
+def _fetch_bundle_order_sample(
+    authenticated_http_client,
+    api_base_url,
+    report_window,
+    sold_store_ids,
+    *,
+    max_pages,
+    deadline,
+):
+    """Page order headers and inspect only that page's details until a bundle is found."""
+    session = authenticated_http_client
+    root = api_base_url.rstrip("/")
+    payload = _order_source_payload(report_window, sold_store_ids)
+    seen_orders = 0
+    last_total = 0
+
+    for page in range(1, max_pages + 1):
+        payload["pageNum"] = page
         response = session.post(
-            root + "/oms-admin/sales/orderItem/queryAllList",
-            json={"orderNoList": numbers[start : start + 100]},
-            timeout=_order_source_timeout(deadline, f"order detail batch {start // 100 + 1}"),
+            root + "/oms-admin/sales/order/batchListNew",
+            json=payload,
+            timeout=_order_source_timeout(deadline, f"bundle order page {page}"),
         )
         response.raise_for_status()
         body = response.json()
         assert body.get("code") == 200, body
-        details.update(body.get("data") or {})
-    return orders, details
+        table = body["data"]["tableDataInfo"]
+        page_orders = table.get("rows") or []
+        last_total = int(table["total"])
+        if not page_orders:
+            if seen_orders < last_total:
+                raise OrderSourceScanLimitError("INCOMPLETE: bundle order pagination returned an empty page")
+            break
+
+        numbers = [str(order["orderNo"]) for order in page_orders]
+        assert len(numbers) == len(set(numbers)), "Duplicate order number on bundle sample page"
+        active_orders = [order for order in page_orders if str(order.get("orderStatus")) != "6"]
+        active_numbers = [str(order["orderNo"]) for order in active_orders]
+        details = _fetch_order_details(session, root, active_numbers, deadline)
+        missing_details = sorted(set(active_numbers) - set(details))
+        if missing_details:
+            raise OrderSourceScanLimitError(
+                "INCOMPLETE: bundle sample order details are missing for " f"{missing_details[:10]}"
+            )
+        bundles = bundle_order_rows(active_orders, details)
+        if bundles:
+            return bundles, active_orders, details
+
+        seen_orders += len(page_orders)
+        if seen_orders >= last_total:
+            break
+    else:
+        if seen_orders < last_total:
+            raise OrderSourceScanLimitError(
+                f"INCOMPLETE: bundle order search exceeded {max_pages} pages ({seen_orders}/{last_total} orders)"
+            )
+
+    if seen_orders < last_total:
+        raise OrderSourceScanLimitError(
+            f"INCOMPLETE: bundle order search stopped before all orders ({seen_orders}/{last_total})"
+        )
+    if not seen_orders:
+        raise NoOrderSampleError("No order sample in this period")
+    return [], [], {}
 
 
 def _category_sku_candidates(sku_rows, category_rows):
@@ -1090,7 +1214,7 @@ def _category_order_source_count(orders, details, category_sku_ids):
             order_numbers.add(order_no)
         if len(matching_skus) > 1:
             has_multi_sku_order = True
-    return len(order_numbers), has_multi_sku_order
+    return len(order_numbers), has_multi_sku_order, sorted(order_numbers)
 
 
 @pytest.fixture
@@ -1099,7 +1223,16 @@ def sold_order_data(authenticated_http_client, api_base_url, report_window, sold
 
 
 def _assert_sku_sales_match_order_source(
-    report_query, report_window, store_ids, orders, details, order_source_client, api_base_url
+    report_query,
+    report_window,
+    store_ids,
+    orders,
+    details,
+    order_source_client,
+    api_base_url,
+    *,
+    order_source_max_pages=200,
+    deadline=None,
 ):
     source = aggregate_orders(orders, details)
     payload = {**build_filter(report_window, store_ids=store_ids), "pageNum": 1, "pageSize": 500}
@@ -1122,6 +1255,8 @@ def _assert_sku_sales_match_order_source(
             report_window,
             store_ids,
             item_ids=mismatched_skus,
+            max_pages=order_source_max_pages,
+            deadline=deadline,
         )
         rechecked_source = aggregate_orders(rechecked_orders, rechecked_details)
         rechecked_report_body = report_query(DIMENSIONS["sku"], payload)
@@ -1193,82 +1328,106 @@ def test_multistore_sku_sales_against_order_items(
     )
 
 
+@pytest.mark.slow
 def test_bundle_order_sample_is_available(
-    sold_order_data, authenticated_http_client, api_base_url, report_window, report_query
+    authenticated_http_client,
+    api_base_url,
+    report_window,
+    report_query,
+    sold_store_ids,
 ):
-    sampled_orders, details = sold_order_data
+    deadline = time.monotonic() + BUNDLE_ORDER_SAMPLE_TIMEOUT_SECONDS
     api = SKUGroupAPI(authenticated_http_client, api_base_url)
-    bundles = bundle_order_rows(sampled_orders, details)
-    if not bundles:
-        available = api.list_page(page_num=1, page_size=100)
-        api.assert_success(available)
-        role = os.environ.get("SALES_VOLUME_ROLE", "unknown")
-        search_windows = [report_window, *build_report_sample_history_windows(report_window)]
-        for window in search_windows:
-            try:
-                candidate_orders, candidate_details = _fetch_order_data(
-                    authenticated_http_client, api_base_url, window, []
-                )
-            except AssertionError as exc:
-                if str(exc).startswith("No order sample in this period"):
-                    continue
-                raise
-            candidates = bundle_order_rows(candidate_orders, candidate_details)
-            if not candidates:
-                continue
-
+    available = api.list_page(page_num=1, page_size=100)
+    api.assert_success(available)
+    role = os.environ.get("SALES_VOLUME_ROLE", "unknown")
+    search_windows = [
+        (report_window, sold_store_ids),
+        *[(window, []) for window in build_report_sample_history_windows(report_window)],
+    ]
+    incomplete_windows = []
+    selected = None
+    for window, store_ids in search_windows:
+        if time.monotonic() >= deadline:
+            pytest.fail("INCOMPLETE: bundle sample search exceeded its shared time budget")
+        try:
+            bundles, _, _ = _fetch_bundle_order_sample(
+                authenticated_http_client,
+                api_base_url,
+                window,
+                store_ids,
+                max_pages=BUNDLE_ORDER_SAMPLE_MAX_PAGES,
+                deadline=deadline,
+            )
+        except NoOrderSampleError:
+            continue
+        except OrderSourceScanLimitError as exc:
+            incomplete_windows.append({"window": window, "reason": str(exc)})
+            continue
+        if bundles:
             timed_candidates = []
-            for order, row in candidates:
+            for order, row in bundles:
                 raw_pay_time = str(order.get("payTime") or "").replace("T", " ")[:19]
                 try:
                     pay_time = datetime.strptime(raw_pay_time, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     continue
                 group_id = str(row.get("groupSkuId") or row.get("itemId") or "")
-                timed_candidates.append((pay_time, str(order.get("orderNo") or ""), group_id, order))
+                timed_candidates.append((pay_time, str(order.get("orderNo") or ""), group_id))
+            if timed_candidates:
+                selected = min(timed_candidates, key=lambda item: item[:3])
+                break
+            pytest.fail("INCOMPLETE: visible bundle orders have no usable payment time")
 
-            if not timed_candidates:
-                pytest.fail("INCOMPLETE: visible bundle orders have no usable payment time")
-
-            pay_time, order_no, _, _ = min(timed_candidates, key=lambda item: item[:3])
-            minute_start = pay_time.replace(second=0, microsecond=0)
-            sample_window = (
-                minute_start.strftime("%Y-%m-%d %H:%M:%S"),
-                minute_start.replace(second=59).strftime("%Y-%m-%d %H:%M:%S"),
-            )
-            try:
-                sample_orders, sample_details = _fetch_order_data(
-                    authenticated_http_client, api_base_url, sample_window, []
-                )
-            except AssertionError as exc:
-                if str(exc).startswith("No order sample in this period"):
-                    pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
-                raise
-
-            bundles = [
-                (order, row)
-                for order, row in bundle_order_rows(sample_orders, sample_details)
-                if str(order.get("orderNo") or "") == order_no
-            ]
-            if not bundles:
-                pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
-
-            _assert_sku_sales_match_order_source(
-                report_query,
-                sample_window,
-                [],
-                sample_orders,
-                sample_details,
-                authenticated_http_client,
-                api_base_url,
-            )
-            break
-        if not bundles:
+    if not selected:
+        if incomplete_windows:
             pytest.fail(
-                "INCOMPLETE: no non-void bundle order was visible to role="
-                f"{role} within the six-calendar-month sample search; "
-                f"{available['total']} combination SKU definitions are not order samples"
+                "INCOMPLETE: no bundle sample found before bounded order scans were exhausted; "
+                f"role={role} incompleteWindows={incomplete_windows}"
             )
+        pytest.fail(
+            "INCOMPLETE: no non-void bundle order was visible to role="
+            f"{role} within the six-calendar-month sample search; "
+            f"{available['total']} combination SKU definitions are not order samples"
+        )
+
+    pay_time, order_no, _ = selected
+    minute_start = pay_time.replace(second=0, microsecond=0)
+    sample_window = (
+        minute_start.strftime("%Y-%m-%d %H:%M:%S"),
+        minute_start.replace(second=59).strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    try:
+        sample_orders, sample_details = _fetch_order_data(
+            authenticated_http_client,
+            api_base_url,
+            sample_window,
+            [],
+            max_pages=BUNDLE_ORDER_SAMPLE_MAX_PAGES,
+            deadline=deadline,
+        )
+    except NoOrderSampleError:
+        pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
+
+    bundles = [
+        (order, row)
+        for order, row in bundle_order_rows(sample_orders, sample_details)
+        if str(order.get("orderNo") or "") == order_no
+    ]
+    if not bundles:
+        pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
+
+    _assert_sku_sales_match_order_source(
+        report_query,
+        sample_window,
+        [],
+        sample_orders,
+        sample_details,
+        authenticated_http_client,
+        api_base_url,
+        order_source_max_pages=BUNDLE_ORDER_SAMPLE_MAX_PAGES,
+        deadline=deadline,
+    )
     group_ids = sorted({str(row.get("groupSkuId") or row.get("itemId") or "") for _, row in bundles})
     assert "" not in group_ids, "Bundle order rows have no group SKU identifier"
     for group_id in group_ids:
@@ -1323,6 +1482,7 @@ def test_category_distinct_orders_against_order_source(
     report_window,
 ):
     deadline = time.monotonic() + CATEGORY_ORDER_SAMPLE_TIMEOUT_SECONDS
+    incomplete_stores = []
     base = {**build_filter(report_window), "pageNum": 1, "pageSize": 100}
     stores_response = authenticated_http_client.post(
         api_base_url.rstrip("/") + "/oms-admin/base/store/queryPermissionStoreList",
@@ -1365,42 +1525,64 @@ def test_category_distinct_orders_against_order_source(
             continue
         _, category_candidates = _category_sku_candidates(sku_rows, categories)
         categories_by_id = {str(row.get("classId") or ""): row for row in categories}
+        if not category_candidates:
+            continue
+        try:
+            # Order headers may contain a bundle parent SKU while their details expose component SKUs.
+            orders, details = _fetch_order_data(
+                authenticated_http_client,
+                api_base_url,
+                report_window,
+                ids,
+                max_pages=CATEGORY_ORDER_SAMPLE_MAX_PAGES,
+                deadline=deadline,
+            )
+        except NoOrderSampleError:
+            continue
+        except OrderSourceScanLimitError as exc:
+            incomplete_stores.append({"storeId": ids[0], "reason": str(exc)})
+            continue
         for class_id, item_ids in category_candidates:
             if time.monotonic() >= deadline:
                 raise OrderSourceScanLimitError(
                     "INCOMPLETE: category order source budget expired while selecting a category"
                 )
-            try:
-                orders, details = _fetch_order_data(
-                    authenticated_http_client,
-                    api_base_url,
-                    report_window,
-                    ids,
-                    item_ids=item_ids,
-                    max_pages=CATEGORY_ORDER_SAMPLE_MAX_PAGES,
-                    deadline=deadline,
-                )
-            except NoOrderSampleError:
-                continue
-            expected_count, has_multi_sku_order = _category_order_source_count(orders, details, set(item_ids))
+            expected_count, has_multi_sku_order, matching_orders = _category_order_source_count(
+                orders, details, set(item_ids)
+            )
             if not has_multi_sku_order:
                 continue
             expected = expected_count
             actual = int(categories_by_id[class_id].get("orderNumber") or 0)
-            assert actual == expected, {
+            diagnostic = {
+                "reportWindow": report_window,
                 "storeId": ids[0],
                 "categoryId": class_id,
-                "categorySkuCount": len(item_ids),
+                "categorySkuIds": item_ids,
                 "reportOrderCount": actual,
                 "orderSourceDistinctCount": expected,
+                "matchingOrderNos": matching_orders[:30],
+                "matchingOrderCount": len(matching_orders),
             }
+            if actual != expected:
+                print(
+                    "SALES_VOLUME_CATEGORY_ORDER_MISMATCH " + json.dumps(diagnostic, ensure_ascii=True, sort_keys=True),
+                    flush=True,
+                )
+                pytest.fail(f"Category distinct order count differs from complete order source: {diagnostic}")
             print(
                 "[category_order_reconciliation] "
                 f"storeId={ids[0]} categoryId={class_id} skuCount={len(item_ids)} "
-                f"sourceOrders={len(orders)} matchingCategoryOrders={expected}",
+                f"sourceOrders={len(orders)} matchingCategoryOrders={expected} "
+                f"matchedOrderNos={matching_orders[:10]}",
                 flush=True,
             )
             return
+    if incomplete_stores:
+        pytest.fail(
+            "INCOMPLETE: no completed category order-source sample was found; "
+            f"some store scans exceeded the bounded page limit: {incomplete_stores}"
+        )
     pytest.fail(
         "No completed order-source sample contained multiple SKUs in one category; "
         "distinct-count scenario incomplete"

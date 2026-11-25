@@ -576,7 +576,7 @@ jobs:
               continue
             fi
             counter=0
-            run_phase 服务就绪检查 12 modules/auto_test/tests/test_sales_volume_regression.py -m ci_readiness
+            run_phase 服务就绪检查 11 modules/auto_test/tests/test_sales_volume_regression.py -m ci_readiness
             if [ "$phase_status" -ne 0 ]; then
               lane_blocked=1
               continue
@@ -584,36 +584,39 @@ jobs:
             if [ "$role" = admin ]; then
               export SALES_VOLUME_ROLE=admin
               run_phase 完整主回归 25 modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_role_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m 'not slow and not ci_readiness'
-              if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
               run_phase 类目订单数对账 15 modules/auto_test/tests/test_sales_volume_regression.py -k test_category_distinct_orders_against_order_source -m slow
-              if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
               run_phase 慢速排序与导出 40 modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -k 'not test_category_distinct_orders_against_order_source'
-              if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; fi
               continue
             fi
-            run_phase 权限 5 modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow'
-            if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+            run_phase 权限 4 modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow'
+            if [ "$phase_blocked" -eq 1 ]; then continue; fi
             common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_custom_class_filter_matches_rows or test_dimension_specific_filter or test_warehouse_expand_keeps_every_sku'
             if [ "$role" != procurement ]; then
-              common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api or test_bundle_order_sample_is_available"
+              common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api"
             else
               common="$common or (test_dimension_accepts_payment_range and not store)"
             fi
             run_phase 筛选与来源对账 10 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow and not ci_readiness'
-            if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+            if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            if [ "$role" != procurement ]; then
+              run_phase 组合SKU订单样本 7 modules/auto_test/tests/test_sales_volume_regression.py -k test_bundle_order_sample_is_available -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            fi
             if [ "$role" = procurement ]; then
               echo '| procurement | 双店筛选 | 不适用：无店铺权限 |' >> "$GITHUB_STEP_SUMMARY"
               echo '| procurement | 管理员交叉核对 | 延后到串行核对阶段 |' >> "$GITHUB_STEP_SUMMARY"
             fi
-            run_phase 排序与导出 8 modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
-            if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+            run_phase 排序与导出 5 modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
+            if [ "$phase_blocked" -eq 1 ]; then continue; fi
             if [ "$role" != procurement ]; then
-              run_phase 多店异步导出 15 modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow
-              if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+              run_phase 多店异步导出 12 modules/auto_test/tests/test_sales_volume_regression.py -k async_export -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
               echo "| $role | 管理员越权店铺核对 | 延后到串行核对阶段 |" >> "$GITHUB_STEP_SUMMARY"
             else
-              run_phase 采购异步导出 12 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_async_export_matches_query -m slow
-              if [ "$phase_blocked" -eq 1 ]; then lane_blocked=1; continue; fi
+              run_phase 采购异步导出 10 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_async_export_matches_query -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
             fi
           done
           exit "$overall"

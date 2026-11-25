@@ -44,10 +44,18 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert "B) roles=(sales procurement)" in script
     assert "C) roles=(manager assistant)" in script
     assert 'for role in "${roles[@]}"' in script
-    assert "run_phase 服务就绪检查 12" in script
+    assert "run_phase 服务就绪检查 11" in script
     assert "run_phase 完整主回归 25" in script
     assert "run_phase 类目订单数对账 15" in script
     assert "run_phase 慢速排序与导出 40" in script
+    assert "run_phase 权限 4" in script
+    assert "run_phase 组合SKU订单样本 7" in script
+    assert "run_phase 排序与导出 5" in script
+    assert "run_phase 多店异步导出 12" in script
+    assert "run_phase 采购异步导出 10" in script
+    assert script.count("lane_blocked=1") == 1
+    assert 'if [ "$phase_blocked" -eq 1 ]; then continue; fi' in script
+    assert "test_bundle_order_sample_is_available" not in script.split("common='", 1)[1].split("'", 1)[0]
     assert "timeout --signal=TERM --kill-after=20s" in script
     assert ".runtime/reports/sales-volume-ci-logs/${SALES_VOLUME_ROLE}-${counter}.log" in script
     source_path = (
