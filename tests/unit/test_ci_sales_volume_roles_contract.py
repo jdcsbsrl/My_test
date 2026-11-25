@@ -52,6 +52,8 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert "run_phase 组合SKU订单样本 7" in script
     assert "run_phase 排序与导出 5" in script
     assert "run_phase 多店异步导出 12" in script
+    assert script.count("test_multistore_async_export_matches_query[warehouse-3]") == 2
+    assert script.count("test_multistore_async_export_matches_query[country-4]") == 2
     assert "run_phase 采购异步导出 10" in script
     assert script.count("lane_blocked=1") == 1
     assert 'if [ "$phase_blocked" -eq 1 ]; then continue; fi' in script
@@ -88,6 +90,10 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
         "test_procurement_source_data",
         "test_procurement_data_matches_administrator",
         "test_role_denied_store_with_administrator_sold_sample",
+        "管理员国家与仓库多店异步导出",
+        "业务员国家与仓库多店异步导出",
+        "test_multistore_async_export_matches_query[warehouse-3]",
+        "test_multistore_async_export_matches_query[country-4]",
     ):
         assert expected in crosscheck_script
     assert crosschecks["needs"][-1] == "sales-volume-regression"

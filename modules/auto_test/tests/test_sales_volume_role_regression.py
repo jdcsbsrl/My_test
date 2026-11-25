@@ -1,6 +1,7 @@
 """Role-sensitive checks for the merged sales volume report."""
 
 import os
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -12,6 +13,8 @@ from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.tests.test_sales_volume_regression import NoOrderSampleError
 
 pytest_plugins = ("modules.auto_test.tests.test_sales_volume_regression",)
+ADMIN_LOGIN_READINESS_TIMEOUT_SECONDS = 600
+ADMIN_LOGIN_READINESS_RETRY_SECONDS = 15
 
 
 @pytest.mark.slow
@@ -178,21 +181,78 @@ def administrator_client(browser):
     page.on("response", capture)
     session = requests.Session()
     try:
-        login_succeeded = LoginPage(page).login(username, password)
-        body = captured.get("body") or {}
-        token_data = body.get("data") or {}
-        token = token_data.get("token") or token_data.get("access_token")
-        if not login_succeeded or not token or str(body.get("code")) != "200":
-            raise AssertionError(
-                {
-                    "message": "Administrator login failed",
-                    "page_login_succeeded": login_succeeded,
-                    "http_status": captured.get("http_status"),
-                    "app_code": body.get("code"),
-                    "request_id": captured.get("request_id"),
-                }
+        deadline = time.monotonic() + ADMIN_LOGIN_READINESS_TIMEOUT_SECONDS
+        attempts = []
+        while True:
+            captured.clear()
+            login_succeeded = LoginPage(page).login(username, password)
+            body = captured.get("body") or {}
+            token_data = body.get("data")
+            if not isinstance(token_data, dict):
+                token_data = {}
+            token = (
+                token_data.get("token")
+                or token_data.get("access_token")
+                or token_data.get("accessToken")
+                or body.get("token")
+                or body.get("access_token")
+                or body.get("accessToken")
             )
-        session.headers.update({"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            if login_succeeded and str(body.get("code")) == "200" and not token:
+                token = page.evaluate("""() => {
+                        const keys = ['Admin-Token', 'access_token', 'accessToken', 'token', 'Authorization'];
+                        for (const key of keys) {
+                            const value = localStorage.getItem(key) || sessionStorage.getItem(key);
+                            if (value) return value;
+                        }
+                        return '';
+                    }""")
+            if login_succeeded and token and str(body.get("code")) == "200":
+                break
+
+            http_status = captured.get("http_status")
+            app_code = body.get("code")
+            try:
+                http_status_number = int(http_status)
+            except (TypeError, ValueError):
+                http_status_number = None
+            try:
+                app_code_number = int(app_code)
+            except (TypeError, ValueError):
+                app_code_number = None
+            diagnostic = {
+                "page_login_succeeded": login_succeeded,
+                "http_status": http_status,
+                "app_code": app_code,
+                "message": body.get("message") or body.get("msg"),
+                "request_id": captured.get("request_id"),
+            }
+            attempts.append(diagnostic)
+            transient_server_error = any(
+                code is not None and 500 <= code < 600 for code in (http_status_number, app_code_number)
+            )
+            remaining = deadline - time.monotonic()
+            if not transient_server_error or remaining <= 0:
+                raise AssertionError(
+                    {
+                        "message": "Administrator login failed",
+                        "retryable_server_error": transient_server_error,
+                        "readinessTimeoutSeconds": ADMIN_LOGIN_READINESS_TIMEOUT_SECONDS,
+                        "attempts": attempts,
+                    }
+                )
+            time.sleep(min(ADMIN_LOGIN_READINESS_RETRY_SECONDS, remaining))
+
+        raw_token = str(token).strip()
+        bare_token = raw_token[7:].strip() if raw_token[:7].lower() == "bearer " else raw_token
+        bearer_token = raw_token if raw_token.lower().startswith("bearer ") else f"Bearer {raw_token}"
+        session.headers.update(
+            {
+                "Authorization": bearer_token,
+                "Admin-Token": bare_token,
+                "Content-Type": "application/json",
+            }
+        )
         if captured.get("clientid"):
             session.headers["clientid"] = captured["clientid"]
         for cookie in context.cookies():

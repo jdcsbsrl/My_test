@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal
 from io import BytesIO
+import hashlib
 import json
 import logging
 import os
@@ -1704,8 +1705,8 @@ def _read_sku_export(content):
     return totals, count
 
 
-def _download_export_workbook(session, file_url, timeout, max_attempts=3):
-    """Retry a task file that becomes visible before its XLSX object is complete."""
+def _download_export_workbook(session, file_url, timeout, max_attempts=5):
+    """Retry briefly when a successful task exposes its XLSX before it is finalized."""
     diagnostics = []
     for attempt in range(1, max_attempts + 1):
         try:
@@ -1739,11 +1740,12 @@ def _download_export_workbook(session, file_url, timeout, max_attempts=3):
                     "declaredBytes": response.headers.get("content-length"),
                     "downloadedBytes": len(content),
                     "zipMagic": content[:4].hex(),
+                    "sha256": hashlib.sha256(content).hexdigest(),
                     "error": str(exc)[:300],
                 }
             )
             if attempt < max_attempts:
-                time.sleep(attempt * 2)
+                time.sleep(min(2**attempt, 15))
     raise AssertionError(
         {
             "message": "Export task reported success but its workbook remained unreadable after retries",
@@ -1956,7 +1958,22 @@ def _assert_async_export_matches_query(
         "taskName": task_name,
         "last": _export_task_summary(task),
     }
-    _, workbook = _download_export_workbook(session, task["fileUrl"], timeout=(10, 180))
+    task_id = export_task_id(task)
+    try:
+        _, workbook = _download_export_workbook(session, task["fileUrl"], timeout=(10, 180))
+    except AssertionError as exc:
+        raise AssertionError(
+            {
+                "message": "Async export workbook could not be read",
+                "dimension": dimension,
+                "reportType": report_type,
+                "taskId": task_id,
+                "taskName": task.get("taskName"),
+                "filters": payload,
+                "taskConditions": conditions,
+                "downloadFailure": str(exc),
+            }
+        ) from None
     actual = defaultdict(Decimal)
     try:
         for sheet in workbook:
@@ -1974,9 +1991,25 @@ def _assert_async_export_matches_query(
     after_values = group_sales_by_sku(after["rows"])
     assert expected == after_values, {
         "message": "Source changed during async export; result inconclusive",
+        "dimension": dimension,
+        "taskId": task_id,
+        "filters": payload,
+        "before": expected,
+        "after": after_values,
         "task": task_name,
     }
-    assert dict(actual) == expected, {"task": task_name, "query": expected, "export": dict(actual)}
+    assert dict(actual) == expected, {
+        "message": "Async export rows do not match the same-filter SKU query",
+        "dimension": dimension,
+        "reportType": report_type,
+        "taskId": task_id,
+        "taskName": task.get("taskName"),
+        "filters": payload,
+        "taskConditions": conditions,
+        "queryBefore": expected,
+        "queryAfter": after_values,
+        "export": dict(actual),
+    }
 
 
 @pytest.mark.slow
