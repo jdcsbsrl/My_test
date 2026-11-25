@@ -157,7 +157,7 @@ def test_procurement_category_export_selects_a_detail_sample_under_limit():
     assert payload["storeIds"] == []
 
 
-def test_export_task_list_retries_transient_server_errors_only(monkeypatch):
+def test_export_task_list_retries_app_server_errors_beyond_previous_retry_window(monkeypatch):
     from modules.auto_test.tests import test_sales_volume_regression as report_tests
 
     class FakeResponse:
@@ -176,7 +176,15 @@ def test_export_task_list_retries_transient_server_errors_only(monkeypatch):
     class FakeSession:
         def __init__(self):
             self.responses = [
-                FakeResponse(503, {"code": 503, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
+                FakeResponse(200, {"code": 500, "msg": "temporary"}),
                 FakeResponse(200, {"code": 200, "data": []}),
             ]
             self.calls = 0
@@ -185,13 +193,15 @@ def test_export_task_list_retries_transient_server_errors_only(monkeypatch):
             self.calls += 1
             return self.responses.pop(0)
 
-    monkeypatch.setattr(report_tests.time, "sleep", lambda _: None)
+    delays = []
+    monkeypatch.setattr(report_tests.time, "sleep", delays.append)
     session = FakeSession()
 
     result = _fetch_export_task_page(session, "https://test.invalid", "商品销量报表_SKU维度", 1, 20)
 
     assert result == {"code": 200, "data": []}
-    assert session.calls == 2
+    assert session.calls == 10
+    assert delays == [1, 2, 4, 8, 15, 15, 15, 15, 15]
 
 
 def test_export_task_list_does_not_retry_authentication_errors(monkeypatch):

@@ -45,7 +45,8 @@ CATEGORY_ORDER_SAMPLE_TIMEOUT_SECONDS = 900
 CATEGORY_ORDER_SAMPLE_MAX_PAGES = 20
 BUNDLE_ORDER_SAMPLE_TIMEOUT_SECONDS = 420
 BUNDLE_ORDER_SAMPLE_MAX_PAGES = 20
-SUPPLIER_SEARCH_SAMPLE_ATTEMPTS = 3
+EXPORT_TASK_LIST_MAX_ATTEMPTS = 16
+EXPORT_TASK_LIST_MAX_RETRY_DELAY_SECONDS = 15
 
 
 @pytest.fixture
@@ -464,42 +465,25 @@ def test_creator_filter_matches_dictionary_user(authenticated_http_client, api_b
 
 def test_supplier_name_filter_matches_rows(report_query, report_window):
     payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
-    attempts = []
-    successful_filter = None
-    for attempt in range(1, SUPPLIER_SEARCH_SAMPLE_ATTEMPTS + 1):
-        baseline = report_query(DIMENSIONS["sku"], payload)
-        assert baseline.get("code") == 200, baseline
-        candidate = _supplier_search_candidate(baseline.get("rows") or [])
-        if not candidate:
-            attempts.append({"attempt": attempt, "reason": "no default supplier row in current baseline"})
-            continue
-        fragment = candidate["fragment"]
-        filtered = report_query(DIMENSIONS["sku"], {**payload, "supplierName": fragment})
-        assert filtered.get("code") == 200, filtered
-        matched = filtered.get("rows") or []
-        attempts.append(
-            {
-                "attempt": attempt,
-                "supplierFragment": fragment,
-                "baselineSupplierNames": candidate["supplierNames"],
-                "baselineItemIds": candidate["itemIds"][:20],
-                "baselineTotal": baseline.get("total"),
-                "filteredTotal": filtered.get("total"),
-            }
-        )
-        if matched:
-            successful_filter = (fragment, matched)
-            break
-    failure = {
-        "message": (
-            "No current supplier fragment returned rows after " f"{SUPPLIER_SEARCH_SAMPLE_ATTEMPTS} refreshed samples"
-        ),
-        "attempts": attempts,
+    baseline = report_query(DIMENSIONS["sku"], payload)
+    assert baseline.get("code") == 200, baseline
+    candidate = _supplier_search_candidate(baseline.get("rows") or [])
+    assert candidate, {
+        "message": "No SKU row with a default supplier was available for supplier search",
+        "baselineTotal": baseline.get("total"),
     }
-    assert successful_filter, failure
-    fragment, matched = successful_filter
-    assert all(fragment in str(row.get("defaultSupplier") or "") for row in matched), {
-        "supplier": fragment,
+
+    supplier_name = candidate["supplierName"]
+    filtered = report_query(DIMENSIONS["sku"], {**payload, "supplierName": supplier_name})
+    assert filtered.get("code") == 200, filtered
+    matched = filtered.get("rows") or []
+    assert matched, (
+        "Searching by a supplier shown in the baseline returned no rows: "
+        f"supplierName={supplier_name!r}, baselineItemIds={candidate['itemIds'][:20]}, "
+        f"baselineTotal={baseline.get('total')}, filteredTotal={filtered.get('total')}"
+    )
+    assert all(supplier_name in str(row.get("defaultSupplier") or "").strip() for row in matched), {
+        "supplierName": supplier_name,
         "rows": matched[:5],
     }
     empty = report_query(DIMENSIONS["sku"], {**payload, "supplierName": "NO-SUCH-SUPPLIER-1003420"})
@@ -507,26 +491,25 @@ def test_supplier_name_filter_matches_rows(report_query, report_window):
 
 
 def _supplier_search_candidate(rows):
-    """Select the most represented two-character supplier fragment in the baseline."""
-    fragments = {}
+    """Select the most represented full supplier name from the current baseline."""
+    suppliers = {}
     for index, row in enumerate(rows):
         supplier = str(row.get("defaultSupplier") or "").strip()
-        fragment = supplier[:2]
-        if len(fragment) < 2:
+        item_id = str(row.get("itemId") or "").strip()
+        if not supplier or not item_id:
             continue
-        group = fragments.setdefault(fragment, {"firstSeen": index, "supplierNames": set(), "itemIds": set()})
-        group["supplierNames"].add(supplier)
-        item_id = str(row.get("itemId") or "")
-        if item_id:
-            group["itemIds"].add(item_id)
+        group = suppliers.setdefault(supplier, {"firstSeen": index, "itemIds": set()})
+        group["itemIds"].add(item_id)
 
-    if not fragments:
+    if not suppliers:
         return None
-    fragment = max(fragments, key=lambda value: (len(fragments[value]["itemIds"]), -fragments[value]["firstSeen"]))
-    selected = fragments[fragment]
+    supplier_name = max(
+        suppliers,
+        key=lambda value: (len(suppliers[value]["itemIds"]), -suppliers[value]["firstSeen"]),
+    )
+    selected = suppliers[supplier_name]
     return {
-        "fragment": fragment,
-        "supplierNames": sorted(selected["supplierNames"]),
+        "supplierName": supplier_name,
         "itemIds": sorted(selected["itemIds"]),
         "baselineRows": len(selected["itemIds"]),
     }
@@ -1841,7 +1824,7 @@ def _fetch_export_task_page(
     task_name: str,
     page_num: int,
     page_size: int,
-    max_attempts: int = 3,
+    max_attempts: int = EXPORT_TASK_LIST_MAX_ATTEMPTS,
 ) -> dict:
     """Retry only the idempotent task-list GET for transient server failures."""
     url = api_root.rstrip("/") + "/oms-admin/base/exportTask/list"
@@ -1855,7 +1838,7 @@ def _fetch_export_task_page(
             if attempt == max_attempts:
                 break
             _LOG.warning("Export-task list request failed; retrying: %s", last_diagnostic)
-            time.sleep(attempt)
+            time.sleep(min(2 ** (attempt - 1), EXPORT_TASK_LIST_MAX_RETRY_DELAY_SECONDS))
             continue
 
         headers = response.headers
@@ -1885,8 +1868,13 @@ def _fetch_export_task_page(
         if transient_server_error:
             if attempt == max_attempts:
                 break
-            _LOG.warning("Export-task list returned a transient server error; retrying: %s", last_diagnostic)
-            time.sleep(attempt)
+            retry_delay = min(2 ** (attempt - 1), EXPORT_TASK_LIST_MAX_RETRY_DELAY_SECONDS)
+            _LOG.warning(
+                "Export-task list returned a transient server error; retrying in %ss: %s",
+                retry_delay,
+                last_diagnostic,
+            )
+            time.sleep(retry_delay)
             continue
 
         response.raise_for_status()

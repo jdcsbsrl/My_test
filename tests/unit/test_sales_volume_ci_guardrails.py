@@ -60,7 +60,7 @@ def test_category_source_count_counts_distinct_active_orders_and_multi_sku_order
     assert matching_orders == ["order-1", "order-2"]
 
 
-def test_supplier_sample_uses_most_common_fuzzy_fragment_without_fallback():
+def test_supplier_sample_uses_most_common_full_name_without_fallback():
     rows = [
         {"itemId": "SKU-A", "defaultSupplier": "清河供应商甲"},
         {"itemId": "SKU-B", "defaultSupplier": "清河供应商乙"},
@@ -71,53 +71,41 @@ def test_supplier_sample_uses_most_common_fuzzy_fragment_without_fallback():
     candidate = _supplier_search_candidate(rows)
 
     assert candidate == {
-        "fragment": "清河",
-        "supplierNames": ["清河供应商乙", "清河供应商甲"],
-        "itemIds": ["SKU-A", "SKU-B", "SKU-C"],
-        "baselineRows": 3,
+        "supplierName": "清河供应商乙",
+        "itemIds": ["SKU-B", "SKU-C"],
+        "baselineRows": 2,
     }
 
 
-def test_supplier_filter_refreshes_dynamic_sample_and_does_not_require_same_sku():
+def test_supplier_filter_searches_full_name_from_current_results():
     from modules.auto_test.tests import test_sales_volume_regression as report_tests
 
     calls = []
-    baselines = [
-        [{"itemId": "SKU-A", "defaultSupplier": "清河供应商甲"}],
-        [{"itemId": "SKU-B", "defaultSupplier": "阿里供应商乙"}],
-    ]
-    baseline_index = 0
+    baselines = [{"itemId": "SKU-A", "defaultSupplier": "清河供应商甲"}]
 
     def report_query(endpoint, payload):
-        nonlocal baseline_index
         calls.append(payload)
-        fragment = payload.get("supplierName")
-        if fragment == "清河":
-            return {"code": 200, "total": 0, "rows": []}
-        if fragment == "阿里":
+        supplier_name = payload.get("supplierName")
+        if supplier_name == "清河供应商甲":
             return {
                 "code": 200,
                 "total": 1,
-                "rows": [{"itemId": "SKU-C", "defaultSupplier": "阿里供应商乙"}],
+                "rows": [{"itemId": "SKU-B", "defaultSupplier": "清河供应商甲"}],
             }
-        if fragment:
+        if supplier_name:
             return {"code": 200, "total": 0, "rows": []}
-        rows = baselines[min(baseline_index, len(baselines) - 1)]
-        baseline_index += 1
-        return {"code": 200, "total": len(rows), "rows": rows}
+        return {"code": 200, "total": len(baselines), "rows": baselines}
 
     report_tests.test_supplier_name_filter_matches_rows(report_query, ("2026-11-01", "2026-11-30"))
 
     assert [payload.get("supplierName") for payload in calls] == [
         None,
-        "清河",
-        None,
-        "阿里",
+        "清河供应商甲",
         "NO-SUCH-SUPPLIER-1003420",
     ]
 
 
-def test_supplier_filter_still_fails_after_all_refreshed_samples_miss():
+def test_supplier_filter_fails_when_a_baseline_supplier_returns_no_rows():
     from modules.auto_test.tests import test_sales_volume_regression as report_tests
 
     calls = []
@@ -135,7 +123,7 @@ def test_supplier_filter_still_fails_after_all_refreshed_samples_miss():
     with pytest.raises(AssertionError):
         report_tests.test_supplier_name_filter_matches_rows(report_query, ("2026-11-01", "2026-11-30"))
 
-    assert len(calls) == report_tests.SUPPLIER_SEARCH_SAMPLE_ATTEMPTS * 2
+    assert [payload.get("supplierName") for payload in calls] == [None, "清河供应商甲"]
 
 
 def test_bundle_sample_stops_after_first_page_containing_bundle_details():
