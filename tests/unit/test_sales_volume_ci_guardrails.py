@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -77,10 +78,11 @@ def test_supplier_sample_uses_most_common_full_name_without_fallback():
     }
 
 
-def test_supplier_filter_searches_full_name_from_current_results():
+def test_supplier_filter_searches_and_exports_full_name_from_current_results(monkeypatch):
     from modules.auto_test.tests import test_sales_volume_regression as report_tests
 
     calls = []
+    export_calls = []
     baselines = [{"itemId": "SKU-A", "defaultSupplier": "清河供应商甲"}]
 
     def report_query(endpoint, payload):
@@ -90,19 +92,44 @@ def test_supplier_filter_searches_full_name_from_current_results():
             return {
                 "code": 200,
                 "total": 1,
-                "rows": [{"itemId": "SKU-B", "defaultSupplier": "清河供应商甲"}],
+                "rows": [{"itemId": "SKU-B", "defaultSupplier": "清河供应商甲", "salesNumber": 7}],
             }
         if supplier_name:
             return {"code": 200, "total": 0, "rows": []}
         return {"code": 200, "total": len(baselines), "rows": baselines}
 
-    report_tests.test_supplier_name_filter_matches_rows(report_query, ("2026-11-01", "2026-11-30"))
+    class FakeExportResponse:
+        content = b"workbook"
+
+        @staticmethod
+        def raise_for_status():
+            return None
+
+    class FakeHttpClient:
+        def post(self, url, json, timeout):
+            export_calls.append((url, json, timeout))
+            return FakeExportResponse()
+
+    monkeypatch.setattr(
+        report_tests,
+        "_read_sku_export",
+        lambda _: ({"SKU-B": Decimal("7")}, 1),
+    )
+    report_tests.test_supplier_name_filter_matches_rows(
+        FakeHttpClient(), "https://test.invalid", report_query, ("2026-11-01", "2026-11-30")
+    )
 
     assert [payload.get("supplierName") for payload in calls] == [
         None,
         "清河供应商甲",
+        "清河供应商甲",
         "NO-SUCH-SUPPLIER-1003420",
     ]
+    assert [url.rsplit("/", 1)[-1] for url, _, _ in export_calls] == [
+        "exportOmsInventoryReportV2",
+        "exportOmsInventoryReportCurrentPage",
+    ]
+    assert all(payload.get("supplierName") == "清河供应商甲" for _, payload, _ in export_calls)
 
 
 def test_supplier_filter_fails_when_a_baseline_supplier_returns_no_rows():
@@ -121,7 +148,7 @@ def test_supplier_filter_fails_when_a_baseline_supplier_returns_no_rows():
         }
 
     with pytest.raises(AssertionError):
-        report_tests.test_supplier_name_filter_matches_rows(report_query, ("2026-11-01", "2026-11-30"))
+        report_tests.test_supplier_name_filter_matches_rows(None, None, report_query, ("2026-11-01", "2026-11-30"))
 
     assert [payload.get("supplierName") for payload in calls] == [None, "清河供应商甲"]
 

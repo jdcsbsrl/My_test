@@ -463,7 +463,7 @@ def test_creator_filter_matches_dictionary_user(authenticated_http_client, api_b
     assert rows and all(row.get("createByName") == name for row in rows), {"creator": name, "rows": rows[:10]}
 
 
-def test_supplier_name_filter_matches_rows(report_query, report_window):
+def test_supplier_name_filter_matches_rows(authenticated_http_client, api_base_url, report_query, report_window):
     payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
     baseline = report_query(DIMENSIONS["sku"], payload)
     assert baseline.get("code") == 200, baseline
@@ -477,6 +477,12 @@ def test_supplier_name_filter_matches_rows(report_query, report_window):
     filtered = report_query(DIMENSIONS["sku"], {**payload, "supplierName": supplier_name})
     assert filtered.get("code") == 200, filtered
     matched = filtered.get("rows") or []
+    assert len(matched) == filtered.get("total") <= 500, {
+        "message": "Supplier-filtered SKU results are not fully paginated",
+        "supplierName": supplier_name,
+        "rows": len(matched),
+        "total": filtered.get("total"),
+    }
     assert matched, (
         "Searching by a supplier shown in the baseline returned no rows: "
         f"supplierName={supplier_name!r}, baselineItemIds={candidate['itemIds'][:20]}, "
@@ -486,6 +492,49 @@ def test_supplier_name_filter_matches_rows(report_query, report_window):
         "supplierName": supplier_name,
         "rows": matched[:5],
     }
+
+    root = api_base_url.rstrip("/")
+    filter_conditions = {**build_filter(report_window), "supplierName": supplier_name}
+    expected = group_sales_by_sku(matched)
+    full_export = authenticated_http_client.post(
+        root + "/oms-admin/sales/report/exportOmsInventoryReportV2",
+        json=filter_conditions,
+        timeout=(10, 300),
+    )
+    full_export.raise_for_status()
+    exported, export_count = _read_sku_export(full_export.content)
+    assert export_count == filtered.get("total") and dict(exported) == expected, {
+        "message": "Supplier-filtered search export differs from the filtered SKU query",
+        "supplierName": supplier_name,
+        "queryTotal": filtered.get("total"),
+        "exportRows": export_count,
+        "query": expected,
+        "export": dict(exported),
+    }
+
+    page_size = 50
+    page_payload = {**filter_conditions, "pageNum": 1, "pageSize": page_size}
+    page_query = report_query(DIMENSIONS["sku"], page_payload)
+    assert page_query.get("code") == 200, page_query
+    page_rows = page_query.get("rows") or []
+    assert page_rows and len(page_rows) == min(page_size, page_query.get("total", 0)), page_query
+    page_expected = group_sales_by_sku(page_rows)
+    current_page_export = authenticated_http_client.post(
+        root + "/oms-admin/sales/report/exportOmsInventoryReportCurrentPage",
+        json=page_payload,
+        timeout=(10, 300),
+    )
+    current_page_export.raise_for_status()
+    page_exported, page_export_count = _read_sku_export(current_page_export.content)
+    assert page_export_count == len(page_rows) and dict(page_exported) == page_expected, {
+        "message": "Supplier-filtered current-page export differs from the filtered query page",
+        "supplierName": supplier_name,
+        "queryRows": len(page_rows),
+        "exportRows": page_export_count,
+        "query": page_expected,
+        "export": dict(page_exported),
+    }
+
     empty = report_query(DIMENSIONS["sku"], {**payload, "supplierName": "NO-SUCH-SUPPLIER-1003420"})
     assert empty.get("code") == 200 and empty.get("total") == 0 and not empty.get("rows"), empty
 
@@ -2023,6 +2072,41 @@ def test_multistore_async_export_matches_query(
         payload,
         dimension,
         report_type,
+        login_token,
+        refresh_authenticated_http_client,
+    )
+
+
+@pytest.mark.slow
+def test_supplier_name_filtered_async_export_matches_query(
+    authenticated_http_client,
+    login_token,
+    refresh_authenticated_http_client,
+    api_base_url,
+    report_query,
+    report_window,
+):
+    baseline_payload = {**build_filter(report_window), "pageNum": 1, "pageSize": 500}
+    baseline = report_query(DIMENSIONS["sku"], baseline_payload)
+    assert baseline.get("code") == 200, baseline
+    candidate = _supplier_search_candidate(baseline.get("rows") or [])
+    assert candidate, {
+        "message": "No SKU with a default supplier was available for filtered async export",
+        "baselineTotal": baseline.get("total"),
+    }
+    payload = {
+        **build_filter(report_window),
+        "supplierName": candidate["supplierName"],
+        "pageNum": 1,
+        "pageSize": 500,
+    }
+    _assert_async_export_matches_query(
+        authenticated_http_client,
+        api_base_url,
+        report_query,
+        payload,
+        "sku",
+        1,
         login_token,
         refresh_authenticated_http_client,
     )

@@ -602,6 +602,10 @@ jobs:
             fi
             run_phase 筛选与来源对账 10 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow and not ci_readiness'
             if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            if [ "$role" != admin ]; then
+              run_phase 供应商筛选异步导出任务 12 modules/auto_test/tests/test_sales_volume_regression.py -k test_supplier_name_filtered_async_export_matches_query -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            fi
             if [ "$role" != procurement ]; then
               run_phase 组合SKU订单样本 7 modules/auto_test/tests/test_sales_volume_regression.py -k test_bundle_order_sample_is_available -m slow
               if [ "$phase_blocked" -eq 1 ]; then continue; fi
