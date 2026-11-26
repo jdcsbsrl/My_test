@@ -53,8 +53,11 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert 'if [ "$role" != admin ]; then' in script
     assert "run_phase 供应商筛选异步导出任务 12" in script
     assert "test_supplier_name_filtered_async_export_matches_query" in script
+    assert script.index("run_phase 供应商筛选异步导出任务 12") < script.index("run_phase 筛选与来源对账 10")
     assert "run_phase 排序与导出 5" in script
     assert "run_phase 多店异步导出 12" in script
+    assert "-k test_multistore_async_export_matches_query -m slow" in script
+    assert "-k async_export -m slow" not in script
     assert script.count("test_multistore_async_export_matches_query[warehouse-3]") == 2
     assert script.count("test_multistore_async_export_matches_query[country-4]") == 2
     assert "run_phase 采购异步导出 10" in script
@@ -77,7 +80,7 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
         "test_multistore_sku_sales_against_order_items",
         "test_procurement_async_export_matches_query",
         "sort_regression.py",
-        "-k async_export",
+        "-k test_multistore_async_export_matches_query",
         "run_phase 采购异步导出",
         "test_dimension_specific_filter",
     ):
