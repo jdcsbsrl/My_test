@@ -41,6 +41,7 @@ from modules.auto_test.core.sales_volume_contract import (
 _LOG = logging.getLogger(__name__)
 REPORT_SERVICE_READINESS_TIMEOUT_SECONDS = 600
 REPORT_SERVICE_READINESS_RETRY_SECONDS = 15
+REPORT_QUERY_RETRY_DELAYS_SECONDS = (5, 15, 30)
 CATEGORY_ORDER_SAMPLE_TIMEOUT_SECONDS = 900
 CATEGORY_ORDER_SAMPLE_MAX_PAGES = 20
 BUNDLE_ORDER_SAMPLE_TIMEOUT_SECONDS = 420
@@ -57,16 +58,20 @@ def report_window():
 @pytest.fixture
 def report_query(authenticated_http_client, api_base_url, _authenticated_session):
     def query(endpoint, payload, *, timeout=(10, 180)):
-        response = authenticated_http_client.post(
+        response, body, attempts = _post_report_with_transient_retry(
+            authenticated_http_client,
             api_base_url.rstrip("/") + "/oms-admin/sales/report/" + endpoint,
-            json=payload,
-            timeout=timeout,
+            payload,
+            timeout,
         )
+        if attempts > 1:
+            print(
+                "[sales_volume_report_retry] "
+                f"role={os.environ.get('SALES_VOLUME_ROLE', 'unknown')} "
+                f"endpoint={endpoint} attempts={attempts} "
+                f"http_status={response.status_code} app_code={body.get('code')}"
+            )
         if response.status_code == 401:
-            try:
-                body = response.json()
-            except ValueError:
-                body = {}
             raise AssertionError(
                 _report_auth_failure_diagnostic(
                     response,
@@ -77,7 +82,6 @@ def report_query(authenticated_http_client, api_base_url, _authenticated_session
                 )
             )
         response.raise_for_status()
-        body = response.json()
         if isinstance(body, dict) and str(body.get("code")) == "401":
             raise AssertionError(
                 _report_auth_failure_diagnostic(
@@ -91,6 +95,55 @@ def report_query(authenticated_http_client, api_base_url, _authenticated_session
         return body
 
     return query
+
+
+def _post_report_with_transient_retry(http_client, url, payload, timeout, *, sleep=time.sleep):
+    """Retry report reads on transient HTTP/application 5xx responses only."""
+    response = None
+    body = {}
+    for attempt in range(len(REPORT_QUERY_RETRY_DELAYS_SECONDS) + 1):
+        response = http_client.post(url, json=payload, timeout=timeout)
+        try:
+            candidate = response.json()
+        except ValueError:
+            candidate = {}
+        body = candidate if isinstance(candidate, dict) else {}
+
+        if not _is_report_server_error(response.status_code, body):
+            return response, body, attempt + 1
+
+        if attempt == len(REPORT_QUERY_RETRY_DELAYS_SECONDS):
+            _LOG.error(
+                "Sales-volume endpoint kept returning 5xx after %s attempts: path=%s http_status=%s app_code=%s",
+                attempt + 1,
+                urlsplit(url).path,
+                response.status_code,
+                body.get("code"),
+            )
+            return response, body, attempt + 1
+
+        delay = REPORT_QUERY_RETRY_DELAYS_SECONDS[attempt]
+        _LOG.warning(
+            "Transient sales-volume 5xx; retrying attempt %s/%s in %ss: path=%s http_status=%s app_code=%s",
+            attempt + 2,
+            len(REPORT_QUERY_RETRY_DELAYS_SECONDS) + 1,
+            delay,
+            urlsplit(url).path,
+            response.status_code,
+            body.get("code"),
+        )
+        sleep(delay)
+
+    raise AssertionError("Unreachable report retry loop")
+
+
+def _is_report_server_error(http_status, body):
+    if http_status >= 500:
+        return True
+    try:
+        return int(body.get("code")) >= 500
+    except (AttributeError, TypeError, ValueError):
+        return False
 
 
 def _wait_for_sales_volume_report_services(

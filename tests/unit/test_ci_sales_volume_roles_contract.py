@@ -63,7 +63,18 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert "run_phase 采购异步导出 10" in script
     assert script.count("lane_blocked=1") == 1
     assert 'if [ "$phase_blocked" -eq 1 ]; then continue; fi' in script
-    assert "test_bundle_order_sample_is_available" not in script.split("common='", 1)[1].split("'", 1)[0]
+    common = script.split("common='", 1)[1].split("'", 1)[0]
+    assert "test_bundle_order_sample_is_available" not in common
+    assert "test_custom_class_filter_matches_rows" not in common
+    assert "test_warehouse_expand_keeps_every_sku" not in common
+    assert (
+        'common="$common or test_custom_class_filter_matches_rows or test_warehouse_expand_keeps_every_sku"' in script
+    )
+    sales_summary_line = (
+        "echo '| sales | Data-dependent custom-class and warehouse checks | "
+        "Covered by the administrator full regression |'"
+    )
+    assert sales_summary_line in script
     assert "timeout --signal=TERM --kill-after=20s" in script
     assert ".runtime/reports/sales-volume-ci-logs/${SALES_VOLUME_ROLE}-${counter}.log" in script
     source_path = (

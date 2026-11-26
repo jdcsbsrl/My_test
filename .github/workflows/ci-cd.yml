@@ -598,7 +598,14 @@ jobs:
               run_phase 供应商筛选异步导出任务 12 modules/auto_test/tests/test_sales_volume_regression.py -k test_supplier_name_filtered_async_export_matches_query -m slow
               if [ "$phase_blocked" -eq 1 ]; then continue; fi
             fi
-            common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_custom_class_filter_matches_rows or test_dimension_specific_filter or test_warehouse_expand_keeps_every_sku'
+            common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_dimension_specific_filter'
+            if [ "$role" != sales ]; then
+              common="$common or test_custom_class_filter_matches_rows or test_warehouse_expand_keeps_every_sku"
+            else
+              # These checks require current-window classified and multi-warehouse sales data;
+              # the sales account may not have that sample in its permitted store scope.
+              echo '| sales | Data-dependent custom-class and warehouse checks | Covered by the administrator full regression |' >> "$GITHUB_STEP_SUMMARY"
+            fi
             if [ "$role" != procurement ]; then
               common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api"
             else

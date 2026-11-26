@@ -12,9 +12,76 @@ from modules.auto_test.tests.test_sales_volume_regression import (
     _fetch_bundle_order_sample,
     _supplier_search_candidate,
     _fetch_order_data,
+    _post_report_with_transient_retry,
     _wait_for_sales_volume_report_services,
     test_bundle_order_sample_is_available as _bundle_sample_test,
 )
+
+
+def test_report_query_retries_transient_application_and_http_5xx_only():
+    class FakeResponse:
+        def __init__(self, status, body):
+            self.status_code = status
+            self._body = body
+
+        def json(self):
+            return self._body
+
+    class FakeHttpClient:
+        def __init__(self):
+            self.responses = [
+                FakeResponse(200, {"code": 500, "msg": "restarting"}),
+                FakeResponse(503, {"code": 503, "msg": "restarting"}),
+                FakeResponse(200, {"code": 200, "rows": []}),
+            ]
+
+        def post(self, *args, **kwargs):
+            return self.responses.pop(0)
+
+    delays = []
+    response, body, attempts = _post_report_with_transient_retry(
+        FakeHttpClient(),
+        "https://test.invalid/oms-admin/sales/report/queryOmsInventoryNew",
+        {"pageNum": 1},
+        (10, 30),
+        sleep=delays.append,
+    )
+
+    assert response.status_code == 200
+    assert body == {"code": 200, "rows": []}
+    assert attempts == 3
+    assert delays == [5, 15]
+
+
+def test_report_query_preserves_failure_after_bounded_5xx_retries():
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"code": 500, "msg": "persistent report error"}
+
+    class FakeHttpClient:
+        calls = 0
+
+        def post(self, *args, **kwargs):
+            self.calls += 1
+            return FakeResponse()
+
+    delays = []
+    client = FakeHttpClient()
+    response, body, attempts = _post_report_with_transient_retry(
+        client,
+        "https://test.invalid/oms-admin/sales/report/queryOmsInventoryNew",
+        {"pageNum": 1},
+        (10, 30),
+        sleep=delays.append,
+    )
+
+    assert response.status_code == 200
+    assert body["code"] == 500
+    assert client.calls == attempts == 4
+    assert delays == [5, 15, 30]
 
 
 def test_category_candidates_include_only_known_categories_and_are_narrow_first():

@@ -30,6 +30,7 @@ COLUMN_VALUES = """header => {
 REPORT_RESPONSE_TIMEOUT_MS = 90_000
 REPORT_DOWNLOAD_TIMEOUT_MS = 90_000
 SORT_RENDER_TIMEOUT_MS = 15_000
+REPORT_QUERY_RETRY_DELAYS_MS = (5_000, 15_000, 30_000)
 
 
 def _response_diagnostics(response):
@@ -70,6 +71,56 @@ def _request_diagnostics(request):
             if key in payload:
                 details[key] = payload[key]
     return details
+
+
+def _is_transient_report_server_error(response):
+    if response.status >= 500:
+        return True
+    details = _response_diagnostics(response)
+    try:
+        return int(details.get("code")) >= 500
+    except (TypeError, ValueError):
+        return False
+
+
+def _search_report_rows_with_retry(page, endpoint, tab, pending_requests):
+    failures = []
+    for attempt in range(len(REPORT_QUERY_RETRY_DELAYS_MS) + 1):
+        with page.expect_request(_report_query_request(endpoint), timeout=REPORT_RESPONSE_TIMEOUT_MS) as search_request:
+            page.get_by_role("button", name="搜索", exact=True).click()
+        request = search_request.value
+        response = request.response()
+        assert response is not None, {
+            "tab": tab,
+            "action": "search",
+            "request": _request_diagnostics(request),
+            "failure": request.failure,
+        }
+
+        if _is_transient_report_server_error(response):
+            failures.append(
+                {
+                    "attempt": attempt + 1,
+                    "request": _request_diagnostics(request),
+                    "response": _response_diagnostics(response),
+                }
+            )
+            if attempt < len(REPORT_QUERY_RETRY_DELAYS_MS):
+                _wait_for_report_requests_idle(page, pending_requests)
+                page.wait_for_timeout(REPORT_QUERY_RETRY_DELAYS_MS[attempt])
+                continue
+            raise AssertionError(
+                {
+                    "tab": tab,
+                    "action": "search",
+                    "message": "Report search kept returning a server error after bounded retries",
+                    "attempts": failures,
+                }
+            )
+
+        return request, _assert_report_rows(response, tab, "search")
+
+    raise AssertionError("Unreachable report search retry loop")
 
 
 def _report_query_request(endpoint):
@@ -304,20 +355,13 @@ def test_visible_numeric_sort_and_export(
         _wait_for_report_requests_idle(page, pending_report_requests)
         page.get_by_text(tab, exact=True).click()
         _wait_for_report_requests_idle(page, pending_report_requests)
-        with page.expect_request(
-            _report_query_request(endpoints[tab]), timeout=REPORT_RESPONSE_TIMEOUT_MS
-        ) as search_request:
-            page.get_by_role("button", name="搜索", exact=True).click()
-        request = search_request.value
-        response = request.response()
-        assert response is not None, {
-            "tab": tab,
-            "action": "search",
-            "requestPath": urlsplit(request.url).path,
-            "failure": request.failure,
-        }
-        latest_rows[tab] = _assert_report_rows(response, tab, "search")
-        latest_payloads[tab] = response.request.post_data_json or {}
+        request, latest_rows[tab] = _search_report_rows_with_retry(
+            page,
+            endpoints[tab],
+            tab,
+            pending_report_requests,
+        )
+        latest_payloads[tab] = request.post_data_json or {}
         labels = ["销量", "日均销量", "库存(汇总)"]
         if tab != "SKU维度":
             labels.append("订单数")
