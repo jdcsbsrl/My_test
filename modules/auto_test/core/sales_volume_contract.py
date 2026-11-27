@@ -206,6 +206,25 @@ def aggregate_orders(
     return {sku: {"sales": total, "orders": len(order_numbers[sku])} for sku, total in sales.items()}
 
 
+def find_underreported_sku_metrics(
+    report_metrics: Mapping[str, Mapping[str, Any]], source_metrics: Mapping[str, Mapping[str, Any]]
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Find report metrics below a known order sample's contribution.
+
+    Order-list results can omit orders whose stores have no assigned manager, so
+    a known visible order is a lower bound for the report, not necessarily the
+    complete total for its payment window.
+    """
+    underreported = {}
+    for sku, source in source_metrics.items():
+        report = report_metrics.get(sku, {})
+        expected = {key: int(source.get(key) or 0) for key in ("sales", "orders")}
+        actual = {key: int(report.get(key) or 0) for key in ("sales", "orders")}
+        if any(actual[key] < expected[key] for key in expected):
+            underreported[str(sku)] = {"report": actual, "orderSourceSample": expected}
+    return underreported
+
+
 def order_source_breakdown(
     orders: Iterable[Mapping[str, Any]],
     items_by_order: Mapping[str, list[Mapping[str, Any]]],

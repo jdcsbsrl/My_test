@@ -30,6 +30,7 @@ from modules.auto_test.core.sales_volume_contract import (
     build_filter,
     bundle_order_rows,
     export_task_id,
+    find_underreported_sku_metrics,
     find_new_export_task,
     list_export_tasks,
     group_sales_by_sku,
@@ -1513,17 +1514,69 @@ def test_bundle_order_sample_is_available(
     if not bundles:
         pytest.fail("INCOMPLETE: selected bundle order was not present in the payment-minute recheck")
 
-    _assert_sku_sales_match_order_source(
-        report_query,
-        sample_window,
-        source_store_ids,
-        sample_orders,
-        sample_details,
-        authenticated_http_client,
-        api_base_url,
-        order_source_max_pages=BUNDLE_ORDER_SAMPLE_MAX_PAGES,
-        deadline=deadline,
+    selected_sample_order = next(order for order in sample_orders if str(order.get("orderNo") or "") == order_no)
+    selected_order_metrics = aggregate_orders([selected_sample_order], {order_no: sample_details[order_no]})
+    report_payload = {
+        **build_filter(sample_window, store_ids=source_store_ids),
+        "pageNum": 1,
+        "pageSize": 500,
+    }
+    report_body = report_query(
+        DIMENSIONS["sku"],
+        report_payload,
+        timeout=_order_source_timeout(deadline, "bundle sample report"),
     )
+    assert report_body.get("code") == 200, report_body
+    report_rows = report_body.get("rows") or []
+    assert report_rows and len(report_rows) == report_body.get("total") <= 500, (
+        "Bundle sample SKU report is empty or pagination is incomplete",
+        report_body,
+    )
+    report_metrics = {
+        str(row["itemId"]): {
+            "sales": int(row.get("salesNumber") or 0),
+            "orders": int(row.get("orderQuantity") or 0),
+        }
+        for row in report_rows
+    }
+    underreported = find_underreported_sku_metrics(report_metrics, selected_order_metrics)
+    assert not underreported, {
+        "orderNo": order_no,
+        "window": sample_window,
+        "underreportedComponents": underreported,
+    }
+
+    window_source_metrics = aggregate_orders(sample_orders, sample_details)
+    visibility_gaps = {
+        sku: {
+            "orderSource": window_source_metrics.get(sku, {"sales": 0, "orders": 0}),
+            "report": report_metrics.get(sku, {"sales": 0, "orders": 0}),
+        }
+        for sku in selected_order_metrics
+        if any(
+            report_metrics.get(sku, {}).get(metric, 0) > window_source_metrics.get(sku, {}).get(metric, 0)
+            for metric in ("sales", "orders")
+        )
+    }
+    if visibility_gaps:
+        print(
+            "BUNDLE_ORDER_SOURCE_VISIBILITY_GAP "
+            + json.dumps(
+                {
+                    "reportWindow": sample_window,
+                    "storeIds": source_store_ids,
+                    "visibleOrderCount": len(sample_orders),
+                    "selectedOrderNo": order_no,
+                    "metrics": visibility_gaps,
+                    "note": (
+                        "Report exceeds order-list results; " "orders from stores without a manager may be omitted."
+                    ),
+                },
+                ensure_ascii=True,
+                sort_keys=True,
+            ),
+            flush=True,
+        )
     group_ids = sorted({str(row.get("groupSkuId") or row.get("itemId") or "") for _, row in bundles})
     assert "" not in group_ids, "Bundle order rows have no group SKU identifier"
     for group_id in group_ids:

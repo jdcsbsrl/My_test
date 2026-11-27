@@ -15,6 +15,7 @@ from modules.auto_test.core.sales_volume_contract import (
     build_report_sample_history_windows,
     bundle_order_rows,
     category_order_counts,
+    find_underreported_sku_metrics,
     find_new_export_task,
     token_user_id,
     build_filter,
@@ -152,6 +153,23 @@ def test_order_aggregation_excludes_void_and_deduplicates_same_sku():
     }
     with pytest.raises(ValueError, match="Missing order details"):
         aggregate_orders(orders, {})
+
+
+def test_bundle_sample_report_metrics_allow_source_visibility_excess():
+    report = {"SKU-A": {"sales": 5, "orders": 5}}
+    visible_order = {"SKU-A": {"sales": 1, "orders": 1}}
+
+    assert find_underreported_sku_metrics(report, visible_order) == {}
+
+
+def test_bundle_sample_report_metrics_fail_when_known_order_is_missing():
+    report = {"SKU-A": {"sales": 0, "orders": 0}}
+    visible_order = {"SKU-A": {"sales": 1, "orders": 1}, "SKU-B": {"sales": 2, "orders": 1}}
+
+    assert find_underreported_sku_metrics(report, visible_order) == {
+        "SKU-A": {"report": {"sales": 0, "orders": 0}, "orderSourceSample": {"sales": 1, "orders": 1}},
+        "SKU-B": {"report": {"sales": 0, "orders": 0}, "orderSourceSample": {"sales": 2, "orders": 1}},
+    }
 
 
 def test_bundle_sales_use_split_inventory_items_not_group_sku():
