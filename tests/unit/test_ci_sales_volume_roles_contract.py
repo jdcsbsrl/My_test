@@ -49,11 +49,12 @@ def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
     assert "run_phase 类目订单数对账 15" in script
     assert "run_phase 慢速排序与导出 40" in script
     assert "run_phase 权限 4" in script
+    assert "run_phase 筛选与来源对账 15" in script
     assert "run_phase 组合SKU订单样本 7" in script
     assert 'if [ "$role" != admin ]; then' in script
     assert "run_phase 供应商筛选异步导出任务 12" in script
     assert "test_supplier_name_filtered_async_export_matches_query" in script
-    assert script.index("run_phase 供应商筛选异步导出任务 12") < script.index("run_phase 筛选与来源对账 10")
+    assert script.index("run_phase 供应商筛选异步导出任务 12") < script.index("run_phase 筛选与来源对账 15")
     assert "run_phase 排序与导出 5" in script
     assert "run_phase 多店异步导出 12" in script
     assert "-k test_multistore_async_export_matches_query -m slow" in script

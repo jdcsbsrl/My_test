@@ -611,7 +611,7 @@ jobs:
             else
               common="$common or (test_dimension_accepts_payment_range and not store)"
             fi
-            run_phase 筛选与来源对账 10 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow and not ci_readiness'
+            run_phase 筛选与来源对账 15 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow and not ci_readiness'
             if [ "$phase_blocked" -eq 1 ]; then continue; fi
             if [ "$role" != procurement ]; then
               run_phase 组合SKU订单样本 7 modules/auto_test/tests/test_sales_volume_regression.py -k test_bundle_order_sample_is_available -m slow
