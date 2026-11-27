@@ -1140,6 +1140,13 @@ def _order_source_payload(report_window, sold_store_ids, item_ids=None):
     }
 
 
+def _order_source_store_scope(orders):
+    """Return the explicit store scope covered by order-list rows."""
+    return sorted(
+        {str(order.get("storeId") or "").strip() for order in orders if str(order.get("storeId") or "").strip()}
+    )
+
+
 def _fetch_order_details(session, root, order_numbers, deadline=None):
     details = {}
     for start in range(0, len(order_numbers), 100):
@@ -1459,7 +1466,7 @@ def test_bundle_order_sample_is_available(
                 except ValueError:
                     continue
                 group_id = str(row.get("groupSkuId") or row.get("itemId") or "")
-                timed_candidates.append((pay_time, str(order.get("orderNo") or ""), group_id))
+                timed_candidates.append((pay_time, str(order.get("orderNo") or ""), group_id, order))
             if timed_candidates:
                 selected = min(timed_candidates, key=lambda item: item[:3])
                 break
@@ -1477,7 +1484,10 @@ def test_bundle_order_sample_is_available(
             f"{available['total']} combination SKU definitions are not order samples"
         )
 
-    pay_time, order_no, _ = selected
+    pay_time, order_no, _, selected_order = selected
+    source_store_ids = _order_source_store_scope([selected_order])
+    if not source_store_ids:
+        pytest.fail("INCOMPLETE: selected bundle order has no store ID for matching report scope")
     minute_start = pay_time.replace(second=0, microsecond=0)
     sample_window = (
         minute_start.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1488,7 +1498,7 @@ def test_bundle_order_sample_is_available(
             authenticated_http_client,
             api_base_url,
             sample_window,
-            [],
+            source_store_ids,
             max_pages=BUNDLE_ORDER_SAMPLE_MAX_PAGES,
             deadline=deadline,
         )
@@ -1506,7 +1516,7 @@ def test_bundle_order_sample_is_available(
     _assert_sku_sales_match_order_source(
         report_query,
         sample_window,
-        [],
+        source_store_ids,
         sample_orders,
         sample_details,
         authenticated_http_client,
@@ -2079,27 +2089,81 @@ def _assert_async_export_matches_query(
     after = report_query(DIMENSIONS["sku"], payload)
     assert after.get("code") == 200 and len(after.get("rows") or []) == after.get("total") <= 500, after
     after_values = group_sales_by_sku(after["rows"])
-    assert expected == after_values, {
-        "message": "Source changed during async export; result inconclusive",
-        "dimension": dimension,
-        "taskId": task_id,
-        "filters": payload,
-        "before": expected,
-        "after": after_values,
-        "task": task_name,
-    }
-    assert dict(actual) == expected, {
-        "message": "Async export rows do not match the same-filter SKU query",
+    _assert_async_export_matches_observed_snapshots(
+        dict(actual),
+        expected,
+        after_values,
+        dimension=dimension,
+        report_type=report_type,
+        task_id=task_id,
+        task_name=task.get("taskName"),
+        filters=payload,
+        task_conditions=conditions,
+    )
+
+
+def _assert_async_export_matches_observed_snapshots(
+    export_values,
+    before_values,
+    after_values,
+    *,
+    dimension,
+    report_type,
+    task_id,
+    task_name,
+    filters,
+    task_conditions,
+):
+    """Verify export data against stable or immediately surrounding live query snapshots."""
+    exported = dict(export_values)
+    before = dict(before_values)
+    after = dict(after_values)
+    context = {
         "dimension": dimension,
         "reportType": report_type,
         "taskId": task_id,
-        "taskName": task.get("taskName"),
-        "filters": payload,
-        "taskConditions": conditions,
-        "queryBefore": expected,
-        "queryAfter": after_values,
-        "export": dict(actual),
+        "taskName": task_name,
+        "filters": filters,
+        "taskConditions": task_conditions,
+        "queryBefore": before,
+        "queryAfter": after,
+        "export": exported,
     }
+
+    if before == after:
+        assert exported == before, {
+            **context,
+            "message": "Async export rows do not match the stable same-filter SKU query",
+        }
+        return {"status": "stable_snapshot_match", "matchedSnapshots": ["before", "after"]}
+
+    matched_snapshots = []
+    if exported == before:
+        matched_snapshots.append("before")
+    if exported == after:
+        matched_snapshots.append("after")
+    if matched_snapshots:
+        diagnostic = {
+            "status": "source_changed_export_matches_observed_snapshot",
+            "dimension": dimension,
+            "reportType": report_type,
+            "taskId": task_id,
+            "matchedSnapshots": matched_snapshots,
+            "beforeSkuCount": len(before),
+            "afterSkuCount": len(after),
+        }
+        print("SALES_VOLUME_EXPORT_SNAPSHOT_MATCH " + json.dumps(diagnostic, ensure_ascii=True, sort_keys=True))
+        return diagnostic
+
+    diagnostic = {
+        **context,
+        "status": "source_changed_export_matches_neither_snapshot",
+        "message": (
+            "INCOMPLETE: report data changed during async export and the workbook "
+            "matches neither surrounding query snapshot"
+        ),
+    }
+    pytest.fail(json.dumps(diagnostic, ensure_ascii=True, sort_keys=True))
 
 
 @pytest.mark.slow

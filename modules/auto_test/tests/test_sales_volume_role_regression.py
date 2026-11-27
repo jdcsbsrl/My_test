@@ -7,7 +7,11 @@ from datetime import datetime, timedelta
 import pytest
 import requests
 
-from modules.auto_test.core.sales_volume_contract import DIMENSIONS, build_filter
+from modules.auto_test.core.sales_volume_contract import (
+    DIMENSIONS,
+    build_filter,
+    build_report_sample_history_windows,
+)
 from modules.auto_test.core.secret_provider import get_secret
 from modules.auto_test.pages.login_page import LoginPage
 from modules.auto_test.tests.test_sales_volume_regression import NoOrderSampleError
@@ -25,13 +29,32 @@ def test_procurement_source_data(request, api_base_url, report_query, report_win
         _assert_inventory_matches_report,
         _assert_sku_sales_match_order_source,
         _fetch_order_data,
+        _order_source_store_scope,
+        _order_source_payload,
     )
 
-    orders, details, window = _find_daily_order_sample(
-        report_window[1],
+    orders, details, window = _find_order_sample_for_reconciliation(
+        report_window,
+        lambda search_window, page_num: _fetch_order_sample_page(
+            administrator_client,
+            api_base_url,
+            search_window,
+            page_num,
+            _order_source_payload,
+        ),
         lambda daily_window: _fetch_order_data(administrator_client, api_base_url, daily_window, []),
     )
-    _assert_sku_sales_match_order_source(report_query, window, [], orders, details, administrator_client, api_base_url)
+    source_store_ids = _order_source_store_scope(orders)
+    assert source_store_ids, "INCOMPLETE: order source sample has no store IDs for matching report scope"
+    _assert_sku_sales_match_order_source(
+        report_query,
+        window,
+        source_store_ids,
+        orders,
+        details,
+        administrator_client,
+        api_base_url,
+    )
     _assert_inventory_matches_report(administrator_client, api_base_url, report_query, window, [])
 
 
@@ -48,7 +71,84 @@ def _find_daily_order_sample(end_time, fetch_order_data, days=30):
         except NoOrderSampleError:
             continue
         return orders, details, window
-    raise AssertionError(f"No complete daily order sample in the last {days} days")
+    raise AssertionError(f"INCOMPLETE: no complete daily order sample in the last {days} days")
+
+
+def _fetch_order_sample_page(session, api_base_url, report_window, page_num, payload_builder):
+    root = api_base_url.rstrip("/")
+    payload = payload_builder(report_window, [])
+    payload["pageNum"] = page_num
+    response = session.post(
+        root + "/oms-admin/sales/order/batchListNew",
+        json=payload,
+        timeout=(10, 90),
+    )
+    response.raise_for_status()
+    body = response.json()
+    assert body.get("code") == 200, body
+    return body["data"]["tableDataInfo"]
+
+
+def _find_order_sample_for_reconciliation(
+    report_window,
+    fetch_order_page,
+    fetch_order_day,
+    *,
+    lookback_months=6,
+    max_pages_per_window=20,
+):
+    """Find a recent eligible order day, falling back through bounded 30-day history windows."""
+    search_windows = [
+        report_window,
+        *build_report_sample_history_windows(report_window, lookback_months=lookback_months),
+    ]
+    scanned_windows = []
+
+    for search_window in search_windows:
+        scanned_windows.append(search_window)
+        page_num = 1
+        total = 0
+        while page_num <= max_pages_per_window:
+            table = fetch_order_page(search_window, page_num)
+            rows = table.get("rows") or []
+            total = int(table.get("total") or 0)
+            if not rows:
+                if (page_num - 1) * 500 < total:
+                    raise AssertionError(
+                        "INCOMPLETE: order sample header pagination returned an empty page "
+                        f"({(page_num - 1) * 500}/{total}) in {search_window}"
+                    )
+                break
+
+            for order in rows:
+                if str(order.get("orderStatus")) == "6":
+                    continue
+                raw_pay_time = str(order.get("payTime") or "").replace("T", " ")[:19]
+                try:
+                    pay_time = datetime.strptime(raw_pay_time, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    continue
+                day_window = (
+                    pay_time.replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S"),
+                    pay_time.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S"),
+                )
+                try:
+                    orders, details = fetch_order_day(day_window)
+                except NoOrderSampleError:
+                    continue
+                return orders, details, day_window
+
+            if page_num * 500 >= total:
+                break
+            page_num += 1
+
+        if total > max_pages_per_window * 500 and page_num > max_pages_per_window:
+            continue
+
+    raise AssertionError(
+        "INCOMPLETE: no complete, non-void order sample was found in the report window "
+        f"or the previous {lookback_months} calendar months; windowsScanned={scanned_windows}"
+    )
 
 
 @pytest.fixture

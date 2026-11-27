@@ -6,6 +6,8 @@ import requests
 import yaml
 
 from modules.auto_test.tests.test_sales_volume_regression import (
+    _assert_async_export_matches_observed_snapshots,
+    _order_source_store_scope,
     _fetch_export_task_page,
     _report_auth_failure_diagnostic,
     _dimension_filter_store_scope,
@@ -13,6 +15,86 @@ from modules.auto_test.tests.test_sales_volume_regression import (
     _store_picker_group_names,
 )
 from modules.auto_test.tests.test_sales_volume_role_regression import _procurement_async_export_payload
+
+
+def test_async_export_accepts_a_stable_matching_query_snapshot():
+    result = _assert_async_export_matches_observed_snapshots(
+        {"SKU-A": 4},
+        {"SKU-A": 4},
+        {"SKU-A": 4},
+        dimension="sku",
+        report_type=1,
+        task_id="task-1",
+        task_name="sales-volume-sku",
+        filters={},
+        task_conditions={},
+    )
+
+    assert result == {"status": "stable_snapshot_match", "matchedSnapshots": ["before", "after"]}
+
+
+@pytest.mark.parametrize("matched_snapshot", ["before", "after"])
+def test_async_export_accepts_a_matching_snapshot_when_live_data_changes(matched_snapshot, capsys):
+    before = {"SKU-A": 4}
+    after = {"SKU-A": 5}
+    exported = before if matched_snapshot == "before" else after
+
+    result = _assert_async_export_matches_observed_snapshots(
+        exported,
+        before,
+        after,
+        dimension="sku",
+        report_type=1,
+        task_id="task-1",
+        task_name="sales-volume-sku",
+        filters={},
+        task_conditions={},
+    )
+
+    assert result["status"] == "source_changed_export_matches_observed_snapshot"
+    assert result["matchedSnapshots"] == [matched_snapshot]
+    assert "SALES_VOLUME_EXPORT_SNAPSHOT_MATCH" in capsys.readouterr().out
+
+
+def test_async_export_marks_unmatched_snapshot_drift_incomplete():
+    with pytest.raises(pytest.fail.Exception, match="INCOMPLETE: report data changed"):
+        _assert_async_export_matches_observed_snapshots(
+            {"SKU-A": 6},
+            {"SKU-A": 4},
+            {"SKU-A": 5},
+            dimension="sku",
+            report_type=1,
+            task_id="task-1",
+            task_name="sales-volume-sku",
+            filters={},
+            task_conditions={},
+        )
+
+
+def test_async_export_keeps_a_stable_export_mismatch_as_a_failure():
+    with pytest.raises(AssertionError, match="stable same-filter SKU query"):
+        _assert_async_export_matches_observed_snapshots(
+            {"SKU-A": 6},
+            {"SKU-A": 4},
+            {"SKU-A": 4},
+            dimension="sku",
+            report_type=1,
+            task_id="task-1",
+            task_name="sales-volume-sku",
+            filters={},
+            task_conditions={},
+        )
+
+
+def test_order_source_store_scope_uses_only_store_ids_returned_by_order_rows():
+    assert _order_source_store_scope(
+        [
+            {"orderNo": "order-1", "storeId": "store-2"},
+            {"orderNo": "order-2", "storeId": "store-1"},
+            {"orderNo": "order-3", "storeId": "store-2"},
+            {"orderNo": "order-4", "storeId": None},
+        ]
+    ) == ["store-1", "store-2"]
 
 
 def test_sales_volume_uses_three_bounded_parallel_lanes() -> None:
@@ -307,11 +389,16 @@ def test_procurement_source_reconciliation_calls_shared_assertions(monkeypatch):
 
     administrator_client = object()
     report_query = object()
-    orders = [{"orderNo": "order-1"}]
+    orders = [{"orderNo": "order-1", "storeId": "store-1"}]
     details = {"order-1": [{"itemId": "SKU-1", "quantity": 1}]}
     calls = {}
 
-    monkeypatch.setattr(report_tests, "_fetch_order_data", lambda *args, **kwargs: (orders, details))
+    window = ("2026-11-13 00:00:00", "2026-11-13 23:59:59")
+    monkeypatch.setattr(
+        role_tests,
+        "_find_order_sample_for_reconciliation",
+        lambda *args, **kwargs: (orders, details, window),
+    )
     monkeypatch.setattr(
         report_tests,
         "_assert_sku_sales_match_order_source",
@@ -331,8 +418,15 @@ def test_procurement_source_reconciliation_calls_shared_assertions(monkeypatch):
         "procurement",
     )
 
-    window = ("2026-11-13 00:00:00", "2026-11-13 23:59:59")
-    assert calls["sales"] == (report_query, window, [], orders, details, administrator_client, "https://test.invalid")
+    assert calls["sales"] == (
+        report_query,
+        window,
+        ["store-1"],
+        orders,
+        details,
+        administrator_client,
+        "https://test.invalid",
+    )
     assert calls["inventory"] == (
         administrator_client,
         "https://test.invalid",
