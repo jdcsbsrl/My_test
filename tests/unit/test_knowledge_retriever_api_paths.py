@@ -369,6 +369,45 @@ def test_specialized_search_methods_use_single_and_multiple_file_helpers(tmp_pat
     assert len(calls) == 5
 
 
+def test_search_navigation_merges_supplemental_directories_without_dropping_primary(monkeypatch):
+    retriever = KnowledgeRetriever.__new__(KnowledgeRetriever)
+    primary = {
+        "seven_modules": ["产品", "销售", "采购", "物流", "财务", "系统", "维护"],
+        "module_hierarchy": {"Dashboard": {"Commission": ["Affiliate"]}},
+        "business_rules": [{"rule_id": "NAV-DASH-COMMISSION-AFFILIATE-1003225"}],
+    }
+    supplement = {
+        "module_hierarchy": {"Dashboard": {"Setting": ["Sub-Accounts"]}},
+        "business_rules": [{"rule_id": "NAV-DASH-SUBACCOUNTS-1004126"}],
+    }
+    monkeypatch.setattr(retriever, "_search_single_file", lambda *tags, title_filter=None: primary)
+    monkeypatch.setattr(
+        retriever,
+        "_search_by_tags",
+        lambda *tags: [
+            {"file_id": "canonical-navigation", "title": "ERP菜单导航与路由规范"},
+            {"file_id": "dashboard-subaccounts", "title": "dashboard_subaccounts_navigation_1004126"},
+        ],
+    )
+    monkeypatch.setattr(
+        retriever,
+        "_load_file_content",
+        lambda info: supplement if info["file_id"] == "dashboard-subaccounts" else primary,
+    )
+
+    navigation = retriever.search_navigation()
+
+    assert navigation["seven_modules"] == ["产品", "销售", "采购", "物流", "财务", "系统", "维护"]
+    assert navigation["module_hierarchy"]["Dashboard"] == {
+        "Commission": ["Affiliate"],
+        "Setting": ["Sub-Accounts"],
+    }
+    assert {rule["rule_id"] for rule in navigation["business_rules"]} == {
+        "NAV-DASH-COMMISSION-AFFILIATE-1003225",
+        "NAV-DASH-SUBACCOUNTS-1004126",
+    }
+
+
 def test_index_chunk_cache_file_management_and_stats(tmp_path):
     retriever, kb_dir = _retriever(tmp_path)
     global_index = {"version": "3.0", "files": [{"file_id": "a"}]}

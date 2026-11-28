@@ -357,9 +357,61 @@ class KnowledgeRetriever:
         """检索ERP菜单导航与路由规范（保持向后兼容）
 
         Returns:
-            导航规范字典
+            以正式导航文档为主体，并合并带有导航标签的补充目录和规则。
         """
-        return self._search_single_file("导航规范", "ERP菜单导航")
+        primary = self._search_single_file(
+            "导航规范", "ERP菜单导航", title_filter=lambda title: "erp菜单导航" in title.lower()
+        )
+        if not primary:
+            return {}
+
+        result = dict(primary)
+        hierarchy: dict[str, dict[str, list[str]]] = {}
+        rules = list(primary.get("business_rules") or [])
+        rule_ids = {
+            rule.get("rule_id")
+            for rule in rules
+            if isinstance(rule, dict) and rule.get("rule_id")
+        }
+
+        for file_info in self._search_by_tags("导航规范", "ERP菜单导航"):
+            title = str(file_info.get("title", "")).lower()
+            if "erp菜单导航" in title:
+                content = primary
+            else:
+                content = self._load_file_content(file_info)
+            if not isinstance(content, dict) or not content:
+                continue
+
+            source_hierarchy = content.get("module_hierarchy") or {}
+            if isinstance(source_hierarchy, dict):
+                for module, categories in source_hierarchy.items():
+                    if not isinstance(categories, dict):
+                        continue
+                    target_categories = hierarchy.setdefault(module, {})
+                    for category, pages in categories.items():
+                        if not isinstance(pages, list):
+                            continue
+                        target_pages = target_categories.setdefault(category, [])
+                        for page in pages:
+                            if page not in target_pages:
+                                target_pages.append(page)
+
+            if content is primary:
+                continue
+            for rule in content.get("business_rules") or []:
+                if not isinstance(rule, dict):
+                    continue
+                rule_id = rule.get("rule_id")
+                if rule_id and rule_id not in rule_ids:
+                    rules.append(rule)
+                    rule_ids.add(rule_id)
+
+        if hierarchy:
+            result["module_hierarchy"] = hierarchy
+        if rules:
+            result["business_rules"] = rules
+        return result
 
     def search_automation_spec(self) -> dict[str, Any]:
         """检索自动化测试规范（保持向后兼容）
