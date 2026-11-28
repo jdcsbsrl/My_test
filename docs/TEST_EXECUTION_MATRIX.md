@@ -12,7 +12,7 @@ pytest -m smoke -p no:asyncio -p no:rerunfailures
 
 ## 核心回归
 
-验证库存查询、销售商品销量报表和关键导出：
+验证库存查询、产品侧商品销量报表和关键导出：
 
 ```text
 pytest -m core -p no:asyncio -p no:rerunfailures

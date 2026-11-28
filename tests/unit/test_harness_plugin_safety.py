@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import requests
 
 from fixtures import harness_plugin
 
@@ -120,6 +121,153 @@ def test_authentication_refresh_updates_shared_state_and_replaces_storage_atomic
     assert list(tmp_path.glob("*.refresh-*.tmp")) == []
     assert state["refresh_count"] == 1
     assert len(page.removed) == 1
+
+
+def test_authentication_refresh_accepts_valid_session_after_login_ui_check_misses(tmp_path, monkeypatch):
+    auth_file = tmp_path / "auth-state.json"
+    auth_file.write_text(json.dumps({"cookies": []}), encoding="utf-8")
+
+    class FakeRequestInfo:
+        def all_headers(self):
+            return {"clientid": "client"}
+
+    class FakeResponse:
+        url = "https://erp.test/auth/login"
+        request = FakeRequestInfo()
+
+        def json(self):
+            return {"code": 200, "data": {"access_token": "fresh-token"}}
+
+    class FakeContext:
+        def cookies(self):
+            return []
+
+        def storage_state(self, path):
+            Path(path).write_text(json.dumps({"cookies": []}), encoding="utf-8")
+
+    class FakePage:
+        def __init__(self):
+            self.context = FakeContext()
+            self.handlers = []
+
+        def on(self, event, handler):
+            self.handlers.append(handler)
+
+        def remove_listener(self, event, handler):
+            self.handlers.remove(handler)
+
+    class FakeLoginPage:
+        def __init__(self, page):
+            self.page = page
+
+        def login(self, username, password):
+            for handler in self.page.handlers:
+                handler(FakeResponse())
+            return False
+
+    authenticated_navigation = []
+    monkeypatch.setattr(harness_plugin, "LoginPage", FakeLoginPage)
+    monkeypatch.setattr(
+        harness_plugin,
+        "_assert_authenticated_page",
+        lambda page, base_url, timeout: authenticated_navigation.append((base_url, timeout)),
+    )
+    monkeypatch.setattr(harness_plugin, "_capture_authentication_diagnostic", lambda *args, **kwargs: None)
+
+    state = {
+        "storage_state": str(auth_file),
+        "login_response": {"code": 200, "data": {"token": "stale-token"}},
+        "credentials": {"username": "user", "password": "password"},
+        "refresh_lock": harness_plugin.threading.Lock(),
+        "refresh_count": 0,
+    }
+    page = FakePage()
+
+    harness_plugin._refresh_authenticated_session(
+        state=state,
+        page=page,
+        request=FakeRequest(SimpleNamespace()),
+        config_manager=SimpleNamespace(base_url="https://erp.test"),
+    )
+
+    assert authenticated_navigation == [("https://erp.test", 30000)]
+    assert state["login_response"]["data"]["access_token"] == "fresh-token"
+    assert state["refresh_count"] == 1
+
+
+def test_apply_authenticated_state_refreshes_http_client_token_and_cookies():
+    class FakeClient:
+        def __init__(self):
+            self.headers = {"Authorization": "Bearer stale", "clientid": "old-client"}
+            self.cookies = requests.cookies.RequestsCookieJar()
+            self.cookies.set("old-cookie", "old-value", domain="erp.test", path="/")
+
+    client = FakeClient()
+    login_response = {
+        "data": {"token": "fresh-token"},
+        "_clientid": "fresh-client",
+        "_cookies": [{"name": "session", "value": "fresh-value", "domain": "erp.test", "path": "/"}],
+    }
+
+    harness_plugin._apply_authenticated_state_to_client(client, login_response)
+
+    assert client.headers == {"Authorization": "Bearer fresh-token", "clientid": "fresh-client"}
+    assert [(cookie.name, cookie.value) for cookie in client.cookies] == [("session", "fresh-value")]
+
+
+def test_refresh_authenticated_http_client_forces_login_and_updates_api_state(monkeypatch):
+    class FakeContext:
+        cookies_cleared = False
+
+        def clear_cookies(self):
+            self.cookies_cleared = True
+
+    class FakePage:
+        context = FakeContext()
+        evaluations = []
+
+        def evaluate(self, expression):
+            self.evaluations.append(expression)
+
+    page = FakePage()
+    state = {
+        "login_response": {
+            "data": {"token": "stale-token"},
+            "_clientid": "stale-client",
+            "_cookies": [],
+        }
+    }
+    client = requests.Session()
+    calls = []
+
+    def refresh_session(**kwargs):
+        calls.append(kwargs)
+        kwargs["state"]["login_response"].update(
+            {
+                "data": {"token": "fresh-token"},
+                "_clientid": "fresh-client",
+                "_cookies": [{"name": "session", "value": "fresh-value", "domain": "erp.test", "path": "/"}],
+            }
+        )
+
+    monkeypatch.setattr(harness_plugin, "_refresh_authenticated_session", refresh_session)
+    refresh = harness_plugin.refresh_authenticated_http_client._fixture_function(
+        FakeRequest(SimpleNamespace()),
+        SimpleNamespace(base_url="https://erp.test"),
+        state,
+        page,
+        client,
+    )
+
+    refresh()
+
+    assert len(calls) == 1
+    assert page.context.cookies_cleared
+    assert page.evaluations == ["() => { window.localStorage.clear(); window.sessionStorage.clear(); }"]
+    assert client.headers["Authorization"] == "Bearer fresh-token"
+    assert client.headers["clientid"] == "fresh-client"
+    assert [(cookie.name, cookie.value) for cookie in client.cookies] == [("session", "fresh-value")]
+    client.close()
 
 
 def test_authentication_refresh_cleans_temp_state_and_reports_failure(tmp_path, monkeypatch):
@@ -262,6 +410,7 @@ def test_run_and_worker_paths_are_isolated(monkeypatch):
         ("http_client", "function"),
         ("login_token", "function"),
         ("authenticated_http_client", "function"),
+        ("refresh_authenticated_http_client", "function"),
         ("api_client", "function"),
     ],
 )

@@ -10,6 +10,7 @@
 
 import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from .audit_models import AuditIssue, AuditResult
@@ -22,6 +23,7 @@ CODE_AUDITOR = "code"
 SECURITY_AUDITOR = "security"
 ENVIRONMENT_AUDITOR = "environment"
 IMPACT_AUDITOR = "impact"
+TEST_PLAN_AUDITOR = "test_plan"
 
 
 class AuditEngine:
@@ -78,6 +80,10 @@ class AuditEngine:
                 from .auditors import ImpactAuditor
 
                 self._auditors[auditor_type] = ImpactAuditor(self.rule_manager)
+            elif auditor_type == TEST_PLAN_AUDITOR:
+                from .auditors import TestPlanAuditor
+
+                self._auditors[auditor_type] = TestPlanAuditor()
         return self._auditors[auditor_type]
 
     def audit(self, target: Any, audit_type: AuditType = AuditType.ALL, context: dict | None = None) -> AuditResult:
@@ -97,6 +103,8 @@ class AuditEngine:
         if audit_type == AuditType.TEST_CASE:
             strict_level = context.get("strict_level", self.config.strict_level)
             result = self._get_auditor(TEST_CASE_AUDITOR).audit(target, strict_level, context)
+        elif audit_type == AuditType.TEST_PLAN:
+            result = self._get_auditor(TEST_PLAN_AUDITOR).audit(target, context)
         elif audit_type == AuditType.CODE:
             language = context.get("language", "python")
             result = self._get_auditor(CODE_AUDITOR).audit(target, language)
@@ -275,8 +283,12 @@ class AuditEngine:
                     audit_types.append(AuditType.TEST_CASE)
 
             if isinstance(target, str):
+                # 测试计划是独立的 Markdown 交付，不走 15 字段用例审核。
+                file_name = Path(target).name
+                if file_name.endswith(".md") and "_测试计划" in file_name:
+                    audit_types.append(AuditType.TEST_PLAN)
                 # 可能是代码
-                if any(ext in target for ext in [".py", ".js", ".java", ".cpp"]):
+                elif any(ext in target for ext in [".py", ".js", ".java", ".cpp"]):
                     audit_types.extend([AuditType.CODE, AuditType.SECURITY])
                 elif target.endswith(".json"):
                     audit_types.append(AuditType.ENVIRONMENT)

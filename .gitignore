@@ -9,6 +9,10 @@ venv/
 env/
 ENV/
 .agents/
+!.agents/
+.agents/*
+!.agents/skills/
+!.agents/skills/**
 
 # ========== Python缓存 ==========
 __pycache__/

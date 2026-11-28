@@ -23,6 +23,7 @@ CORE_DOCS = (
 FRONTMATTER_REQUIRED_FIELDS = ("title", "purpose", "version", "updated", "authority")
 
 REQUIRED_ROUTES = {
+    "需求分析与测试计划": ".agents/skills/erp-requirement-test-plan/SKILL.md",
     "测试用例生成": "docs/TRAE_TEST_WORKFLOW.md",
     "自动化测试执行": "docs/AUTO_TEST_WORKFLOW.md",
     "知识库检索": "docs/KNOWLEDGE_BASE_RETRIEVER.md",

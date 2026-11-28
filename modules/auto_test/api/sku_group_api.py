@@ -17,10 +17,13 @@ class SKUGroupAPI:
         self.session = session
         self.base_url = api_base_url.rstrip("/")
 
-    def list_page(self, group_sku_id: str, page_num: int = 1, page_size: int = 20) -> dict[str, Any]:
+    def list_page(self, group_sku_id: str | None = None, page_num: int = 1, page_size: int = 20) -> dict[str, Any]:
+        params: dict[str, Any] = {"pageSize": page_size, "pageNum": page_num}
+        if group_sku_id is not None:
+            params["groupSkuId"] = group_sku_id
         response = self.session.get(
             f"{self.base_url}{self.PATH}",
-            params={"pageSize": page_size, "pageNum": page_num, "groupSkuId": group_sku_id},
+            params=params,
             timeout=self.REQUEST_TIMEOUT,
         )
         response.raise_for_status()

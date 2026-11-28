@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pytest
 import requests
@@ -157,11 +157,18 @@ def _refresh_authenticated_session(
         login_result, handler = _login_response_capture(page)
         try:
             credentials = state["credentials"]
-            if not LoginPage(page).login(credentials["username"], credentials["password"]):
-                raise RuntimeError("重新登录未成功返回")
+            login_succeeded = LoginPage(page).login(credentials["username"], credentials["password"])
+            authenticated_by_fallback = False
+            if not login_succeeded:
+                # The login helper's URL/DOM checks can miss a valid app session
+                # when the SPA keeps a stale /login URL after the API response.
+                # A fresh navigation must still prove that the session works.
+                _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+                authenticated_by_fallback = True
             if "response" not in login_result:
                 raise RuntimeError("重新登录未捕获到 auth/login 响应")
-            _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
+            if not authenticated_by_fallback:
+                _assert_authenticated_page(page, config_manager.base_url, timeout=30000)
 
             login_response = login_result["response"]
             login_response["_clientid"] = login_result.get("clientid")
@@ -178,11 +185,34 @@ def _refresh_authenticated_session(
             state["login_response"].clear()
             state["login_response"].update(login_response)
             state["refresh_count"] += 1
+            state["login_count"] = int(state.get("login_count", 1)) + 1
+            state["last_login_monotonic"] = time.monotonic()
         except Exception as exc:
             _capture_authentication_diagnostic(page, "refresh-failure", request.config)
             raise RuntimeError(f"认证刷新失败: {exc}") from exc
         finally:
             page.remove_listener("response", handler)
+
+
+def _apply_authenticated_state_to_client(client: requests.Session, login_response: dict[str, Any]) -> None:
+    data = login_response.get("data") or {}
+    token = data.get("token") or data.get("access_token")
+    if not token:
+        raise RuntimeError("刷新登录后没有获得 API token")
+    client.headers["Authorization"] = f"Bearer {token}"
+    clientid = login_response.get("_clientid") or get_secret("CLIENTID")
+    if clientid:
+        client.headers["clientid"] = clientid
+    else:
+        client.headers.pop("clientid", None)
+    client.cookies.clear()
+    for cookie in login_response.get("_cookies", []):
+        client.cookies.set(
+            cookie["name"],
+            cookie["value"],
+            domain=cookie.get("domain"),
+            path=cookie.get("path", "/"),
+        )
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -543,6 +573,8 @@ def _authenticated_session(
                 "credentials": test_user_credentials,
                 "refresh_lock": threading.Lock(),
                 "refresh_count": 0,
+                "login_count": 1,
+                "last_login_monotonic": time.monotonic(),
             }
         except Exception as exc:
             if auth_page is not None:
@@ -712,6 +744,30 @@ def authenticated_http_client(http_client, login_token: str, login_response: dic
     finally:
         # The owning http_client fixture performs the actual close.
         http_client.headers.pop("Authorization", None)
+
+
+@pytest.fixture
+def refresh_authenticated_http_client(
+    request: pytest.FixtureRequest,
+    config_manager: ConfigManager,
+    _authenticated_session: dict[str, Any],
+    logged_in_page: Page,
+    authenticated_http_client: requests.Session,
+) -> Callable[[], None]:
+    """Force a fresh ERP login and synchronize browser and API authentication state."""
+
+    def refresh() -> None:
+        logged_in_page.evaluate("() => { window.localStorage.clear(); window.sessionStorage.clear(); }")
+        logged_in_page.context.clear_cookies()
+        _refresh_authenticated_session(
+            state=_authenticated_session,
+            page=logged_in_page,
+            request=request,
+            config_manager=config_manager,
+        )
+        _apply_authenticated_state_to_client(authenticated_http_client, _authenticated_session["login_response"])
+
+    return refresh
 
 
 @pytest.fixture(scope="function")

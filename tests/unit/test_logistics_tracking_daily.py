@@ -10,6 +10,8 @@ from modules.auto_test.core.logistics_tracking_daily import (
     LOGIN_API,
     TrackingBlockedError,
     _allow_login_only,
+    _has_access_challenge,
+    _stop_if_access_challenge,
     choose_samples,
     load_used_hashes,
     number_hash,
@@ -172,3 +174,22 @@ def test_failure_summary_exposes_only_safe_page_stage():
     summary = _safe_failure(error)
     assert "等待真实运单结果超时" in summary
     assert "TEST0000" not in summary
+
+
+def test_public_page_verification_stops_before_query_and_keeps_stage_safe():
+    class Body:
+        def inner_text(self, *, timeout):
+            assert timeout == 3000
+            return "Security Verification\nLook at the picture on the right and find its kind"
+
+    class Page:
+        def locator(self, selector):
+            assert selector == "body"
+            return Body()
+
+    assert not _has_access_challenge("Tracking Information\nIn transit")
+    assert _has_access_challenge("Security Verification")
+    with pytest.raises(TrackingBlockedError) as error:
+        _stop_if_access_challenge(Page(), "等待页面初始化")
+    assert error.value.public_stage == "等待页面初始化：验证码或访问限制"
+    assert "Look at the picture" not in str(error.value)

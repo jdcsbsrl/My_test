@@ -10,6 +10,7 @@ from .file_splitter import JSONFileSplitter
 from .index_builder_v3 import IndexBuilderV3
 from .metadata_manager import normalize_file_id
 from .path_utils import find_project_root
+from .runtime_paths import runtime_dir
 
 
 class KnowledgeBaseMonitor:
@@ -171,7 +172,7 @@ class KnowledgeBaseMonitor:
             处理结果字典
         """
         result = {"success": False, "file_path": file_path, "split": None, "index": None, "error": ""}
-        rollback_dir = tempfile.mkdtemp(prefix="kb-process-")
+        rollback_dir = tempfile.mkdtemp(prefix="kb-process-", dir=str(runtime_dir("cache")))
         old_chunks = []
         old_index = None
 

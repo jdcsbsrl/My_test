@@ -1,0 +1,3 @@
+interface:
+  display_name: "ERP需求测试计划"
+  short_description: "分析需求和截图并生成可审阅的测试计划"

@@ -70,11 +70,14 @@ python tools/run_regression.py --env test --case-id CASE-ID
 python tools/run_regression.py --env test --requirement-id REQ-DEMO --impact-query "销售订单查询完整业务规则"
 ```
 
-确认范围和环境后，显式增加 `--execute` 才执行已登记用例：
+确认范围、环境并获得当前任务的执行授权后，显式增加 `--execute` 才会执行所选范围或已登记用例：
 
 ```powershell
+python tools/run_regression.py --env test --scope module --execute
 python tools/run_regression.py --env test --case-id CASE-ID --execute
 ```
+
+`--execute` 只是命令执行开关，不替代用户授权；入口仍只接受 `test`、`uat`。
 
 报告和执行证据写入 `.runtime/reports/`。禁止将报告或测试产物写入项目根目录或 `workspace/` 历史交付目录。
 

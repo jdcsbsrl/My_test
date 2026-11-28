@@ -15,13 +15,13 @@ from tools.report_generator import run_regression_tests
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="运行 TEST 环境回归测试并生成报告")
+    parser = argparse.ArgumentParser(description="预览或执行 TEST/UAT 回归测试并生成报告")
     parser.add_argument("--env", choices=("test", "uat"), default="test")
     parser.add_argument("--scope", choices=("smoke", "module", "release"), default="module")
     parser.add_argument("--case-id", action="append", help="登记表中的活动用例ID，可重复")
     parser.add_argument("--requirement-id", help="按需求ID计算规则影响范围")
     parser.add_argument("--impact-query", help="通过KnowledgeRetriever检索完整规则并选择受影响用例")
-    parser.add_argument("--execute", action="store_true", help="执行已登记用例；默认只预览选择")
+    parser.add_argument("--execute", action="store_true", help="执行所选回归；默认只预览计划")
     args = parser.parse_args()
     if args.case_id or args.impact_query:
         from modules.trae_test.utils.case_registry import CaseRegistry
@@ -49,6 +49,14 @@ def main() -> int:
         for row in selected:
             print(row["case_id"], f"v{row['version']}", row["script_id"])
         return run_registered_cases(registry, selected, args.env) if args.execute else 0
+    if not args.execute:
+        from modules.auto_test.core.regression_checks import planned_scenario_count
+
+        print(
+            f"回归计划：环境={args.env}，范围={args.scope}，场景数={planned_scenario_count(args.scope)}。"
+            "本次未执行查询；确认当前任务已获执行授权后，添加 --execute 再运行。"
+        )
+        return 0
     report = run_regression_tests(env_name=args.env, scope=args.scope)
     return (
         1 if report.release_decision["status"] == "BLOCKED" else 2 if not report.release_decision["can_deliver"] else 0

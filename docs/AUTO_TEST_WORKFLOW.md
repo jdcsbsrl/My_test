@@ -1,8 +1,8 @@
 ---
 title: auto_test 模块工作流程
 purpose: 自动化测试执行、数据生命周期和报告
-version: 3.0.0
-updated: 2026-08-18
+version: 3.1.0
+updated: 2026-11-12
 authority: 专项规范
 ---
 
@@ -11,6 +11,11 @@ authority: 专项规范
 ## 模块定位
 
 `auto_test` 是自动化测试执行模块，负责配置测试环境、执行测试脚本、收集测试结果并生成可视化报告。
+
+### 页面知识入口
+
+- 客户报价明细的页面结构、赠品重复规则、新增/编辑及其 2.0 版本、复制和导入探索记录见 [CUSTOMER_QUOTATION_ITEM_AUTOTEST.md](CUSTOMER_QUOTATION_ITEM_AUTOTEST.md)。该文档标注了已观察结果、未确认的产品语义和未来回归门槛。
+- 当前代码入口 `modules/auto_test/pages/customer_quotation_item_page.py` 提供目标页身份校验、只读观察和 `explored_flows()` 流程契约；写操作回归尚未启用。未来添加用例前应先读上述文档，并遵循本流程的数据生命周期和执行授权规则。
 
 ## 工作流程
 
@@ -70,7 +75,7 @@ authority: 专项规范
 **处理步骤**:
 1. 读取环境配置文件
 2. 验证环境类型（test/uat）
-3. 检查环境安全性（禁止生产环境）
+3. 检查环境安全性（常规自动化回归禁止生产环境；生产数据专项任务只能走 [PROJECT_RULES.md](PROJECT_RULES.md) 规定的专用只读流程）
 4. 验证API端点和认证信息
 5. 初始化 TestDataFactory（注册数据生成器）
 6. 初始化 TestDataLifecycleManager（注册 setUp/cleanup 回调）
@@ -155,11 +160,13 @@ authority: 专项规范
 **处理步骤**:
 1. 生成 HTML 可视化报告
 2. 生成 JSON 格式报告（便于集成）
-3. 发送测试结果通知
+3. （可选）需要通知时按独立通知能力发送结果；正式回归入口只生成报告并打印摘要，不包含通知步骤
 
 **输出**: 测试报告（HTML/JSON），统一写入 `.runtime/reports/`。
 
 ## 支持的测试环境
+
+正式回归会话仅接受 `test`、`uat`。配置管理器和部分 pytest 入口另支持 `test_env` 配置档，须验证具体入口和经批准的测试端点；这不改变项目入口中的环境红线或正式回归会话支持范围。
 
 | 环境 | 配置文件 | 说明 |
 |------|----------|------|
@@ -179,6 +186,13 @@ authority: 专项规范
 
 ## 关键操作步骤
 
+### UI 自动化入口与浏览器选择
+
+1. 先确认用户授权、`test`/`uat` 环境及目标账号角色，检查已有测试入口、页面对象、浏览器驱动、登录 fixture 和角色配置；优先复用适用的项目能力。没有覆盖时说明缺口，再决定如何补充。
+2. 用户未指定浏览器时，优先使用项目框架管理的独立浏览器会话；任务需要使用用户现有浏览器时，先确认目标及操作范围。用户明确指定浏览器时遵循其选择；若无法与框架连接或复用会话，说明已确认的限制和可选方案，未经用户同意不切换浏览器。
+3. 登录受阻时，先检查目标环境和目标角色的已有登录链路及安全配置；通用账号或其他角色登录失败不能证明目标角色登录失败。不得输出账号密码、Token、Cookie 等认证信息。
+4. 登录会话受进程和浏览器上下文边界约束，不能假定独立 `auto_login` 进程或另一个浏览器的登录态已传给目标页面。无法安全建立目标会话时如实报告阻塞，不以手动登录替代已有可用链路。
+
 ### 预览回归范围
 
 正式回归入口是 `tools/run_regression.py`。默认只计算范围和生成计划，不执行测试：
@@ -189,15 +203,18 @@ python tools/run_regression.py --env test --case-id CASE-ID
 python tools/run_regression.py --env test --requirement-id REQ-DEMO --impact-query "销售订单查询完整业务规则"
 ```
 
-### 执行已登记用例
+### 执行所选范围或已登记用例
 
-确认环境、范围和授权后，显式增加 `--execute` 才会执行登记表中关联的 pytest 节点：
+确认环境、范围和当前任务的授权后，显式增加 `--execute` 才会执行：`--case-id` 运行登记表中关联的 pytest 节点，`--scope` 运行该范围的业务查询。
 
 ```powershell
 python tools/run_regression.py --env test --case-id CASE-ID --execute
+python tools/run_regression.py --env test --scope module --execute
 ```
 
-执行过程会复用 `ConfigManager`、环境安全校验、`regression_session`、数据生命周期和已登记用例的脚本关联，不会把自然语言用例自动编译为测试脚本。
+`--execute` 只控制程序是否运行，不构成用户授权。
+
+两种入口的执行路径不同：`--scope` 通过 `regression_session` 执行只读业务查询并生成报告；`--case-id` 和 `--impact-query` 运行登记表关联的 pytest 节点，由测试框架管理用例数据生命周期和执行证据。两条路径都执行环境与授权校验，也都不会把自然语言用例自动编译为测试脚本。
 
 ### Python 调用
 
@@ -250,7 +267,7 @@ HTML 和 JSON 报告由 `run_regression_tests()` 统一写入 `.runtime/reports/
 
 ## 个人回归入口与结果可信度
 
-`python tools/run_regression.py --env test --scope smoke` 验证基础查询、精确筛选和状态筛选；`--scope module` 增加模糊筛选、组合筛选、空结果和分页检查；`--scope release` 执行模块全部查询契约，供发布门禁使用。
+`python tools/run_regression.py --env test --scope smoke --execute` 验证基础查询、精确筛选和状态筛选；`--scope module --execute` 增加模糊筛选、组合筛选、空结果和分页检查；`--scope release --execute` 执行模块全部查询契约，供发布门禁使用。不带 `--execute` 时只输出计划。
 执行需已有明确授权。数据不足返回BLOCKED，不用空列表证明筛选正确；HTTP成功码不能代替业务断言。
 返回码0表示所选范围全部通过，1表示失败，2表示验证不完整。报告展示计划数、实际执行数、跳过和阻断。
  pytest核心/P0用例跳过时不得返回成功；仅包含非核心可选用例的全跳过 shard 记录为验证不完整但不以退出码2阻断，setup/teardown错误进入运行摘要。
@@ -305,3 +322,37 @@ python -m modules.auto_test delivery-status-regression --env test --execute --fl
 ```
 
 每种状态分别检查返回行的 `deliveryStatus`，重点验证搜索结果与请求状态精确匹配。分页结果按 `orderNo` 检查重复；多页结果缺少订单编号或出现重复时，不得判为完整通过。`交运中` 是中间状态，完整查询返回空结果记为 `EMPTY_OK`，整体可以通过；这不表示有订单行可供状态核对。未交运、交运成功、交运失败的空结果仍记为 `NO_SAMPLE`，需要样本才能确认筛选精度。分页上限不足记为 `PARTIAL`，接口或响应无法验证时记为 `BLOCKED`。报告写入 `.runtime/reports/sales_order_delivery_status/` 的 JSON 文件。正常状态的结果通过，且交运中为 `PASS` 或 `EMPTY_OK` 时返回码 0；确认失败返回码 1，验证不完整返回码 2。CI 在组长账号测试通道运行真实 TEST 环境回归，离线单元测试继续由 `tests/unit/` 执行。
+
+## 需求 1003531 库存 SKU 与销售订单导出回归
+
+`modules/auto_test/tests/test_export_requirement_1003531.py` 同时支持 test 和 uat 配置。管理员 CI 分片只在 test 环境执行 `-m "not slow"`，覆盖库存 SKU 超 5000 条分页实时导出、固定底部按钮，以及库存 SKU 和销售订单从列表直接传查询条件创建导出任务。CI 创建的任务使用 `CI_R1003531_` 前缀，便于在共享任务列表识别来源。
+
+TEST 环境的导出任务定时器不是持续运行，依赖后台任务完成和文件下载的库存全分页对账、销售订单实时文件与异步文件对账统一标记为 `slow`，不进入普通 CI，也不影响合并门禁。人工开启定时器后执行：
+
+```powershell
+pytest modules/auto_test/tests/test_export_requirement_1003531.py -m slow --env test
+```
+
+如后台任务需要更长时间，可通过 `EXPORT_TASK_TIMEOUT_MS` 调整等待上限。UAT 仅保留配置能力，不配置 CI 执行入口。
+
+## 库存同步未发货订单口径（需求 1004021）
+
+`modules/auto_test/core/inventory_sync_calculator.py` 提供不依赖 ERP 响应的订单筛选、SKU 件数/组合套数汇总、组合瓶颈折算、公式计算和负数归零断言。单元测试位于 `tests/unit/test_inventory_sync_calculator_1004021.py` 和 `tests/unit/test_inventory_sync_order_api_1004021.py`，随常规 `unit-tests` CI 执行。
+
+`modules/auto_test/tests/test_inventory_sync_requirement_1004021.py` 使用组长账号，只读取规则 `1113新增规则`，检查两个选项、问号注释和互斥行为。切换选项只发生在未保存的编辑弹窗内，测试结束点击取消。该用例接入组长库存 CI shard 10。
+
+`modules/auto_test/tests/test_inventory_sync_order_matrix_1004021.py` 只读查询订单和订单明细，检查状态码 0（待处理）、2（配货中）、5（待付款）、8（WMS发货中）、10（WMS取消发货）、Hold、`deficitFlag` 以及两个 SKU 的口径差值。组合 SKU 父行没有 `deficitFlag` 时，适配器从组合子明细继承，并要求子明细标志一致。所有订单必须属于规则店铺 `yxl_kehu_zuzhang-test_yxl_new`；每个状态、每种待付款标志和 Hold 样本都要同时覆盖 `DWOYX-LF006` 与 `Merge001`。手动运行前设置 `INVENTORY_SYNC_ORDER_NUMBERS`，值为逗号分隔的 TEST 订单号，不要添加凭证。样本不完整时测试失败并报告缺少的状态或标志，不把缺样本判为通过。
+
+本地 PowerShell 自测示例：
+
+```powershell
+$env:INVENTORY_SYNC_ORDER_NUMBERS = "<orderNo1>,<orderNo2>,<orderNo3>"
+$env:AUTO_TEST_AUTHORIZED = "1"
+pytest modules/auto_test/tests/test_inventory_sync_order_matrix_1004021.py --env test
+Remove-Item Env:INVENTORY_SYNC_ORDER_NUMBERS
+Remove-Item Env:AUTO_TEST_AUTHORIZED
+```
+
+在 GitHub Actions 中，到仓库 **Settings → Secrets and variables → Actions → New repository secret** 创建名为 `INVENTORY_SYNC_ORDER_NUMBERS` 的 secret，值使用同样的逗号分隔订单号。库存 shard 10 每次运行都会执行订单矩阵预检；即使该 shard 的规则 UI 用例失败，预检也会继续运行（除非 workflow 被取消）。未配置订单号 secret 或样本不完整时，步骤会明确失败，不会静默跳过。预检使用组长账号，只读订单，不修改订单或触发库存同步。
+
+这些用例目前验证规则页面契约和订单源数据矩阵；它们不自动修改规则，也不触发 Shopify 库存同步。若要把最终同步数量和逐 SKU 同步记录纳入自动 E2E，需先在 TEST 确认平台商品手动同步入口产生的记录接口/字段契约，并准备包含待处理、配货中、待付款 `deficitFlag=0/1`、WMS 发货中、WMS 取消发货及 Hold 的完整订单样本。写操作 E2E 应使用可恢复的 CI 专用规则与 SKU 范围，并在独立的手动/夜间通道串行执行。

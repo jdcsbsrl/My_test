@@ -1,6 +1,6 @@
 # 项目结构说明
 
-> 版本：v2.1 · 2026-08-18
+> 版本：v2.2 · 2026-11-18
 >
 > 目录归属、文件生命周期、Git、清理和审核规则以
 > [PROJECT_ARTIFACT_PLACEMENT.md](PROJECT_ARTIFACT_PLACEMENT.md) 为准；本文只描述当前代码结构，不与行为规范重复定义规则。
@@ -9,6 +9,7 @@
 
 ```text
 test_erp/
+├── .agents/                         # Codex 项目级 Skill（skills/ 纳入 Git）
 ├── .github/                         # CI/CD 工作流
 ├── assets/                          # 本地知识库和固定资源
 │   └── knowledge_base/              # 本地业务知识库，不提交真实内容

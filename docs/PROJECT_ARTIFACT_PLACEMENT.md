@@ -1,12 +1,12 @@
 ---
 title: 项目文件与产物管理行为规范
 purpose: 项目目录、运行时产物、workspace、Git 和清理边界
-version: 2.2.0
-updated: 2026-08-18
+version: 2.3.0
+updated: 2026-11-18
 authority: 项目强制规范
 ---
 
-# 项目文件与产物管理行为规范 v2.1
+# 项目文件与产物管理行为规范 v2.3
 
 ## 1. 适用范围
 
@@ -17,7 +17,7 @@ authority: 项目强制规范
 允许的项目目录：
 
 ```text
-.github/ assets/ configs/ data/ docs/ evaluation/ fixtures/
+.agents/ .github/ assets/ configs/ data/ docs/ evaluation/ fixtures/
 modules/ tests/ tools/ workspace/ .runtime/ .venv/ browsers/
 ```
 
@@ -28,6 +28,7 @@ modules/ tests/ tools/ workspace/ .runtime/ .venv/ browsers/
 | 目录 | 职责 |
 |---|---|
 | `.github/` | CI/CD 工作流 |
+| `.agents/` | Codex 项目级 Skill 放入 `skills/`；仅 `skills/` 内容纳入 Git，其他本地 Agent 运行内容仍忽略 |
 | `assets/` | 本地知识库和固定资源；真实知识库不提交 |
 | `configs/` | 正式配置和脱敏配置模板 |
 | `data/` | 可变测试数据；真实数据放 `data/private/` |
@@ -45,6 +46,8 @@ modules/ tests/ tools/ workspace/ .runtime/ .venv/ browsers/
 ## 4. workspace 规则
 
 最终测试用例和用户交付文件直接放入 `workspace/YYYYMMDD/`，不创建 `formal/`、`draft/`、`test_cases/`、`exports/` 或模块子目录。`workspace/` 默认不进入 Git，只保留 `workspace/.gitkeep` 骨架；真实成果默认本地保存。workspace 是重要的历史测试知识库，任何自动清理工具都不得删除其中的历史文件；`workspace/.keep` 仅用于记录保护规则，不改变永久保留策略。
+
+需求分析与测试计划等非用例交付物允许使用 Markdown，直接放入 `workspace/YYYYMMDD/`。测试计划命名为 `需求{需求ID}{需求名称}_测试计划.md`；需求 ID 可选，没有 ID 时使用 `需求{需求名称}_测试计划.md`。文件名中的占位符不包含尖括号；同一需求的修订不得覆盖历史文件，使用 `_修订NN` 后缀递增。测试计划是计划类交付，不替代 `TRAE_TEST_WORKFLOW.md` 规定的 15 字段用例和 `.xlsx` 交付。
 
 ## 5. .runtime 规则
 
@@ -83,31 +86,13 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 11. 命名规则
 
-长期文件使用 `{模块}_{用途}.{扩展名}`；运行时文件使用 `{用途}_{日期}_{uuid}.{扩展名}`。禁止 `new.xlsx`、`test2.json`、`最终版.xlsx` 等无语义名称。文件名不得包含 `\ / : * ? " < > |`。
+长期文件使用 `{模块}_{用途}.{扩展名}`；运行时文件使用 `{用途}_{日期}_{uuid}.{扩展名}`。workspace 测试计划按第 4 节的 `需求{需求ID}{需求名称}_测试计划.md` 命名。禁止 `new.xlsx`、`test2.json`、`最终版.xlsx` 等无语义名称。文件名不得包含 `\ / : * ? " < > |`。
 
-## 12. 测试用例专项规则
+## 12. 测试用例产物
 
-测试用例必须通过知识库 API 生成，使用统一 15 字段模板和 Excel 生成器；标准15字段中删除“关联缺陷ID”，第15列为“质量评分”。前置条件、执行步骤、预期结果必须基于业务知识和页面对象分点描述，便于测试人员直接操作；用例还必须登记功能点、业务规则、页面对象和覆盖矩阵。经过质量评分、优化和审核后，最终 `.xlsx` 文件写入 `workspace/YYYYMMDD/`：格式审核、固定字段校验和业务内容审核通过才允许导出；质量评分仅作结构参考。中间 JSON、评分轨迹、审核报告和临时 Excel 写入 `.runtime/`。原始评分、优化后评分、最终评分及冷启动信息只保留在运行时和审核报告中，不扩展正式Excel表头。回归执行按变更风险选择冒烟、模块、影响域或全量范围，核心 P0 用例不得因缩减回归而跳过。重生次数以 `TestCaseRegenerationLoop` 配置为准，保留兼容上限3次；当前格式整理仅执行一次，无新增依据不反复凑分。
+测试用例质量门禁、评分和运行时字段以 [TRAE_TEST_WORKFLOW.md](TRAE_TEST_WORKFLOW.md) 为准；交付文件、运行产物及登记表位置与保留规则见本规范第 4、5、8 节及该工作流。
 
-### 测试用例质量门禁契约
-
-- 前置条件至少 2 个分点，必须说明账号/权限、页面入口、业务数据或业务状态中的适用项。
-- 执行步骤至少 3 个分点；每步必须包含明确页面对象、动作和必要测试数据，禁止使用“进入相关页面”等空泛表述。
-- 预期结果至少 2 个分点；必须对应步骤并描述可观察、可验证的页面、提示、数据或状态变化，禁止仅写“成功”或“符合预期”。
-- AuditAgent 必须同时检查格式、结构、业务可执行性、业务规则与页面对象一致性、覆盖矩阵和回归标识。
-- 业务依据缺失、关键歧义或矛盾未解决时，必须阻断审核和导出；新用例没有执行历史，不因此触发人工确认。结构参考分缺失或非法时修复字段，低于85不单独阻断。
-- 适量回归按变更风险执行：冒烟回归覆盖核心主流程；模块回归覆盖受影响模块及关联异常；影响域回归覆盖公共能力的依赖方；发布或核心重构执行全量回归。P0 用例必须执行。
-
-### 运行时评分与覆盖矩阵字段契约
-
-运行时字段必须使用 `_runtime_` 命名空间，不能增加或改写正式15列Excel表头。评分状态统一写入 `_runtime_quality`，版本写入 `_runtime_quality_version`；其字段为：`original_score`、`optimized_score`、`final_score`、`score_history`、`score_threshold`、`is_cold_start`、`confidence`、`optimization_attempts`、`needs_human_review`、`final_audit_passed`。结构参考分提示线保留85分，`score_history`必须保留原始评分和每次优化评分，冷启动信息只能作为运行历史上下文，不构成交付门槛。
-
-覆盖矩阵统一写入 `_runtime_coverage_matrix`，版本写入 `_runtime_coverage_matrix_version`；矩阵维度为业务规则、业务对象、正常场景、异常场景、边界场景、回滚场景和排除项。矩阵缺口、回归范围和审核结果写入 `.runtime/reports/`，不得写入正式Excel。正式Excel仍严格保持15列，表头必须严格等于 `template_builder.ALL_FIELDS`。
-
-活动用例登记表位于 `data/private/case_registry.sqlite3`，记录稳定ID、版本、停用原因、脚本关联及执行证据。该文件是持久业务资产，不属于临时缓存，不自动清理。固定字段由 RuleManager 配置控制，默认值不自动等同固定值。
-
-有限业务契约映射使用`_runtime_rule_binding`保存来源ID、规则ID、版本、场景及程序核对的规则摘要/判断。
-映射随用例版本进入登记内容JSON，参与版本指纹，不扩展Excel十五列，也不回写业务知识库。
+测试计划为独立的非用例交付物，可使用第 4 节规定的 Markdown 格式；计划矩阵不能代替固定 15 字段 JSON、AuditAgent 用例审核或统一 Excel 生成链路。
 
 ## 13. 审核与 CI
 
@@ -127,7 +112,7 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 14. 清理规则
 
-`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除路径。对历史遗留在 `.runtime` 根目录下的临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式识别 `pytest-*`、`browser-temp-*`、`validate-report-*`、`real-response-validation-*` 等固定命名模式，并检查目录最新修改时间。若需在确认后清理近期遗留目录，使用 `--purge-legacy-roots`，建议先配合 `--dry-run` 预览；该选项只针对已识别的 `.runtime` 直属遗留根目录，不会扩大到未知目录。清理器始终阻止符号链接/Junction 越界，不跟随指向 `.runtime` 外部的依赖目录；单个目录无权限时跳过并继续其他清理。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。评分审核统一以格式整理流程写入的“最终评分”为结构参考分值，并同步回写“质量评分”；两者不一致时审核阻断，避免重复计算造成导出前分数漂移。
+`tools/clean_runtime.py --keep-days 14` 清理过期运行时文件；正式清理前可使用 `--dry-run` 预览待删除路径。对历史遗留在 `.runtime` 根目录下的临时目录和脚本，必须显式增加 `--clean-legacy-roots` 才允许清理；该模式识别 `pytest-*`、`browser-temp-*`、`validate-report-*`、`real-response-validation-*` 等固定命名模式，并检查目录最新修改时间。若需在确认后清理近期遗留目录，使用 `--purge-legacy-roots`，建议先配合 `--dry-run` 预览；该选项只针对已识别的 `.runtime` 直属遗留根目录，不会扩大到未知目录。清理器始终阻止符号链接/Junction 越界，不跟随指向 `.runtime` 外部的依赖目录；单个目录无权限时跳过并继续其他清理。项目不提供自动清理 `workspace/` 的工具；workspace 历史测试用例由用户自行管理。运行时清理工具跳过 `.keep` 中匹配的文件，不处理 `assets/knowledge_base/`、`data/private/` 和 `workspace/`。
 
 ## 15. 变更记录
 
@@ -137,3 +122,4 @@ cache downloads logs reports scripts sheet_build uploads
 | v2.0 | 增加 workspace、`.runtime`、运行时 API、审核退出码 |
 | v2.1 | 补齐实际目录、模块测试、私有数据、`.keep`、CI、例外登记和清理规则 |
 | v2.2 | 补齐遗留临时目录模式，增加显式近期遗留清理和权限/链接安全处理 |
+| v2.3 | 登记 Codex 项目级 Skill 目录；允许 Markdown 测试计划作为独立 workspace 交付并保留修订历史 |

@@ -30,8 +30,8 @@
 
 ## 3. 核心红线
 
-1. **环境红线**：自动化测试仅允许在 UAT/内网测试环境执行（项目配置标识：`test`、`uat`）。
-2. **授权红线**：测试执行需用户明确批准；未经用户明确授权，不得擅自提交、推送、删除或覆盖用户已有改动。
+1. **环境红线**：常规自动化测试仅允许在 UAT/内网测试环境执行（项目配置标识：`test`、`uat`）。生产环境默认禁止测试；只有用户在当前任务中明确要求时，才可按其指定范围处理。现有正式回归入口不支持 `prod`，完整边界见 [PROJECT_RULES.md](docs/PROJECT_RULES.md)。
+2. **授权红线**：每次测试执行需用户明确批准；`--execute` 只是命令执行开关，不替代用户授权。未经用户明确授权，不得擅自提交、推送、删除或覆盖用户已有改动。
 3. **数据红线**：必须通过 `KnowledgeRetriever` API 访问知识库，禁止直接按文件路径读取原始JSON。
 4. **目录红线**：临时缓存、日志、报告、下载文件和脚本进入 `.runtime/`；最终测试用例和交付文件进入 `workspace/YYYYMMDD/`。
 5. **历史红线**：workspace 下的历史测试用例和交付记录永久保留，任何自动清理工具不得触碰。
@@ -42,6 +42,7 @@
 
 | 任务类型 | 必读专项规范 | 代码/工具入口 | 验证入口 |
 |---|---|---|---|
+| 需求分析与测试计划 | [erp-requirement-test-plan](.agents/skills/erp-requirement-test-plan/SKILL.md)、[TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md)、[KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md)、[PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) | `KnowledgeRetriever`、`AuditAgent.audit_test_plan()` | 测试计划审核与用户审阅 |
 | 测试用例生成 | [TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | `case_generation_service.py`、`case_generator_cli.py` | 测试用例测试与人工审核 |
 | 自动化测试执行 | [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) | `run_regression.py`、`auto_test/` | 目标测试与报告 |
 | 知识库检索 | [KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | `KnowledgeRetriever` | 检索 API 测试 |
@@ -70,6 +71,12 @@
 
 ## 6. 任务与代码入口
 
+### 需求分析与测试计划
+
+- [.agents/skills/erp-requirement-test-plan/SKILL.md](.agents/skills/erp-requirement-test-plan/SKILL.md)：接收原始需求文字/图片，生成并归档独立的 Markdown 测试计划；不替代正式 15 字段用例。
+- [.agents/skills/erp-requirement-test-plan/references/test-plan-template.md](.agents/skills/erp-requirement-test-plan/references/test-plan-template.md)：计划矩阵和覆盖自查模板。
+- 测试计划审核使用 `AuditAgent.audit_test_plan()`；正式用例仍使用 `AuditAgent.audit_test_cases()` 和统一 Excel 链路。
+
 ### 测试用例生成
 
 - [case_generation_service.py](modules/trae_test/utils/case_generation_service.py)：正式需求到用例生成服务。
@@ -80,7 +87,9 @@
 
 ### 自动化测试与报告
 
+- UI 自动化优先复用项目框架，浏览器选择遵循用户明确要求；执行与登录排查按 [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) 进行。
 - [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)：执行流程和数据生命周期。
+- [SALES_VOLUME_REGRESSION_1003420.md](docs/SALES_VOLUME_REGRESSION_1003420.md)：商品销量报表回归的范围、角色矩阵与 slow 用例。
 - [__main__.py](modules/auto_test/__main__.py)：auto_test 模块原生排序审计入口；排序逻辑、测试和报告由模块维护。
 - [run_regression.py](tools/run_regression.py)：回归测试入口。
 - [report_generator.py](tools/report_generator.py)：`TestReportGenerator`，使用 `--help` 查看参数。
@@ -97,6 +106,7 @@
 详细规则唯一来源为 [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md)。
 
 - `.runtime/`：缓存、下载、日志、报告、脚本、上传和构建临时产物。
+- `.agents/skills/`：Codex 项目级 Skill 和参考模板，纳入 Git；其他 `.agents/` 本地运行内容仍忽略。
 - `workspace/YYYYMMDD/`：最终测试用例和交付文件；历史内容不自动清理。
 - `data/private/`：本地真实敏感数据；只保留脱敏样例或骨架文件。
 - `assets/knowledge_base/`：本地业务知识库，默认不进入 Git。
@@ -104,6 +114,8 @@
 - `data/`：可变、按场景切换的脱敏输入数据；真实数据放 `data/private/`。
 
 运行时目录由 `runtime_dir()` 管理，允许的 kind 由 `RUNTIME_KINDS` 固定。`tools/clean_runtime.py` 只清理 `.runtime/`；项目不提供 workspace 自动清理工具。
+
+重复件、零字节或锁文件样本、历史报告和非权威知识副本只登记不删改，清单见 [HISTORICAL_ARTIFACTS.md](docs/HISTORICAL_ARTIFACTS.md)。
 
 ## 8. 测试、审核与 CI
 
@@ -137,13 +149,16 @@
 | 项目结构 | [PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md) |
 | 整体工作流 | [WORKFLOW.md](docs/WORKFLOW.md) |
 | 审核规则 | [AGENT_RULES.md](docs/AGENT_RULES.md) |
+| 环境与安全规则 | [PROJECT_RULES.md](docs/PROJECT_RULES.md) |
 | 文件与产物规则 | [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) |
+| 历史资料登记 | [HISTORICAL_ARTIFACTS.md](docs/HISTORICAL_ARTIFACTS.md) |
 | 结构审核 | [project_structure_auditor.py](tools/project_structure_auditor.py) |
 | 文档一致性审核 | [doc_consistency_checker.py](tools/doc_consistency_checker.py) |
 
 ## 11. 完整索引
 
 - Agent 配置索引：通用规则见 [AGENT_RULES.md](docs/AGENT_RULES.md)。
+- 项目级需求测试计划 Skill：见 [.agents/skills/erp-requirement-test-plan/SKILL.md](.agents/skills/erp-requirement-test-plan/SKILL.md)。
 - 知识库全局索引：`assets/knowledge_base/index/global/`。
 - 逐文件索引：`assets/knowledge_base/index/files/`。
 - 向量索引：`assets/knowledge_base/index/vector/`。

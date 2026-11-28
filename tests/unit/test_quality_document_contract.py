@@ -23,7 +23,7 @@ def test_quality_gate_documents_use_85_and_reject_lower_scores():
 
 
 def test_quality_document_contract_requires_business_and_page_object_detail():
-    content = _read("PROJECT_ARTIFACT_PLACEMENT.md")
+    content = _read("TRAE_TEST_WORKFLOW.md")
 
     for fragment in (
         "业务知识和页面对象分点描述",
@@ -48,3 +48,14 @@ def test_quality_document_contract_forbids_legacy_thresholds_in_active_rules():
         content = _read(name)
         assert "评分 < 70" not in content
         assert "评分 < 60" not in content
+
+
+def test_test_plan_is_a_non_case_markdown_deliverable():
+    artifact_policy = _read("PROJECT_ARTIFACT_PLACEMENT.md")
+    agent_rules = _read("AGENT_RULES.md")
+
+    assert "需求{需求ID}{需求名称}_测试计划.md" in artifact_policy
+    assert "不替代" in artifact_policy and "15 字段" in artifact_policy
+    assert "AuditAgent.audit_test_plan()" in agent_rules
+    assert "AuditAgent.audit_test_cases()" in agent_rules
+    assert "Markdown 测试计划" in agent_rules

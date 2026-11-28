@@ -1094,3 +1094,14 @@ class InventoryExportPage(BasePage):
         except Exception as e:
             logger.warning(f"选择模板失败: {e}")
             return False
+
+    def create_task_button(self):
+        """Return the visible, fixed-footer task action."""
+        return self.page.get_by_role("button", name="创建导出任务")
+
+    def export_page_number(self, number: int) -> None:
+        editor = self.page.locator(".el-pagination__editor input").first
+        editor.fill(str(number))
+        editor.press("Enter")
+        self.page.locator(f'.el-pager li.is-active[aria-label="第 {number} 页"]').wait_for()
+        self.wait_for_loading_complete(timeout=90000)

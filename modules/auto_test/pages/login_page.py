@@ -174,10 +174,14 @@ class LoginPage(BasePage):
                         if isinstance(payload, dict):
                             summary["code"] = payload.get("code")
                             summary["message"] = payload.get("message") or payload.get("msg")
+                            data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
                             summary["has_token"] = bool(
                                 payload.get("token")
+                                or payload.get("access_token")
                                 or payload.get("accessToken")
-                                or (isinstance(payload.get("data"), dict) and payload["data"].get("token"))
+                                or data.get("token")
+                                or data.get("access_token")
+                                or data.get("accessToken")
                             )
                     except Exception:
                         summary["body"] = "unreadable"

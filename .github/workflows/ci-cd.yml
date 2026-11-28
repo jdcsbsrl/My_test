@@ -9,6 +9,12 @@ on:
     # GitHub Actions uses UTC; 16:00 UTC is 00:00 the next day in China Standard Time.
     - cron: '0 16 * * *'
   workflow_dispatch:
+    inputs:
+      run_weekly_report_source_audit:
+        description: "在自动回归之外，额外复跑需求1003838周报与源账单只读对账"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -218,7 +224,7 @@ jobs:
     name: UI测试 (管理员-销售分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: code-quality
-    timeout-minutes: 90
+    timeout-minutes: 180
     env:
       TEST_ENV: test
       # CI is an explicitly authorized test-environment execution.
@@ -230,6 +236,7 @@ jobs:
       TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
       TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      WEEKLY_REPORT_ROLE: admin
       # Keep reportSyncQuery focused on the recent, bounded test data window.
       # Query a broad recent window first, then narrow to 15 minutes and use a
       # five-minute safety window only when the test data is still too dense.
@@ -243,12 +250,18 @@ jobs:
             test_files: "modules/auto_test/tests/test_export_download.py"
           - shard: 4
             test_files: "modules/auto_test/tests/test_export_full_flow.py"
-          - shard: 10
-            test_files: "modules/auto_test/tests/test_sales_report_regression.py"
           - shard: 11
             test_files: "modules/auto_test/tests/test_report_sync_query_regression.py"
           - shard: 12
             test_files: "modules/auto_test/tests/test_inventory_variant_stock_query.py modules/auto_test/tests/test_inventory_sku_and_group_query.py"
+          - shard: 13
+            test_files: "modules/auto_test/tests/test_sales_order_fixed_category_1003845.py"
+          - shard: 14
+            test_files: "modules/auto_test/tests/test_export_requirement_1003531.py -m 'not slow'"
+          - shard: 15
+            test_files: "modules/auto_test/tests/test_customer_bill_exchange_rate_1003647.py"
+          - shard: 16
+            test_files: "modules/auto_test/tests/test_weekly_business_report_1003838.py -m 'not slow'"
       fail-fast: false
       # Each runner has an isolated browser; allow two administrator shards
       # while keeping the account lane bounded.
@@ -306,8 +319,452 @@ jobs:
           path: .runtime/reports/allure-results/
           if-no-files-found: warn
 
+  weekly-report-role-regression:
+    name: 业务组周报权限回归（${{ matrix.role }}）
+    runs-on: ubuntu-latest
+    needs: [code-quality, sales-ui-tests]
+    if: ${{ always() && needs.code-quality.result == 'success' && needs.sales-ui-tests.result != 'cancelled' }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - role: manager
+          - role: sales
+      # Both role jobs may open an administrator comparison session.
+      max-parallel: 1
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: "true"
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      LEADER_USERNAME: ${{ secrets.LEADER_USERNAME }}
+      LEADER_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
+      SALES_USERNAME: ${{ secrets.SALES_USERNAME }}
+      SALES_PASSWORD: ${{ secrets.SALES_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Validate weekly-report role credentials
+        shell: bash
+        run: |
+          test -n "$ADMIN_USERNAME" || { echo '缺少 ADMIN_USERNAME secret'; exit 1; }
+          test -n "$ADMIN_PASSWORD" || { echo '缺少 ADMIN_PASSWORD secret'; exit 1; }
+          case "${{ matrix.role }}" in
+            manager)
+              test -n "$LEADER_USERNAME" || { echo '缺少 LEADER_USERNAME secret'; exit 1; }
+              test -n "$LEADER_PASSWORD" || { echo '缺少 LEADER_PASSWORD secret'; exit 1; }
+              ;;
+            sales)
+              test -n "$SALES_USERNAME" || { echo '缺少 SALES_USERNAME secret'; exit 1; }
+              test -n "$SALES_PASSWORD" || { echo '缺少 SALES_PASSWORD secret'; exit 1; }
+              ;;
+            *) echo '未知周报权限角色'; exit 2 ;;
+          esac
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('pyproject.toml') }}
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      - name: Run read-only weekly-report role checks
+        shell: bash
+        run: |
+          mkdir -p .runtime/reports/allure-results .runtime/cache
+          case "${{ matrix.role }}" in
+            manager) TEST_USERNAME="$LEADER_USERNAME"; TEST_PASSWORD="$LEADER_PASSWORD" ;;
+            sales) TEST_USERNAME="$SALES_USERNAME"; TEST_PASSWORD="$SALES_PASSWORD" ;;
+          esac
+          export TEST_USERNAME TEST_PASSWORD WEEKLY_REPORT_ROLE="${{ matrix.role }}"
+          pytest modules/auto_test/tests/test_weekly_business_report_1003838.py \
+            -k 'test_report_tabs_and_customer_searches_are_available or test_payment_abnormal_tab_renders_all_required_amount_columns or test_ctrl_f_finds_customer_numbers_across_populated_report_sections or test_work_plan_selector_is_scoped_to_the_configured_role' \
+            -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov \
+            --basetemp ".runtime/cache/weekly-report-${{ matrix.role }}" \
+            --alluredir .runtime/reports/allure-results
+      - name: Scan weekly-report role artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        env:
+          TEST_USERNAME: ${{ matrix.role == 'manager' && secrets.LEADER_USERNAME || secrets.SALES_USERNAME }}
+          TEST_PASSWORD: ${{ matrix.role == 'manager' && secrets.LEADER_PASSWORD || secrets.SALES_PASSWORD }}
+      - name: Upload weekly-report role results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-weekly-report-${{ matrix.role }}
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+
+  weekly-report-source-audit:
+    name: 业务组周报付款异常刷新与源账单对账（自动）
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.run_weekly_report_source_audit)
+    runs-on: ubuntu-latest
+    needs: [code-quality, sales-ui-tests, weekly-report-role-regression]
+    timeout-minutes: 60
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: "true"
+      TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      WEEKLY_REPORT_ROLE: admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Validate administrator credentials
+        run: |
+          test -n "$TEST_USERNAME" || { echo '缺少 ADMIN_USERNAME secret'; exit 1; }
+          test -n "$TEST_PASSWORD" || { echo '缺少 ADMIN_PASSWORD secret'; exit 1; }
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      # This TEST-only audit writes current payment-abnormal sections through the UI before comparing bills.
+      - name: Refresh payment-abnormal data and reconcile source bills
+        run: |
+          mkdir -p .runtime/reports/allure-results
+          pytest \
+            modules/auto_test/tests/test_weekly_business_report_1003838.py::test_latest_week_admin_reports_match_source_receivable_bills \
+            modules/auto_test/tests/test_weekly_business_report_1003838.py::test_ctrl_f_finds_all_customer_numbers_and_visible_report_values_in_six_group \
+            -m slow -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov \
+            --alluredir .runtime/reports/allure-results
+      - name: Scan weekly-report source-audit artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+        env:
+          TEST_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+          TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+      - name: Upload weekly-report source-audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-weekly-report-source-audit
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+
+  sales-volume-window:
+    name: 商品销量报表固定数据窗口
+    runs-on: ubuntu-latest
+    outputs:
+      as_of_date: ${{ steps.anchor.outputs.as_of_date }}
+    steps:
+      - name: Resolve run date in Asia Shanghai
+        id: anchor
+        run: echo "as_of_date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
+
+  sales-volume-regression:
+    name: 商品销量报表回归（泳道${{ matrix.lane }}）
+    runs-on: ubuntu-latest
+    # Finish legacy administrator consumers before starting this parallel lane.
+    needs:
+      - code-quality
+      - sales-volume-window
+      - sales-ui-tests
+      - weekly-report-role-regression
+      - weekly-report-source-audit
+    if: ${{ always() && needs.code-quality.result == 'success' && needs.sales-volume-window.result == 'success' && needs.sales-ui-tests.result != 'cancelled' && needs.weekly-report-role-regression.result != 'cancelled' && needs.weekly-report-source-audit.result != 'cancelled' }}
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - lane: A
+          - lane: B
+          - lane: C
+      max-parallel: 3
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: 'true'
+      SALES_VOLUME_AS_OF_DATE: ${{ needs.sales-volume-window.outputs.as_of_date }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      LEADER_USERNAME: ${{ secrets.LEADER_USERNAME }}
+      LEADER_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
+      SALES_USERNAME: ${{ secrets.SALES_USERNAME }}
+      SALES_PASSWORD: ${{ secrets.SALES_PASSWORD }}
+      ASSISTANT_USERNAME: ${{ secrets.ASSISTANT_USERNAME }}
+      ASSISTANT_PASSWORD: ${{ secrets.ASSISTANT_PASSWORD }}
+      PROCUREMENT_USERNAME: ${{ secrets.PROCUREMENT_USERNAME }}
+      PROCUREMENT_PASSWORD: ${{ secrets.PROCUREMENT_PASSWORD }}
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      - name: Run assigned roles independently
+        run: |
+          set -uo pipefail
+          mkdir -p .runtime/reports/allure-results .runtime/reports/sales-volume-ci-logs .runtime/cache
+          overall=0
+          counter=0
+          run_phase() {
+            local phase="$1"
+            local timeout_minutes="$2"
+            shift 2
+            counter=$((counter + 1))
+            local log_path=".runtime/reports/sales-volume-ci-logs/${SALES_VOLUME_ROLE}-${counter}.log"
+            phase_status=0
+            phase_blocked=0
+            echo "::group::$SALES_VOLUME_ROLE - $phase"
+            set +e
+            timeout --signal=TERM --kill-after=20s "${timeout_minutes}m" pytest "$@" -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --basetemp ".runtime/cache/sales-volume-${SALES_VOLUME_ROLE}-${counter}" --alluredir .runtime/reports/allure-results 2>&1 | tee "$log_path"
+            phase_status=${PIPESTATUS[0]}
+            set -e
+            if [ "$phase_status" -eq 0 ]; then
+              echo "| $SALES_VOLUME_ROLE | $phase | 通过 |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              if [ "$phase_status" -eq 124 ] || [ "$phase_status" -eq 137 ] || [ "$phase_status" -eq 143 ]; then
+                echo "| $SALES_VOLUME_ROLE | $phase | 超过 ${timeout_minutes} 分钟上限 |" >> "$GITHUB_STEP_SUMMARY"
+                phase_blocked=1
+              else
+                echo "| $SALES_VOLUME_ROLE | $phase | 失败或不完整 |" >> "$GITHUB_STEP_SUMMARY"
+                if grep -Eq 'INCOMPLETE:|scenario incomplete' "$log_path"; then
+                  phase_blocked=1
+                fi
+              fi
+              overall=1
+            fi
+            echo '::endgroup::'
+          }
+          printf '| 角色 | 检查 | 结果 |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+          case "${{ matrix.lane }}" in
+            A) roles=(admin) ;;
+            B) roles=(sales procurement) ;;
+            C) roles=(manager assistant) ;;
+            *) echo "未知商品销量报表泳道: ${{ matrix.lane }}"; exit 2 ;;
+          esac
+          lane_blocked=0
+          for role in "${roles[@]}"; do
+            if [ "$lane_blocked" -eq 1 ]; then
+              break
+            fi
+            case "$role" in
+              admin) TEST_USERNAME="$ADMIN_USERNAME"; TEST_PASSWORD="$ADMIN_PASSWORD" ;;
+              manager) TEST_USERNAME="$LEADER_USERNAME"; TEST_PASSWORD="$LEADER_PASSWORD" ;;
+              sales) TEST_USERNAME="$SALES_USERNAME"; TEST_PASSWORD="$SALES_PASSWORD" ;;
+              assistant) TEST_USERNAME="$ASSISTANT_USERNAME"; TEST_PASSWORD="$ASSISTANT_PASSWORD" ;;
+              procurement) TEST_USERNAME="$PROCUREMENT_USERNAME"; TEST_PASSWORD="$PROCUREMENT_PASSWORD" ;;
+            esac
+            export TEST_USERNAME TEST_PASSWORD
+            export SALES_VOLUME_ROLE="$role"
+            if [ -z "$TEST_USERNAME" ] || [ -z "$TEST_PASSWORD" ]; then
+              echo "| $role | 凭据检查 | 缺失，未执行 |" >> "$GITHUB_STEP_SUMMARY"
+              overall=1
+              continue
+            fi
+            counter=0
+            run_phase 服务就绪检查 11 modules/auto_test/tests/test_sales_volume_regression.py -m ci_readiness
+            if [ "$phase_status" -ne 0 ]; then
+              lane_blocked=1
+              continue
+            fi
+            if [ "$role" = admin ]; then
+              export SALES_VOLUME_ROLE=admin
+              run_phase 完整主回归 25 modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_role_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m 'not slow and not ci_readiness'
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+              run_phase 类目订单数对账 15 modules/auto_test/tests/test_sales_volume_regression.py -k test_category_distinct_orders_against_order_source -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+              run_phase 慢速排序与导出 40 modules/auto_test/tests/test_sales_volume_regression.py modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow -k 'not test_category_distinct_orders_against_order_source' \
+                --deselect 'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[warehouse-3]' \
+                --deselect 'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[country-4]'
+              continue
+            fi
+            run_phase 权限 4 modules/auto_test/tests/test_sales_volume_role_regression.py -m 'not slow'
+            if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            if [ "$role" != admin ]; then
+              run_phase 供应商筛选异步导出任务 12 modules/auto_test/tests/test_sales_volume_regression.py -k test_supplier_name_filtered_async_export_matches_query -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            fi
+            common='test_time_filter_requires_at_least_one_time or test_payment_and_shipping_time_filters or test_half_year_time_boundary or test_sku_filters_and_invalid_inputs or test_sku_sales_range_filters or test_create_time_filter_limits_result or test_supplier_name_filter_matches_rows or test_dimension_specific_filter'
+            if [ "$role" != sales ]; then
+              common="$common or test_custom_class_filter_matches_rows or test_warehouse_expand_keeps_every_sku"
+            else
+              # These checks require current-window classified and multi-warehouse sales data;
+              # the sales account may not have that sample in its permitted store scope.
+              echo '| sales | Data-dependent custom-class and warehouse checks | Covered by the administrator full regression |' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            if [ "$role" != procurement ]; then
+              common="$common or test_dimension_accepts_payment_range or test_filtered_pagination_and_sales_total or test_ui_multistore_search_and_reset or test_store_single_select_and_clear or test_multistore_expand_sales_matches_sku_list or test_multistore_category_detail_sales or test_multistore_sku_sales_against_order_items or test_multistore_inventory_against_inventory_api"
+            else
+              common="$common or (test_dimension_accepts_payment_range and not store)"
+            fi
+            run_phase 筛选与来源对账 15 modules/auto_test/tests/test_sales_volume_regression.py -k "$common" -m 'not slow and not ci_readiness'
+            if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            if [ "$role" != procurement ]; then
+              run_phase 组合SKU订单样本 7 modules/auto_test/tests/test_sales_volume_regression.py -k test_bundle_order_sample_is_available -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            fi
+            if [ "$role" = procurement ]; then
+              echo '| procurement | 双店筛选 | 不适用：无店铺权限 |' >> "$GITHUB_STEP_SUMMARY"
+              echo '| procurement | 管理员交叉核对 | 延后到串行核对阶段 |' >> "$GITHUB_STEP_SUMMARY"
+            fi
+            run_phase 排序与导出 5 modules/auto_test/tests/test_sales_volume_sort_regression.py -m slow
+            if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            if [ "$role" != procurement ]; then
+              if [ "$role" = sales ]; then
+                # These two admin/sales exports previously launched in lockstep across lanes.
+                # Re-run them after all lanes in the serial cross-check job.
+                run_phase 多店异步导出 12 modules/auto_test/tests/test_sales_volume_regression.py -k test_multistore_async_export_matches_query -m slow \
+                  --deselect 'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[warehouse-3]' \
+                  --deselect 'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[country-4]'
+              else
+                run_phase 多店异步导出 12 modules/auto_test/tests/test_sales_volume_regression.py -k test_multistore_async_export_matches_query -m slow
+              fi
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+              echo "| $role | 管理员越权店铺核对 | 延后到串行核对阶段 |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              run_phase 采购异步导出 10 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_async_export_matches_query -m slow
+              if [ "$phase_blocked" -eq 1 ]; then continue; fi
+            fi
+          done
+          exit "$overall"
+      - name: Scan role test artifacts for secrets
+        id: scan_sales_volume_artifacts
+        if: always()
+        run: |
+          mkdir -p .runtime/reports
+          result=0
+          for role in admin manager sales assistant procurement; do
+            case "$role" in
+              admin) TEST_USERNAME="$ADMIN_USERNAME"; TEST_PASSWORD="$ADMIN_PASSWORD" ;;
+              manager) TEST_USERNAME="$LEADER_USERNAME"; TEST_PASSWORD="$LEADER_PASSWORD" ;;
+              sales) TEST_USERNAME="$SALES_USERNAME"; TEST_PASSWORD="$SALES_PASSWORD" ;;
+              assistant) TEST_USERNAME="$ASSISTANT_USERNAME"; TEST_PASSWORD="$ASSISTANT_PASSWORD" ;;
+              procurement) TEST_USERNAME="$PROCUREMENT_USERNAME"; TEST_PASSWORD="$PROCUREMENT_PASSWORD" ;;
+            esac
+            export TEST_USERNAME TEST_PASSWORD
+            python tools/scan_sensitive_artifacts.py .runtime/reports || result=1
+          done
+          exit "$result"
+      - name: Upload role test results
+        uses: actions/upload-artifact@v4
+        if: always() && steps.scan_sales_volume_artifacts.outcome == 'success'
+        with:
+          name: allure-results-sales-volume-lane-${{ matrix.lane }}
+          path: |
+            .runtime/reports/allure-results/
+            .runtime/reports/sales-volume-ci-logs/
+          if-no-files-found: warn
+
+  sales-volume-admin-crosschecks:
+    name: 商品销量报表管理员交叉核对（串行）
+    runs-on: ubuntu-latest
+    # Keep administrator comparisons and the previously colliding multi-store exports serial.
+    needs:
+      - code-quality
+      - sales-volume-window
+      - sales-ui-tests
+      - weekly-report-role-regression
+      - weekly-report-source-audit
+      - sales-volume-regression
+    if: ${{ always() && needs.code-quality.result == 'success' && needs.sales-volume-window.result == 'success' && needs.sales-ui-tests.result != 'cancelled' && needs.weekly-report-role-regression.result != 'cancelled' && needs.weekly-report-source-audit.result != 'cancelled' && needs.sales-volume-regression.result != 'cancelled' }}
+    timeout-minutes: 90
+    env:
+      TEST_ENV: test
+      AUTO_TEST_AUTHORIZED: 'true'
+      SALES_VOLUME_AS_OF_DATE: ${{ needs.sales-volume-window.outputs.as_of_date }}
+      ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+      ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+      LEADER_USERNAME: ${{ secrets.LEADER_USERNAME }}
+      LEADER_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
+      SALES_USERNAME: ${{ secrets.SALES_USERNAME }}
+      SALES_PASSWORD: ${{ secrets.SALES_PASSWORD }}
+      ASSISTANT_USERNAME: ${{ secrets.ASSISTANT_USERNAME }}
+      ASSISTANT_PASSWORD: ${{ secrets.ASSISTANT_PASSWORD }}
+      PROCUREMENT_USERNAME: ${{ secrets.PROCUREMENT_USERNAME }}
+      PROCUREMENT_PASSWORD: ${{ secrets.PROCUREMENT_PASSWORD }}
+      TEST_WEB_BASE_URL: ${{ secrets.TEST_WEB_BASE_URL }}
+      TEST_WEB_API_BASE_URL: ${{ secrets.TEST_WEB_API_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -e . "pytest>=8,<9"
+      - name: Validate CI endpoints
+        run: python tools/validate_ci_environment.py --require-ui
+      - name: Install Playwright browser
+        run: playwright install --with-deps chromium
+      - name: Run administrator comparisons serially
+        run: |
+          mkdir -p .runtime/reports/allure-results .runtime/cache
+          test -n "$ADMIN_USERNAME" || { echo '缺少 ADMIN_USERNAME secret'; exit 1; }
+          test -n "$ADMIN_PASSWORD" || { echo '缺少 ADMIN_PASSWORD secret'; exit 1; }
+          overall=0
+          counter=0
+          run_check() {
+            local role="$1"
+            local username="$2"
+            local password="$3"
+            local phase="$4"
+            shift 4
+            counter=$((counter + 1))
+            export SALES_VOLUME_ROLE="$role"
+            export TEST_USERNAME="$username"
+            export TEST_PASSWORD="$password"
+            echo "::group::$role - $phase"
+            if [ -z "$TEST_USERNAME" ] || [ -z "$TEST_PASSWORD" ]; then
+              echo "| $role | $phase | 凭据缺失，未执行 |" >> "$GITHUB_STEP_SUMMARY"
+              overall=1
+            elif pytest "$@" -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --basetemp ".runtime/cache/sales-volume-admin-crosscheck-${role}-${counter}" --alluredir .runtime/reports/allure-results; then
+              echo "| $role | $phase | 通过 |" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "| $role | $phase | 失败或不完整 |" >> "$GITHUB_STEP_SUMMARY"
+              overall=1
+            fi
+            echo '::endgroup::'
+          }
+          printf '| 角色 | 管理员交叉核对 | 结果 |\n|---|---|---|\n' >> "$GITHUB_STEP_SUMMARY"
+          run_check procurement "$PROCUREMENT_USERNAME" "$PROCUREMENT_PASSWORD" 订单源对账 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_source_data
+          run_check admin "$ADMIN_USERNAME" "$ADMIN_PASSWORD" 管理员国家与仓库多店异步导出 \
+            'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[warehouse-3]' \
+            'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[country-4]' -m slow
+          run_check sales "$SALES_USERNAME" "$SALES_PASSWORD" 业务员国家与仓库多店异步导出 \
+            'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[warehouse-3]' \
+            'modules/auto_test/tests/test_sales_volume_regression.py::test_multistore_async_export_matches_query[country-4]' -m slow
+          run_check procurement "$PROCUREMENT_USERNAME" "$PROCUREMENT_PASSWORD" 管理员数据对账 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_procurement_data_matches_administrator -m slow
+          run_check manager "$LEADER_USERNAME" "$LEADER_PASSWORD" 越权店铺 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow
+          run_check sales "$SALES_USERNAME" "$SALES_PASSWORD" 越权店铺 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow
+          run_check assistant "$ASSISTANT_USERNAME" "$ASSISTANT_PASSWORD" 越权店铺 modules/auto_test/tests/test_sales_volume_role_regression.py -k test_role_denied_store_with_administrator_sold_sample -m slow
+          exit "$overall"
+      - name: Scan administrator cross-check artifacts for secrets
+        if: always()
+        run: python tools/scan_sensitive_artifacts.py .runtime/reports
+      - name: Upload administrator cross-check results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-results-sales-volume-admin-crosschecks
+          path: .runtime/reports/allure-results/
+          if-no-files-found: warn
+
   inventory-tests:
-    name: UI测试 (组长-库存分片${{ matrix.shard }})
+    name: UI测试 (组长业务分片${{ matrix.shard }})
     runs-on: ubuntu-latest
     # This lane has its own account. It may run in parallel with the
     # administrator sales/report lane, but its own shards remain serial.
@@ -316,7 +773,7 @@ jobs:
     env:
       TEST_ENV: test
       AUTO_TEST_AUTHORIZED: "true"
-      # Inventory pages and order-export regression tests use the
+      # Inventory pages, order exports, and pagination regression use the
       # business-group-leader account, which owns the seeded order fixture.
       TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
       TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
@@ -330,13 +787,15 @@ jobs:
           - shard: 6
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k TestInventorySKUSearch"
           - shard: 7
-            test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination\""
+            test_files: "modules/auto_test/tests/test_inventory_sku_system.py modules/auto_test/tests/test_pagination_requirement_1004106.py -k \"TestInventorySKUSelectAll or TestInventorySKUPagination or test_sales_order_pagination or test_platform_exception_pagination\""
           - shard: 8
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUPageSize or TestInventorySKUExport\""
           - shard: 9
             test_files: "modules/auto_test/tests/test_inventory_sku_system.py -k \"TestInventorySKUExportFields or TestInventorySKUIntegration\""
+          - shard: 10
+            test_files: "modules/auto_test/tests/test_inventory_sync_requirement_1004021.py"
       fail-fast: false
-      # Inventory shards share the group-leader account and backend data scope.
+      # Group-leader shards share the account and backend data scope.
       # Allow two isolated runners at a time while keeping the lane bounded.
       max-parallel: 2
     steps:
@@ -370,10 +829,19 @@ jobs:
           mkdir -p .runtime/reports/allure-results
           python -c "import allure_pytest; print('allure-pytest loaded:', allure_pytest.__file__)"
           pytest ${{ matrix.test_files }} -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures --no-cov --alluredir .runtime/reports/allure-results
+      - name: Run inventory sync 1004021 order matrix preflight
+        if: ${{ always() && matrix.shard == 10 && !cancelled() }}
+        env:
+          INVENTORY_SYNC_ORDER_NUMBERS: ${{ secrets.INVENTORY_SYNC_ORDER_NUMBERS }}
+        run: |
+          test -n "$INVENTORY_SYNC_ORDER_NUMBERS" || { echo '缺少 INVENTORY_SYNC_ORDER_NUMBERS secret'; exit 1; }
+          pytest modules/auto_test/tests/test_inventory_sync_order_matrix_1004021.py \
+            -v --tb=short -p no:playwright -p no:asyncio -p no:rerunfailures \
+            --no-cov --alluredir .runtime/reports/allure-results
       - name: Check sales order delivery status filters (group leader)
         if: matrix.shard == 5 && success()
         run: python -m modules.auto_test delivery-status-regression --env test --execute --page-size 500 --max-pages 100
-      - name: Scan inventory UI test artifacts for secrets
+      - name: Scan group-leader UI test artifacts for secrets
         id: scan_leader_artifacts
         if: always()
         run: |
@@ -383,7 +851,7 @@ jobs:
           TEST_ENV: test
           TEST_USERNAME: ${{ secrets.LEADER_USERNAME }}
           TEST_PASSWORD: ${{ secrets.LEADER_PASSWORD }}
-      - name: Upload inventory UI test results
+      - name: Upload group-leader UI test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -400,7 +868,7 @@ jobs:
   report:
     name: 生成测试报告
     runs-on: ubuntu-latest
-    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, inventory-tests]
+    needs: [security-scan, unit-tests, integration-tests, sales-ui-tests, weekly-report-role-regression, weekly-report-source-audit, sales-volume-regression, sales-volume-admin-crosschecks, inventory-tests]
     if: always()
     timeout-minutes: 15
     steps:
@@ -463,8 +931,8 @@ jobs:
   collect-failure-logs:
     name: 收集失败日志
     runs-on: ubuntu-latest
-    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, inventory-tests, report, deploy-test-stub]
-    if: ${{ always() && contains(needs.*.result, 'failure') }}
+    needs: [structure-audit, code-quality, security-scan, unit-tests, integration-tests, sales-ui-tests, weekly-report-role-regression, weekly-report-source-audit, sales-volume-regression, sales-volume-admin-crosschecks, inventory-tests, report, deploy-test-stub]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -526,10 +994,10 @@ jobs:
           report_dir = Path(sys.argv[2])
           repository = sys.argv[3]
           jobs = json.loads(jobs_path.read_text(encoding="utf-8")).get("jobs", [])
-          failed = [job for job in jobs if job.get("conclusion") == "failure"]
+          failed = [job for job in jobs if job.get("conclusion") in {"failure", "cancelled"}]
           combined_path = report_dir / "failed-jobs.log"
           combined_path.write_text("", encoding="utf-8")
-          summary = ["# 失败 Job 明细", ""]
+          summary = ["# 失败、超时或取消的 Job 明细", ""]
           for job in failed:
               job_id = str(job.get("id"))
               safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", str(job.get("name", job_id))).strip("_") or job_id
@@ -566,7 +1034,7 @@ jobs:
               failed_steps = [
                   step.get("name", "未命名步骤")
                   for step in job.get("steps", [])
-                  if step.get("conclusion") == "failure"
+                  if step.get("conclusion") in {"failure", "cancelled"}
               ]
               summary.append(f"## {job.get('name', job_id)}")
               summary.append(f"- Job ID：`{job_id}`")
@@ -576,7 +1044,7 @@ jobs:
               summary.append(f"- 日志下载退出码：`{log_result.returncode}`")
               summary.append("")
           if not failed:
-              summary.extend(["未识别到失败 Job。", ""])
+              summary.extend(["未识别到失败、超时或取消的 Job。", ""])
           (report_dir / "failed-jobs-summary.md").write_text("\n".join(summary), encoding="utf-8")
           PY
 

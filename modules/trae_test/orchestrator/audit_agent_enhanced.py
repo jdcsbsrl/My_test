@@ -302,6 +302,10 @@ class AuditAgent:
             self._log_audit(AuditType.TEST_CASE, result, context)
         return result
 
+    def audit_test_plan(self, test_plan: Any, context: dict | None = None) -> AuditResult:
+        """审核 Markdown 测试计划结构和归档契约，不执行 15 字段用例审核。"""
+        return self.audit(test_plan, AuditType.TEST_PLAN, context or {})
+
     def audit_code(self, code: Any, language: str = "python") -> AuditResult:
         """审核代码规范
 

@@ -87,6 +87,9 @@ def test_agents_md_keeps_required_harness_engineer_contract_entries():
     required_fragments = [
         "KnowledgeRetriever",
         "AuditAgent",
+        "需求分析与测试计划",
+        ".agents/skills/erp-requirement-test-plan/SKILL.md",
+        "AuditAgent.audit_test_plan()",
         "modules/trae_test/utils/index_builder_v3.py",
         "docs/AUTO_TEST_WORKFLOW.md",
         "tools/run_regression.py",
@@ -96,7 +99,9 @@ def test_agents_md_keeps_required_harness_engineer_contract_entries():
         "必须通过 `KnowledgeRetriever` API",
         "禁止直接按文件路径读取原始JSON",
         "自动化测试仅允许在 UAT/内网测试环境执行",
+        "只有用户在当前任务中明确要求时，才可按其指定范围处理",
         "需用户明确批准",
+        "`--execute` 只是命令执行开关，不替代用户授权",
     ]
 
     for fragment in required_fragments:
@@ -110,3 +115,22 @@ def test_agents_md_keeps_knowledge_base_counts_dynamic():
     assert "关键词数量以索引元数据为准" in content
     assert "r.get_index()" in content
     assert "r.list_available_files()" in content
+
+
+def test_ui_automation_browser_and_login_contract_is_documented():
+    agents = _read_agents_md()
+    workflow = (PROJECT_ROOT / "docs/AUTO_TEST_WORKFLOW.md").read_text(encoding="utf-8")
+    for fragment in (
+        "UI 自动化优先复用项目框架",
+        "浏览器选择遵循用户明确要求",
+        "执行与登录排查按 [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md)",
+    ):
+        assert fragment in agents
+    for fragment in (
+        "目标账号角色",
+        "使用用户现有浏览器时",
+        "未经用户同意不切换浏览器",
+        "其他角色登录失败不能证明目标角色登录失败",
+        "不能假定独立 `auto_login`",
+    ):
+        assert fragment in workflow

@@ -1031,3 +1031,7 @@ class SalesOrderExportPage(BasePage):
         except Exception as e:
             logger.warning(f"获取订单数量预览失败: {e}")
             return None
+
+    def create_task_button(self):
+        """Return the visible, fixed-footer task action."""
+        return self.page.get_by_role("button", name="创建导出任务")
