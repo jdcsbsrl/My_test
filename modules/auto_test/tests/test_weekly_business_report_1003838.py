@@ -1393,9 +1393,9 @@ def test_latest_week_admin_reports_match_source_receivable_bills(
         )
         refreshed_reports += 1
 
-    assert refreshed_reports == len(report_rows), (
-        f"Refreshed {refreshed_reports} of {len(report_rows)} latest weekly reports before reconciliation"
-    )
+    assert refreshed_reports == len(
+        report_rows
+    ), f"Refreshed {refreshed_reports} of {len(report_rows)} latest weekly reports before reconciliation"
     print(f"[weekly_report_payment_refresh] week={latest_start} reports_refreshed={refreshed_reports}")
 
     source_cache: dict[tuple[str, str], list[dict]] = {}
@@ -2660,9 +2660,9 @@ def _verify_refresh_button_write(page, api, report_id, button_name: str, endpoin
     assert body.get("code") == 200, f"{button_name} returned an unsuccessful response"
     persisted = api.get_report(report_id)
     assert str(persisted.get("id")) == str(report_id), f"{button_name} did not persist to the selected report"
-    assert isinstance(persisted.get("detailList"), list), (
-        f"{button_name} did not return a persisted detail list for the selected report"
-    )
+    assert isinstance(
+        persisted.get("detailList"), list
+    ), f"{button_name} did not return a persisted detail list for the selected report"
     return body
 
 

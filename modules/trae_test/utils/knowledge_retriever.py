@@ -368,11 +368,7 @@ class KnowledgeRetriever:
         result = dict(primary)
         hierarchy: dict[str, dict[str, list[str]]] = {}
         rules = list(primary.get("business_rules") or [])
-        rule_ids = {
-            rule.get("rule_id")
-            for rule in rules
-            if isinstance(rule, dict) and rule.get("rule_id")
-        }
+        rule_ids = {rule.get("rule_id") for rule in rules if isinstance(rule, dict) and rule.get("rule_id")}
 
         for file_info in self._search_by_tags("导航规范", "ERP菜单导航"):
             title = str(file_info.get("title", "")).lower()

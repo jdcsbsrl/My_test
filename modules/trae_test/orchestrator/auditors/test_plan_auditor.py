@@ -82,14 +82,18 @@ class TestPlanAuditor:
         matrix_headers = matrix_tables[0][0] if matrix_tables else []
         for field in self.REQUIRED_MATRIX_FIELDS:
             if not any(field.casefold() in header.casefold() for header in matrix_headers):
-                result.add_error("TEST_PLAN_MATRIX_FIELD_MISSING", f"测试计划矩阵缺少字段：{field}", str(plan_path or ""))
+                result.add_error(
+                    "TEST_PLAN_MATRIX_FIELD_MISSING", f"测试计划矩阵缺少字段：{field}", str(plan_path or "")
+                )
 
         coverage_content = self._section_content(content, headings, "七维覆盖自查")
         coverage_tables = self._markdown_tables(coverage_content)
         coverage_rows = {row[0] for _, rows in coverage_tables for row in rows if row}
         for dimension in self.BASE_COVERAGE_DIMENSIONS:
             if dimension not in coverage_rows:
-                result.add_error("TEST_PLAN_COVERAGE_DIMENSION_MISSING", f"未检查基础覆盖维度：{dimension}", str(plan_path or ""))
+                result.add_error(
+                    "TEST_PLAN_COVERAGE_DIMENSION_MISSING", f"未检查基础覆盖维度：{dimension}", str(plan_path or "")
+                )
 
         result.add_suggestion("结构审核通过不代表业务语义已被证明；待确认项仍须由用户审阅。")
         return result
@@ -116,11 +120,7 @@ class TestPlanAuditor:
             return ""
 
         end = next(
-            (
-                line_number
-                for line_number, level, _ in headings
-                if line_number > start and level <= 2
-            ),
+            (line_number for line_number, level, _ in headings if line_number > start and level <= 2),
             len(lines),
         )
         return "\n".join(lines[start + 1 : end])
@@ -215,7 +215,9 @@ class TestPlanAuditor:
 
         filename = path.name
         if not self.PLAN_NAME_PATTERN.fullmatch(filename):
-            result.add_error("TEST_PLAN_NAME_INVALID", "测试计划文件名应为 需求{ID}{名称}_测试计划.md，可附 _修订NN", filename)
+            result.add_error(
+                "TEST_PLAN_NAME_INVALID", "测试计划文件名应为 需求{ID}{名称}_测试计划.md，可附 _修订NN", filename
+            )
         if any(char in filename for char in self.FORBIDDEN_FILENAME_CHARS):
             result.add_error("TEST_PLAN_NAME_INVALID", "测试计划文件名包含 Windows 禁用字符", filename)
 
@@ -225,4 +227,6 @@ class TestPlanAuditor:
         try:
             resolved_path.relative_to(workspace_root)
         except ValueError:
-            result.add_error("TEST_PLAN_PATH_OUTSIDE_PROJECT", "测试计划路径必须位于当前项目的 workspace 下", normalized)
+            result.add_error(
+                "TEST_PLAN_PATH_OUTSIDE_PROJECT", "测试计划路径必须位于当前项目的 workspace 下", normalized
+            )

@@ -5,7 +5,6 @@ from modules.trae_test.orchestrator.audit_models import AuditResult
 from modules.trae_test.orchestrator.auditors.test_plan_auditor import TestPlanAuditor
 from modules.trae_test.orchestrator.config import AuditType
 
-
 VALID_PLAN = """# 需求测试计划
 
 ## 摘要
@@ -13,6 +12,7 @@ VALID_PLAN = """# 需求测试计划
 
 ## 需求与场景矩阵
 | 场景 ID | 需求 ID | 证据 ID | 覆盖维度 | 优先级 | 账号/权限 | 页面入口 | 数据/状态 | 步骤（页面对象 + 动作 + 数据） | 可观察预期 | 测试方式 | 覆盖状态 | 依据状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | S1 | R1 | E1 | 正常场景 | 待确认 | 待确认 | 待确认 | 待确认 | 页面对象和动作 | 可观察结果 | 手工 | covered | 有依据 |
 
 ## 七维覆盖自查
