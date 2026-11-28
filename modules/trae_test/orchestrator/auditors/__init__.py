@@ -5,6 +5,7 @@ from .code_auditor import CodeAuditor
 from .security_auditor import SecurityAuditor
 from .environment_auditor import EnvironmentAuditor
 from .impact_auditor import ImpactAuditor
+from .test_plan_auditor import TestPlanAuditor
 
 __all__ = [
     "TestCaseAuditor",
@@ -12,4 +13,5 @@ __all__ = [
     "SecurityAuditor",
     "EnvironmentAuditor",
     "ImpactAuditor",
+    "TestPlanAuditor",
 ]

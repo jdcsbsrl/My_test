@@ -56,6 +56,15 @@ class TestAuditAgentInit:
         assert agent.config.enforce_hard_block is False
 
 
+class TestAuditAgentTestPlan:
+    def test_test_plan_uses_its_own_audit_type(self, monkeypatch):
+        agent = AuditAgent()
+        monkeypatch.setattr(agent, "_log_audit", lambda *_args, **_kwargs: None)
+
+        with pytest.raises(AuditFailedException, match="TEST_PLAN_SECTION_MISSING"):
+            agent.audit_test_plan("# 不完整的测试计划")
+
+
 class TestAuditAgentTestCases:
     @pytest.fixture(autouse=True)
     def navigation_contract(self, monkeypatch):

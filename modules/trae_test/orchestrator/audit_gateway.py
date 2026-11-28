@@ -112,6 +112,10 @@ class AuditGateway:
         """审核测试用例"""
         return self.audit(test_cases, AuditType.TEST_CASE, context or {})
 
+    def audit_test_plan(self, test_plan: Any, context: dict | None = None) -> AuditResult:
+        """审核 Markdown 测试计划，不套用 15 字段用例契约。"""
+        return self.audit(test_plan, AuditType.TEST_PLAN, context or {})
+
     def audit_code(self, code: Any, language: str = "python") -> AuditResult:
         """审核代码"""
         return self.audit(code, AuditType.CODE, {"language": language})

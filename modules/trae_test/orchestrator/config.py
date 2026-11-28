@@ -16,6 +16,7 @@ class AuditType(Enum):
     """审核类型枚举"""
 
     TEST_CASE = "test_case"  # 测试用例审核
+    TEST_PLAN = "test_plan"  # Markdown 测试计划审核
     CODE = "code"  # 代码规范审核
     ENVIRONMENT = "environment"  # 环境审核
     IMPACT = "impact"  # 影响分析
