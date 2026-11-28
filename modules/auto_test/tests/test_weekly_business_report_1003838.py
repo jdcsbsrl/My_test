@@ -1318,18 +1318,18 @@ def test_tenth_group_export_name_and_contents(
 
 
 @pytest.mark.api
+@pytest.mark.ui
 @pytest.mark.regression
 @pytest.mark.p1
 @pytest.mark.slow
 @pytest.mark.requirement("1003838")
 def test_latest_week_admin_reports_match_source_receivable_bills(
-    authenticated_http_client, api_base_url: str, config_manager
+    authenticated_http_client, api_base_url: str, logged_in_page, config_manager
 ) -> None:
-    """Reconcile only the latest completed week's report to currently queryable bills.
+    """Refresh each payment-abnormal report section before reconciling current bills.
 
-    Older saved reports are immutable snapshots, while the bill endpoint exposes
-    current values. Skip stale or partial report periods instead of comparing
-    them as though the API could reconstruct bill state at snapshot time.
+    The update button directly persists current payment-abnormal data to the selected
+    TEST report. Refresh first because the saved report may predate current bill values.
     WEEKLY_REPORT_GROUP_SCOPE=sixth limits a local run to the sixth group; CI defaults to all groups.
     """
     assert config_manager.env == "test", "需求1003838自动化周报回归仅允许在 TEST 环境执行"
@@ -1350,6 +1350,53 @@ def test_latest_week_admin_reports_match_source_receivable_bills(
         assert len(report_rows) == 1, f"Expected one latest sixth-group report; found {len(report_rows)}"
     else:
         assert group_scope == "all", "WEEKLY_REPORT_GROUP_SCOPE must be 'all' or 'sixth'"
+
+    report_page = WeeklyBusinessReportPage(logged_in_page, config=config_manager)
+    refreshed_reports = 0
+    for report_row in report_rows:
+        report_id = report_row.get("id")
+        assert report_id, f"Latest report {latest_start} has no id"
+        report_before = api.get_report(report_id)
+        non_payment_rows_before = Counter(
+            (
+                str(row.get("sectionType")),
+                str(row.get("customerId") or ""),
+                str(row.get("customerNo") or ""),
+            )
+            for row in report_before.get("detailList") or []
+            if str(row.get("sectionType")) != "3"
+        )
+
+        report_page.open_detail(report_id)
+        report_page.select_tab("付款异常客户")
+        _verify_refresh_button_write(
+            logged_in_page,
+            api,
+            report_id,
+            "更新付款异常客户信息",
+            "/oms-report/weekly/report/refreshPaymentAbnormalById",
+        )
+
+        report_after_refresh = api.get_report(report_id)
+        non_payment_rows_after = Counter(
+            (
+                str(row.get("sectionType")),
+                str(row.get("customerId") or ""),
+                str(row.get("customerNo") or ""),
+            )
+            for row in report_after_refresh.get("detailList") or []
+            if str(row.get("sectionType")) != "3"
+        )
+        assert non_payment_rows_after == non_payment_rows_before, (
+            f"Refreshing payment-abnormal data changed non-payment customer rows in "
+            f"{report_after_refresh.get('deptName')}"
+        )
+        refreshed_reports += 1
+
+    assert refreshed_reports == len(report_rows), (
+        f"Refreshed {refreshed_reports} of {len(report_rows)} latest weekly reports before reconciliation"
+    )
+    print(f"[weekly_report_payment_refresh] week={latest_start} reports_refreshed={refreshed_reports}")
 
     source_cache: dict[tuple[str, str], list[dict]] = {}
     section_counts: Counter[str] = Counter()
@@ -2613,7 +2660,9 @@ def _verify_refresh_button_write(page, api, report_id, button_name: str, endpoin
     assert body.get("code") == 200, f"{button_name} returned an unsuccessful response"
     persisted = api.get_report(report_id)
     assert str(persisted.get("id")) == str(report_id), f"{button_name} did not persist to the selected report"
-    assert persisted.get("detailList"), f"{button_name} left the selected report without detail rows"
+    assert isinstance(persisted.get("detailList"), list), (
+        f"{button_name} did not return a persisted detail list for the selected report"
+    )
     return body
 
 

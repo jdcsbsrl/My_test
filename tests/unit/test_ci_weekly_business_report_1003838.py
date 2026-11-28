@@ -38,12 +38,27 @@ def test_weekly_report_regression_is_wired_to_admin_and_role_ci_lanes() -> None:
     assert "workflow_dispatch" in source_audit_job["if"]
     assert "inputs.run_weekly_report_source_audit" in source_audit_job["if"]
     assert "自动" in source_audit_job["name"]
+    assert "刷新" in source_audit_job["name"]
     assert source_audit_job["needs"] == ["code-quality", "sales-ui-tests", "weekly-report-role-regression"]
     assert source_audit_job["env"]["TEST_ENV"] == "test"
+    assert source_audit_job["env"]["AUTO_TEST_AUTHORIZED"] == "true"
+    source_steps = {step.get("name"): step for step in source_audit_job["steps"] if step.get("name")}
+    reconciliation_step = source_steps["Refresh payment-abnormal data and reconcile source bills"]
+    assert "read-only" not in reconciliation_step["name"].lower()
     assert any(
         "test_latest_week_admin_reports_match_source_receivable_bills" in step.get("run", "")
         for step in source_audit_job["steps"]
     )
+    weekly_test_source = (
+        Path(__file__).resolve().parents[2]
+        / "modules"
+        / "auto_test"
+        / "tests"
+        / "test_weekly_business_report_1003838.py"
+    ).read_text(encoding="utf-8")
+    assert '"更新付款异常客户信息"' in weekly_test_source
+    assert "/oms-report/weekly/report/refreshPaymentAbnormalById" in weekly_test_source
+    assert "non_payment_rows_after == non_payment_rows_before" in weekly_test_source
     assert any(
         "test_ctrl_f_finds_all_customer_numbers_and_visible_report_values_in_six_group" in step.get("run", "")
         for step in source_audit_job["steps"]
