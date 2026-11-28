@@ -87,6 +87,9 @@ def test_agents_md_keeps_required_harness_engineer_contract_entries():
     required_fragments = [
         "KnowledgeRetriever",
         "AuditAgent",
+        "需求分析与测试计划",
+        ".agents/skills/erp-requirement-test-plan/SKILL.md",
+        "AuditAgent.audit_test_plan()",
         "modules/trae_test/utils/index_builder_v3.py",
         "docs/AUTO_TEST_WORKFLOW.md",
         "tools/run_regression.py",

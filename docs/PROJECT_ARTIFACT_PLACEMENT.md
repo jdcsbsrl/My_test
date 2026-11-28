@@ -1,12 +1,12 @@
 ---
 title: 项目文件与产物管理行为规范
 purpose: 项目目录、运行时产物、workspace、Git 和清理边界
-version: 2.2.0
-updated: 2026-08-18
+version: 2.3.0
+updated: 2026-11-18
 authority: 项目强制规范
 ---
 
-# 项目文件与产物管理行为规范 v2.2
+# 项目文件与产物管理行为规范 v2.3
 
 ## 1. 适用范围
 
@@ -17,7 +17,7 @@ authority: 项目强制规范
 允许的项目目录：
 
 ```text
-.github/ assets/ configs/ data/ docs/ evaluation/ fixtures/
+.agents/ .github/ assets/ configs/ data/ docs/ evaluation/ fixtures/
 modules/ tests/ tools/ workspace/ .runtime/ .venv/ browsers/
 ```
 
@@ -28,6 +28,7 @@ modules/ tests/ tools/ workspace/ .runtime/ .venv/ browsers/
 | 目录 | 职责 |
 |---|---|
 | `.github/` | CI/CD 工作流 |
+| `.agents/` | Codex 项目级 Skill 放入 `skills/`；仅 `skills/` 内容纳入 Git，其他本地 Agent 运行内容仍忽略 |
 | `assets/` | 本地知识库和固定资源；真实知识库不提交 |
 | `configs/` | 正式配置和脱敏配置模板 |
 | `data/` | 可变测试数据；真实数据放 `data/private/` |
@@ -45,6 +46,8 @@ modules/ tests/ tools/ workspace/ .runtime/ .venv/ browsers/
 ## 4. workspace 规则
 
 最终测试用例和用户交付文件直接放入 `workspace/YYYYMMDD/`，不创建 `formal/`、`draft/`、`test_cases/`、`exports/` 或模块子目录。`workspace/` 默认不进入 Git，只保留 `workspace/.gitkeep` 骨架；真实成果默认本地保存。workspace 是重要的历史测试知识库，任何自动清理工具都不得删除其中的历史文件；`workspace/.keep` 仅用于记录保护规则，不改变永久保留策略。
+
+需求分析与测试计划等非用例交付物允许使用 Markdown，直接放入 `workspace/YYYYMMDD/`。测试计划命名为 `需求{需求ID}{需求名称}_测试计划.md`；需求 ID 可选，没有 ID 时使用 `需求{需求名称}_测试计划.md`。文件名中的占位符不包含尖括号；同一需求的修订不得覆盖历史文件，使用 `_修订NN` 后缀递增。测试计划是计划类交付，不替代 `TRAE_TEST_WORKFLOW.md` 规定的 15 字段用例和 `.xlsx` 交付。
 
 ## 5. .runtime 规则
 
@@ -83,11 +86,13 @@ cache downloads logs reports scripts sheet_build uploads
 
 ## 11. 命名规则
 
-长期文件使用 `{模块}_{用途}.{扩展名}`；运行时文件使用 `{用途}_{日期}_{uuid}.{扩展名}`。禁止 `new.xlsx`、`test2.json`、`最终版.xlsx` 等无语义名称。文件名不得包含 `\ / : * ? " < > |`。
+长期文件使用 `{模块}_{用途}.{扩展名}`；运行时文件使用 `{用途}_{日期}_{uuid}.{扩展名}`。workspace 测试计划按第 4 节的 `需求{需求ID}{需求名称}_测试计划.md` 命名。禁止 `new.xlsx`、`test2.json`、`最终版.xlsx` 等无语义名称。文件名不得包含 `\ / : * ? " < > |`。
 
 ## 12. 测试用例产物
 
 测试用例质量门禁、评分和运行时字段以 [TRAE_TEST_WORKFLOW.md](TRAE_TEST_WORKFLOW.md) 为准；交付文件、运行产物及登记表位置与保留规则见本规范第 4、5、8 节及该工作流。
+
+测试计划为独立的非用例交付物，可使用第 4 节规定的 Markdown 格式；计划矩阵不能代替固定 15 字段 JSON、AuditAgent 用例审核或统一 Excel 生成链路。
 
 ## 13. 审核与 CI
 
@@ -117,3 +122,4 @@ cache downloads logs reports scripts sheet_build uploads
 | v2.0 | 增加 workspace、`.runtime`、运行时 API、审核退出码 |
 | v2.1 | 补齐实际目录、模块测试、私有数据、`.keep`、CI、例外登记和清理规则 |
 | v2.2 | 补齐遗留临时目录模式，增加显式近期遗留清理和权限/链接安全处理 |
+| v2.3 | 登记 Codex 项目级 Skill 目录；允许 Markdown 测试计划作为独立 workspace 交付并保留修订历史 |

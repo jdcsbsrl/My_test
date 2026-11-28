@@ -21,12 +21,16 @@ def write_core_docs(root: Path) -> None:
             "---\ntitle: test\npurpose: test\nversion: 1.0.0\nupdated: 2026-08-18\nauthority: test\n---\n",
             encoding="utf-8",
         )
+    skill = root / ".agents" / "skills" / "erp-requirement-test-plan"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: erp-requirement-test-plan\ndescription: test\n---\n", encoding="utf-8")
 
 
 def valid_agents() -> str:
     return "\n".join(
         [
             "# Test ERP Agent Workspace Index",
+            "需求分析与测试计划 .agents/skills/erp-requirement-test-plan/SKILL.md",
             "测试用例生成 docs/TRAE_TEST_WORKFLOW.md",
             "自动化测试执行 docs/AUTO_TEST_WORKFLOW.md",
             "知识库检索 docs/KNOWLEDGE_BASE_RETRIEVER.md",

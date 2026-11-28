@@ -42,6 +42,7 @@
 
 | 任务类型 | 必读专项规范 | 代码/工具入口 | 验证入口 |
 |---|---|---|---|
+| 需求分析与测试计划 | [erp-requirement-test-plan](.agents/skills/erp-requirement-test-plan/SKILL.md)、[TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md)、[KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md)、[PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md) | `KnowledgeRetriever`、`AuditAgent.audit_test_plan()` | 测试计划审核与用户审阅 |
 | 测试用例生成 | [TRAE_TEST_WORKFLOW.md](docs/TRAE_TEST_WORKFLOW.md) | `case_generation_service.py`、`case_generator_cli.py` | 测试用例测试与人工审核 |
 | 自动化测试执行 | [AUTO_TEST_WORKFLOW.md](docs/AUTO_TEST_WORKFLOW.md) | `run_regression.py`、`auto_test/` | 目标测试与报告 |
 | 知识库检索 | [KNOWLEDGE_BASE_RETRIEVER.md](docs/KNOWLEDGE_BASE_RETRIEVER.md) | `KnowledgeRetriever` | 检索 API 测试 |
@@ -69,6 +70,12 @@
 知识库文件数量以 registry/API 为准，关键词数量以索引元数据为准。业务文件列表必须动态获取，例如 `r.get_index()` 或 `r.list_available_files()`；不得在 Agent 指令中硬编码具体文件清单。
 
 ## 6. 任务与代码入口
+
+### 需求分析与测试计划
+
+- [.agents/skills/erp-requirement-test-plan/SKILL.md](.agents/skills/erp-requirement-test-plan/SKILL.md)：接收原始需求文字/图片，生成并归档独立的 Markdown 测试计划；不替代正式 15 字段用例。
+- [.agents/skills/erp-requirement-test-plan/references/test-plan-template.md](.agents/skills/erp-requirement-test-plan/references/test-plan-template.md)：计划矩阵和覆盖自查模板。
+- 测试计划审核使用 `AuditAgent.audit_test_plan()`；正式用例仍使用 `AuditAgent.audit_test_cases()` 和统一 Excel 链路。
 
 ### 测试用例生成
 
@@ -99,6 +106,7 @@
 详细规则唯一来源为 [PROJECT_ARTIFACT_PLACEMENT.md](docs/PROJECT_ARTIFACT_PLACEMENT.md)。
 
 - `.runtime/`：缓存、下载、日志、报告、脚本、上传和构建临时产物。
+- `.agents/skills/`：Codex 项目级 Skill 和参考模板，纳入 Git；其他 `.agents/` 本地运行内容仍忽略。
 - `workspace/YYYYMMDD/`：最终测试用例和交付文件；历史内容不自动清理。
 - `data/private/`：本地真实敏感数据；只保留脱敏样例或骨架文件。
 - `assets/knowledge_base/`：本地业务知识库，默认不进入 Git。
@@ -150,6 +158,7 @@
 ## 11. 完整索引
 
 - Agent 配置索引：通用规则见 [AGENT_RULES.md](docs/AGENT_RULES.md)。
+- 项目级需求测试计划 Skill：见 [.agents/skills/erp-requirement-test-plan/SKILL.md](.agents/skills/erp-requirement-test-plan/SKILL.md)。
 - 知识库全局索引：`assets/knowledge_base/index/global/`。
 - 逐文件索引：`assets/knowledge_base/index/files/`。
 - 向量索引：`assets/knowledge_base/index/vector/`。
